@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>{{ drift_correction_label }}</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>{{ drift_correction_wrapper_path }}</string>
+    </array>
+
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>{{ drift_correction_schedule_hour }}</integer>
+        <key>Minute</key>
+        <integer>{{ drift_correction_schedule_minute }}</integer>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>{{ drift_correction_log_dir }}/ansible-drift-correction.stdout.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>{{ drift_correction_log_dir }}/ansible-drift-correction.stderr.log</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>{{ homebrew_prefix }}/bin:{{ homebrew_prefix }}/sbin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <key>HOME</key>
+        <string>{{ home_dir }}</string>
+    </dict>
+</dict>
+</plist>

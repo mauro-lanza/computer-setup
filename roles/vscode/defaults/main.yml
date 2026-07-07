@@ -1,0 +1,10 @@
+---
+# Safe empty default — the baseline extension list is the variable interface
+# `vscode_mandatory_extensions`, supplied by a content layer (list-append).
+vscode_mandatory_extensions: []
+
+# Extensions the user can opt into (resolved from prefs)
+vscode_optional_extensions: []
+
+# User settings.json location (Code stable, macOS).
+vscode_user_config_dir: "{{ home_dir }}/Library/Application Support/Code/User"

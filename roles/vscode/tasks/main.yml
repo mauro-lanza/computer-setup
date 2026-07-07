@@ -1,0 +1,58 @@
+---
+- name: Detect VS Code binary
+  ansible.builtin.stat:
+    path: "{{ vscode_code_binary }}"
+  register: vscode_stat
+
+- name: Get currently installed VS Code extensions
+  ansible.builtin.command:
+    argv:
+      - "{{ vscode_code_binary }}"
+      - --list-extensions
+  register: vscode_installed_extensions
+  changed_when: false
+  # Read-only: run even under --check so the install loop below can skip
+  # already-present extensions. Without this the list is empty in check mode
+  # and the daily drift agent iterates every extension (~10s wasted).
+  check_mode: false
+  when: vscode_stat.stat.exists
+
+- name: Install VS Code extensions
+  ansible.builtin.command:
+    argv:
+      - "{{ vscode_code_binary }}"
+      - --install-extension
+      - "{{ item }}"
+  loop: "{{ vscode_mandatory_extensions + vscode_optional_extensions }}"
+  when:
+    - vscode_stat.stat.exists
+    - item not in (vscode_installed_extensions.stdout_lines | default([]))
+  register: vscode_ext_install
+  changed_when: "'already installed' not in (vscode_ext_install.stdout | default(''))"
+
+- name: Ensure VS Code user config directory exists
+  ansible.builtin.file:
+    path: "{{ vscode_user_config_dir }}"
+    state: directory
+    mode: "0755"
+  when: vscode_stat.stat.exists
+
+# Resolve settings.json across content-layer files/ dirs (highest priority
+# wins), falling back to this role's own files/. Skipped if no layer provides it.
+- name: Resolve VS Code user settings
+  ansible.builtin.set_fact:
+    vscode_settings_src: "{{ lookup('ansible.builtin.first_found', _params, errors='ignore') }}"
+  vars:
+    _params:
+      files: [vscode/settings.json]
+      paths: "{{ (computer_setup_file_search_dirs | default([])) + [role_path + '/files'] }}"
+  when: vscode_stat.stat.exists
+
+- name: Deploy VS Code user settings
+  ansible.builtin.copy:
+    src: "{{ vscode_settings_src }}"
+    dest: "{{ vscode_user_config_dir }}/settings.json"
+    mode: "0644"
+  when:
+    - vscode_stat.stat.exists
+    - vscode_settings_src | default('') | length > 0

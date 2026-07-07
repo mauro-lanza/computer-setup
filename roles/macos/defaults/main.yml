@@ -1,0 +1,19 @@
+---
+# The macos role is a process: it applies whatever `defaults` a content layer
+# declares (via osx_defaults) and deploys the read-only macos-capture helper.
+# The specific values are the variable interface — supplied by content layers
+# (lists that append across layers). Safe empty defaults so the orchestrator
+# changes no system settings on its own.
+#
+# Item schema: { domain, key, type, value, notify? }. Set
+# `notify: Restart Dock and Finder` on entries that affect Dock/Finder UI.
+macos_defaults: []
+
+# Applied only when Rectangle is installed (gated in tasks/main.yml).
+macos_rectangle_defaults: []
+
+# ─── macos-capture helper ─────────────────────────────────────────────────
+# Read-only tool deployed to ~/.local/bin that diffs this machine's live
+# defaults against the declared values and emits paste-ready YAML.
+macos_capture_bin_dir: "{{ home_dir }}/.local/bin"
+macos_capture_path: "{{ macos_capture_bin_dir }}/macos-capture"

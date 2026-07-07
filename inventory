@@ -1,0 +1,12 @@
+# Static inventory: this playbook is local-only (runs on the machine
+# being configured via ansible-pull). Declaring localhost explicitly
+# silences "No inventory was parsed" / "hosts list is empty" warnings
+# from ansible-playbook and ansible-lint.
+#
+# NOTE: ansible-pull itself emits a few harmless "Could not match supplied
+# host pattern" warnings because it auto-limits both its checkout and playbook
+# phases to this machine's hostname variants, which aren't in this localhost-
+# only inventory (see lib/ansible/cli/pull.py: limit_opts). These are cosmetic;
+# eliminating them cleanly is not possible via inventory without breaking
+# ansible-pull's single-host checkout assumption.
+localhost ansible_connection=local

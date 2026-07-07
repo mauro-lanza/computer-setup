@@ -1,0 +1,13 @@
+---
+- name: Restart Dock and Finder
+  ansible.builtin.command: "killall {{ item }}"
+  loop:
+    - Dock
+    - Finder
+  register: macos_killall_result
+  # killall returns 1 when process not found — that's fine.
+  # Anything else (e.g. permission denied) should fail loudly.
+  failed_when:
+    - macos_killall_result.rc != 0
+    - macos_killall_result.rc != 1
+  changed_when: macos_killall_result.rc == 0

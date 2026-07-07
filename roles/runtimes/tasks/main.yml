@@ -1,0 +1,53 @@
+---
+- name: Check if nvm is available
+  ansible.builtin.stat:
+    path: "{{ homebrew_prefix }}/opt/nvm/nvm.sh"
+  register: runtimes_nvm_script
+
+- name: Read current NVM default alias
+  ansible.builtin.slurp:
+    src: "{{ home_dir }}/.nvm/alias/default"
+  register: runtimes_nvm_current_alias
+  failed_when: false
+  when: runtimes_nvm_script.stat.exists
+
+- name: Install default Node.js version via NVM
+  ansible.builtin.shell: |
+    export NVM_DIR="$HOME/.nvm"
+    source "{{ homebrew_prefix }}/opt/nvm/nvm.sh"
+    nvm install {{ runtimes_nvm_default_node }}
+    nvm alias default {{ runtimes_nvm_default_node }}
+  args:
+    executable: /bin/zsh
+  changed_when: true
+  when:
+    - runtimes_nvm_script.stat.exists
+    - runtimes_nvm_current_alias is failed
+      or (runtimes_nvm_current_alias.content | default('') | b64decode | trim) != runtimes_nvm_default_node
+
+- name: Check if tfenv is available
+  ansible.builtin.stat:
+    path: "{{ homebrew_prefix }}/bin/tfenv"
+  register: runtimes_tfenv_stat
+
+- name: Read current tfenv Terraform version
+  ansible.builtin.command:
+    argv:
+      - tfenv
+      - version-name
+  register: runtimes_tfenv_current_version
+  changed_when: false
+  failed_when: false
+  when: runtimes_tfenv_stat.stat.exists
+
+- name: Install and activate Terraform version via tfenv
+  ansible.builtin.shell: |
+    tfenv install {{ runtimes_tfenv_terraform_version }}
+    tfenv use {{ runtimes_tfenv_terraform_version }}
+  args:
+    executable: /bin/zsh
+  changed_when: true
+  when:
+    - runtimes_tfenv_stat.stat.exists
+    - runtimes_tfenv_current_version.rc != 0
+      or (runtimes_tfenv_current_version.stdout | trim) != runtimes_tfenv_terraform_version

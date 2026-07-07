@@ -1,0 +1,132 @@
+#!/bin/bash
+# Managed by ansible — do not edit manually
+#
+# macos-capture — compare this machine's LIVE macOS defaults against the values
+# declared in the `macos` Ansible role, and emit paste-ready YAML so you can
+# adopt the live state back into roles/macos/defaults/main.yml. This closes the
+# IaC loop: tweak a setting in System Settings, then capture the diff into code.
+#
+# Read-only — it never changes any setting.
+
+set -uo pipefail
+
+RED=$'\033[0;31m'; GREEN=$'\033[0;32m'; YELLOW=$'\033[1;33m'; NC=$'\033[0m'
+
+# Managed entries baked in from the role at deploy time: "domain|key|type|declared"
+MANAGED=(
+{% for d in macos_defaults %}
+  "{{ d.domain }}|{{ d.key }}|{{ d.type }}|{{ d.value }}"
+{% endfor %}
+{% for d in macos_rectangle_defaults %}
+  "{{ d.domain }}|{{ d.key }}|{{ d.type }}|{{ d.value }}"
+{% endfor %}
+)
+
+usage() {
+    cat <<'EOF'
+macos-capture — diff live macOS defaults against the declared `macos` role values.
+
+  macos-capture             Diff managed keys; print YAML for those that differ
+  macos-capture --all       Print YAML for every managed key (not just diffs)
+  macos-capture --domain D  Dump ALL keys for domain D (discover new keys)
+  macos-capture -h|--help   Show this help
+
+Read-only; never changes settings. Paste the emitted YAML into
+roles/macos/defaults/main.yml to adopt this machine's live values.
+EOF
+}
+
+norm_bool() {
+    case "$1" in
+        1|true|True|TRUE|yes|Yes|YES) echo 1 ;;
+        *) echo 0 ;;
+    esac
+}
+
+emit_value() {
+    local vtype="$1" val="$2"
+    case "$vtype" in
+        bool) [[ "$(norm_bool "$val")" == "1" ]] && echo "true" || echo "false" ;;
+        int|float) echo "$val" ;;
+        *) printf '"%s"' "$val" ;;
+    esac
+}
+
+MODE="diff"
+case "${1:-}" in
+    --all) MODE="all" ;;
+    --domain)
+        dom="${2:-}"
+        [[ -z "$dom" ]] && { echo "error: --domain requires a domain name" >&2; exit 1; }
+        echo "# All keys for domain: $dom"
+        defaults read "$dom" 2>/dev/null || { echo "No defaults found for '$dom'" >&2; exit 1; }
+        exit 0
+        ;;
+    -h|--help) usage; exit 0 ;;
+    "") ;;
+    *) echo "error: unknown argument '$1'" >&2; usage >&2; exit 1 ;;
+esac
+
+printf '%-44s %-14s %-14s %s\n' "DOMAIN.KEY" "DECLARED" "LIVE" "STATUS"
+printf '%-44s %-14s %-14s %s\n' "----------" "--------" "----" "------"
+
+yaml=""
+total=0
+diffs=0
+for entry in "${MANAGED[@]}"; do
+    IFS='|' read -r domain key vtype declared <<< "$entry"
+    total=$((total + 1))
+
+    show_declared="$declared"
+    if [[ "$vtype" == "bool" ]]; then
+        [[ "$(norm_bool "$declared")" == "1" ]] && show_declared="true" || show_declared="false"
+    fi
+
+    live="$(defaults read "$domain" "$key" 2>/dev/null)"
+    rc=$?
+
+    if [[ $rc -ne 0 ]]; then
+        status="${YELLOW}UNSET${NC}"
+        show_live="(unset)"
+        is_diff=1
+    else
+        show_live="$live"
+        dcmp="$declared"; lcmp="$live"
+        if [[ "$vtype" == "bool" ]]; then
+            dcmp="$(norm_bool "$declared")"
+            lcmp="$(norm_bool "$live")"
+        fi
+        if [[ "$dcmp" == "$lcmp" ]]; then
+            status="${GREEN}match${NC}"
+            is_diff=0
+        else
+            status="${RED}DIFF${NC}"
+            is_diff=1
+        fi
+    fi
+
+    printf '%-44s %-14s %-14s %s\n' "${domain##*.}.${key}" "$show_declared" "$show_live" "$status"
+
+    if [[ "$MODE" == "all" || "$is_diff" == "1" ]]; then
+        [[ "$is_diff" == "1" ]] && diffs=$((diffs + 1))
+        if [[ $rc -eq 0 ]]; then
+            yaml="${yaml}  - domain: ${domain}"$'\n'
+            yaml="${yaml}    key: ${key}"$'\n'
+            yaml="${yaml}    type: ${vtype}"$'\n'
+            yaml="${yaml}    value: $(emit_value "$vtype" "$live")"$'\n'
+        fi
+    fi
+done
+
+echo
+if [[ -n "$yaml" ]]; then
+    if [[ "$MODE" == "all" ]]; then
+        echo "# All ${total} managed key(s) — live values in role schema:"
+    else
+        echo "# ${diffs} of ${total} managed key(s) differ from declared — live values to adopt:"
+        echo "# (paste into roles/macos/defaults/main.yml, replacing the matching entries)"
+    fi
+    printf '%s' "$yaml"
+else
+    echo "${GREEN}No differences — this machine matches the declared macOS defaults.${NC}"
+fi

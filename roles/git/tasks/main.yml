@@ -1,0 +1,27 @@
+---
+- name: Detect VS Code binary (for git editor)
+  ansible.builtin.stat:
+    path: "{{ vscode_code_binary }}"
+  register: git_code_stat
+
+- name: Resolve git editor
+  ansible.builtin.set_fact:
+    git_editor_resolved: >-
+      {{ git_editor if git_editor | length > 0
+         else ('code --wait' if git_code_stat.stat.exists else 'vim') }}
+
+- name: Deploy global .gitignore file
+  ansible.builtin.copy:
+    content: |
+      # Managed by ansible — do not edit manually
+      {% for entry in git_global_gitignore_entries %}
+      {{ entry }}
+      {% endfor %}
+    dest: "{{ home_dir }}/.gitignore_global"
+    mode: "0644"
+
+- name: Deploy managed ~/.gitconfig
+  ansible.builtin.template:
+    src: gitconfig.j2
+    dest: "{{ home_dir }}/.gitconfig"
+    mode: "0644"

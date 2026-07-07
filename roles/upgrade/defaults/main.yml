@@ -1,0 +1,14 @@
+---
+# Whether upgrades are confirmed and may be applied. Left false by default so a
+# bare `drift-apply --tags upgrade` only PREVIEWS. The `drift-update` shell
+# function confirms in the terminal, then sets this via `-e upgrade_assume_yes=true`.
+# Confirmation lives in the shell (guaranteed TTY) rather than an in-play `pause`,
+# which hangs under `ansible-pull` when stdin isn't interactive.
+upgrade_assume_yes: false
+
+# Force-upgrade casks that manage their own auto-updates (e.g. Docker Desktop)
+# to the newest cask version. Set false to only upgrade non-auto-updating casks.
+upgrade_casks_greedy: true
+
+# Node line to re-resolve to the newest available version on upgrade.
+upgrade_nvm_node: "{{ runtimes_nvm_default_node }}"

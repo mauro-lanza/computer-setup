@@ -1,0 +1,11 @@
+---
+# The shell role holds no shell content — aliases, functions, integrations, the
+# prompt, and ~/.zshrc all come from content layers. These are the only knobs:
+
+# Directory of managed zsh snippets. A layer-provided ~/.zshrc sources
+# everything in here (e.g. `for f in ~/.zsh/*.zsh(N); do source $f; done`).
+shell_zsh_config_dir: "{{ home_dir }}/.zsh"
+
+# Filename of the orchestrator's own CLI snippet (engine-owned: drift/repos
+# helpers). Named so it is never mistaken for, or removed as, a layer snippet.
+shell_cli_snippet_name: "50-computer-setup-cli.zsh"

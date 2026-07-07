@@ -1,0 +1,33 @@
+---
+# Example repository catalog for the `repositories` role.
+#
+# Copy to ~/.repositories.yml (NOT committed — it's per-machine, like
+# ~/.mac-prefs.yml, and may contain private remote URLs), edit to taste, then
+# clone everything with the `repos-resurrect` helper (or `--tags repositories`).
+#
+# Tip: scaffold this file automatically from a machine that already has your
+# repos checked out:
+#
+#     repos-generate > ~/.repositories.yml
+#
+# Notes:
+#   - `folder` may be absolute or reference role/play vars — `{{ ansible_env.HOME }}`
+#     and `{{ repositories_base_dir }}` (default: ~/Projects) are both available.
+#   - Cloning is idempotent and non-destructive: an existing checkout is left
+#     completely untouched (no fetch/reset). Only missing repos are cloned.
+#   - `post_clone` runs once, only on a fresh clone, from inside the repo.
+repositories:
+  - folder: "{{ repositories_base_dir }}/oss/computer-setup"
+    remote: "git@github.com:mauro-lanza/computer-setup.git"
+
+  - folder: "{{ repositories_base_dir }}/work/analytics"
+    remote: "git@github.com:example-org/analytics.git"
+    branch: main
+    post_clone:
+      # e.g. add an upstream remote, pin a runtime, or drop a local config
+      - git remote add upstream git@github.com:upstream-org/analytics.git
+      - echo "3.12" > .python-version
+
+  - folder: "{{ repositories_base_dir }}/archive/old-project"
+    remote: "git@github.com:example-org/old-project.git"
+    active: false   # kept in the catalog for reference, but skipped on clone

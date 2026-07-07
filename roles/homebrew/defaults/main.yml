@@ -1,0 +1,22 @@
+---
+# Whether to run `brew update` before installing formulae.
+# Set to false (e.g. via -e homebrew_update=false) to skip on re-runs.
+homebrew_update: true
+
+# Safe empty defaults — the actual baseline is the variable interface, supplied
+# and merged (list-append) across content layers' vars.yml:
+#   homebrew_mandatory_formulae — formulae always installed
+#   homebrew_mandatory_casks     — casks always installed
+#   homebrew_adopt_casks         — casks safe to `--adopt` when already present
+# See computer-setup-layer-public for the shareable baseline.
+#
+# NOTE: engine prerequisites (git, gh, yq, ansible) are installed by bootstrap.sh
+# in Phase 0, before any layer is cloned — they are not listed here.
+homebrew_mandatory_formulae: []
+homebrew_mandatory_casks: []
+homebrew_adopt_casks: []
+
+# Optional formulae/casks are resolved from ~/.mac-prefs.yml
+# in local.yml pre_tasks (which keeps the prefs file format short).
+homebrew_optional_formulae: []
+homebrew_optional_casks: []

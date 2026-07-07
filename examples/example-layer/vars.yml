@@ -1,0 +1,26 @@
+---
+# vars.yml — variable values fed to the orchestrator's roles.
+#
+# These keys are the orchestrator's public "variable interface". Lists append
+# across layers; scalars are overridden by the highest-priority layer (with an
+# info message printed on overlap). Only set what you need.
+
+# ─── Repositories to clone (list — appends across layers) ────────────────────
+# `folder` may use {{ repositories_base_dir }} (default ~/Projects) or an
+# absolute path. `branch`, `active`, and `post_clone` are optional.
+repositories:
+  - folder: "{{ repositories_base_dir }}/example-project"
+    remote: "git@github.com:example-org/example-project.git"
+
+# ─── Homebrew baseline (lists — append across layers) ────────────────────────
+# homebrew_mandatory_formulae: [ripgrep, fd]
+# homebrew_mandatory_casks: [iterm2]
+# homebrew_adopt_casks: [iterm2]
+
+# ─── VS Code baseline extensions (list — appends across layers) ──────────────
+# vscode_mandatory_extensions: [ms-azuretools.vscode-docker]
+
+# ─── dbt (scalars — highest-priority layer wins) ─────────────────────────────
+# dbt_bigquery_project: "my-gcp-project"
+# dbt_bigquery_dev_schema: "dbt_dev_me"
+# dbt_bigquery_threads: 8

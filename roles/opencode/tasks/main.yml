@@ -1,0 +1,25 @@
+---
+- name: Ensure opencode config directory exists
+  ansible.builtin.file:
+    path: "{{ opencode_config_dir }}"
+    state: directory
+    mode: "0755"
+
+# The GitHub MCP token is injected at runtime via the OC_GITHUB_PERSONAL_ACCESS_TOKEN
+# environment variable ({env:...} in the config) — no secret is stored in the repo.
+# Resolved across content-layer files/ dirs (highest priority wins), falling back
+# to this role's own files/. Skipped if no layer provides it.
+- name: Resolve opencode config
+  ansible.builtin.set_fact:
+    opencode_config_src: "{{ lookup('ansible.builtin.first_found', _params, errors='ignore') }}"
+  vars:
+    _params:
+      files: [opencode.json]
+      paths: "{{ (computer_setup_file_search_dirs | default([])) + [role_path + '/files'] }}"
+
+- name: Deploy opencode config
+  ansible.builtin.copy:
+    src: "{{ opencode_config_src }}"
+    dest: "{{ opencode_config_dir }}/opencode.json"
+    mode: "0644"
+  when: opencode_config_src | default('') | length > 0

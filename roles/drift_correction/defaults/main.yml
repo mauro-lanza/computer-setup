@@ -1,0 +1,27 @@
+---
+# `repo_url` is defined in local.yml (play vars) — passed through here so
+# the wrapper template renders with the same URL the playbook is pulled from.
+drift_correction_repo_url: "{{ repo_url }}"
+drift_correction_prefs_file: "{{ home_dir }}/.mac-prefs.yml"
+# Content layers: the wrapper refreshes every layer in the plugin cache and
+# re-merges before checking, so drift covers orchestrator + all layers.
+drift_correction_plugin_cache: "{{ computer_setup_plugin_cache }}"
+drift_correction_layers_manifest: "{{ computer_setup_layers_manifest }}"
+drift_correction_schedule_hour: 10
+drift_correction_schedule_minute: 0
+drift_correction_label: com.ansible.drift-correction
+drift_correction_log_dir: "{{ home_dir }}/Library/Logs"
+
+# Wrapper script — the LaunchAgent calls this instead of ansible-pull directly.
+# Lives under ~/.local/bin so it's on PATH for manual invocation if desired.
+drift_correction_wrapper_dir: "{{ home_dir }}/.local/bin"
+drift_correction_wrapper_path: "{{ drift_correction_wrapper_dir }}/drift-check"
+
+# Maximum lines to retain in the rolling log file (per run, the wrapper trims).
+drift_correction_log_max_lines: 5000
+
+# Connectivity probe — when the wrapper can't reach this host, it logs and
+# exits 0 silently instead of posting a "drift check failed" notification.
+# Closed laptops at 10am are a normal case; offline ≠ failure.
+drift_correction_connectivity_url: "https://github.com"
+drift_correction_connectivity_timeout: 5

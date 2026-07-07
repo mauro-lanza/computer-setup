@@ -1,0 +1,6 @@
+---
+# The dbt role is a process: it ensures ~/.dbt exists and renders whatever
+# profiles.yml.j2 a content layer supplies (see computer-setup-layer-work). The
+# profile content — BigQuery project/schema/threads and any other targets — is
+# the layer's concern, not the orchestrator's.
+dbt_config_dir: "{{ home_dir }}/.dbt"

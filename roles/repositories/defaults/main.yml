@@ -1,0 +1,16 @@
+---
+# Root under which relative project folders are cloned. Catalog entries may
+# reference this as `{{ repositories_base_dir }}` or give an absolute path.
+repositories_base_dir: "{{ home_dir }}/Projects"
+
+# Optional per-machine override catalog. When present it fully replaces the
+# merged `repositories` list — use it on a specific machine that needs extra or
+# private repos beyond what the layers provide. Kept in $HOME (not committed),
+# like ~/.mac-prefs.yml. Scaffold one with `repos-generate`.
+repositories_catalog_file: "{{ home_dir }}/.repositories.yml"
+
+# Safe empty default — the actual repository list is the variable interface
+# `repositories`, supplied and merged (list-append) across content layers'
+# vars.yml. Cloning is idempotent and only ever adds repos that are missing;
+# existing checkouts are never fetched, reset, or pruned.
+repositories: []

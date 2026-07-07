@@ -1,0 +1,43 @@
+---
+- name: Apply macOS system defaults
+  community.general.osx_defaults:
+    domain: "{{ item.domain }}"
+    key: "{{ item.key }}"
+    type: "{{ item.type }}"
+    value: "{{ item.value }}"
+    state: present
+  loop: "{{ macos_defaults }}"
+  loop_control:
+    label: "{{ item.domain }} {{ item.key }}"
+  notify: "{{ item.notify | default([]) }}"
+
+- name: Check if Rectangle is installed
+  ansible.builtin.stat:
+    path: /Applications/Rectangle.app
+  register: macos_rectangle_app
+
+- name: Apply Rectangle defaults
+  community.general.osx_defaults:
+    domain: "{{ item.domain }}"
+    key: "{{ item.key }}"
+    type: "{{ item.type }}"
+    value: "{{ item.value }}"
+    state: present
+  loop: "{{ macos_rectangle_defaults }}"
+  loop_control:
+    label: "{{ item.domain }} {{ item.key }}"
+  when: macos_rectangle_app.stat.exists
+
+# macos-capture: a read-only helper to diff this machine's live defaults against
+# the values declared above and emit paste-ready YAML (closes the IaC loop).
+- name: Ensure ~/.local/bin exists (for macos-capture)
+  ansible.builtin.file:
+    path: "{{ macos_capture_bin_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Deploy macos-capture helper
+  ansible.builtin.template:
+    src: macos-capture.sh.j2
+    dest: "{{ macos_capture_path }}"
+    mode: "0755"

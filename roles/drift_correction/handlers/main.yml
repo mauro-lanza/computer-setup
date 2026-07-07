@@ -1,0 +1,8 @@
+---
+- name: Reload drift-correction agent
+  ansible.builtin.shell: |
+    launchctl bootout gui/$(id -u) {{ home_dir }}/Library/LaunchAgents/{{ drift_correction_label }}.plist 2>/dev/null || true
+    launchctl bootstrap gui/$(id -u) {{ home_dir }}/Library/LaunchAgents/{{ drift_correction_label }}.plist
+  args:
+    executable: /bin/zsh
+  changed_when: true

@@ -1,0 +1,58 @@
+---
+# Merge a single content layer's vars.yml into the accumulated merged set.
+#
+# Called in a loop from local.yml over `computer_setup_active_layers` (sorted by
+# ascending priority, so the highest-priority layer is applied last and wins on
+# scalar conflicts). Lists append across layers via combine(list_merge=append_rp).
+#
+# Loop var: `_layer` — a manifest entry: { name, priority, path? }.
+
+- name: "[{{ _layer.name }}] Read plugin manifest"
+  ansible.builtin.include_vars:
+    file: "{{ computer_setup_plugin_cache }}/{{ _layer.name }}/plugin.yml"
+    name: _layer_plugin
+  # A missing manifest is a broken layer — fail loudly rather than silently
+  # skipping content the user asked for.
+
+- name: "[{{ _layer.name }}] Assert supported schema_version"
+  ansible.builtin.assert:
+    that:
+      - (_layer_plugin.schema_version | default(1) | int) <= (computer_setup_schema_version | int)
+    fail_msg: >-
+      Layer '{{ _layer.name }}' requires schema_version
+      {{ _layer_plugin.schema_version | default(1) }}, but this orchestrator
+      supports up to {{ computer_setup_schema_version }}. Update computer-setup.
+    quiet: true
+
+- name: "[{{ _layer.name }}] Stat vars.yml"
+  ansible.builtin.stat:
+    path: "{{ computer_setup_plugin_cache }}/{{ _layer.name }}/vars.yml"
+  register: _layer_vars_stat
+
+- name: "[{{ _layer.name }}] Load vars.yml"
+  ansible.builtin.include_vars:
+    file: "{{ computer_setup_plugin_cache }}/{{ _layer.name }}/vars.yml"
+    name: _incoming_layer_vars
+  when: _layer_vars_stat.stat.exists
+
+- name: "[{{ _layer.name }}] Report scalar overrides (highest priority wins)"
+  ansible.builtin.debug:
+    msg: >-
+      Layer '{{ _layer.name }}' overrides scalar '{{ item.key }}':
+      '{{ computer_setup_merged_vars[item.key] }}' -> '{{ item.value }}'
+  loop: "{{ (_incoming_layer_vars | default({})) | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  when:
+    - _layer_vars_stat.stat.exists
+    - item.key in computer_setup_merged_vars
+    - item.value is string or item.value is number or item.value is boolean
+    - computer_setup_merged_vars[item.key] != item.value
+
+- name: "[{{ _layer.name }}] Merge into accumulated vars (lists append, scalars override)"
+  ansible.builtin.set_fact:
+    computer_setup_merged_vars: >-
+      {{ computer_setup_merged_vars
+         | combine(_incoming_layer_vars | default({}),
+                   recursive=true, list_merge='append_rp') }}
+  when: _layer_vars_stat.stat.exists

@@ -1,0 +1,107 @@
+---
+# Opt-in upgrade path. Gated behind the `upgrade`/`never` tags in local.yml, so
+# the daily drift check and normal `drift-apply` never run it. Trigger with
+# `drift-update`, which confirms in your terminal, then runs this
+# non-interactively with `-e upgrade_assume_yes=true`.
+#
+# Flow: refresh Homebrew → show exactly which managed packages are outdated →
+# apply upgrades only when `upgrade_assume_yes` is true. Covers every install
+# mechanism: Homebrew formulae + casks (including Powerlevel10k and the zsh
+# plugins), Ansible Galaxy collections, and nvm-managed Node.js.
+#
+# Deliberately NOT upgraded: tfenv's Terraform is pinned
+# (runtimes_tfenv_terraform_version) — an unplanned bump can break state; change
+# that version explicitly when you want it.
+#
+# Confirmation lives in the `drift-update` shell function (a guaranteed TTY), NOT
+# an in-play `pause`: a pause inside `ansible-pull` blocks forever when stdin is
+# an interactive TTY and the user misses the prompt, and silently skips when it
+# isn't. Running this role without `upgrade_assume_yes=true` only previews — it
+# never applies — so a scheduled/non-interactive run can never upgrade.
+
+- name: Refresh Homebrew package index
+  ansible.builtin.command: brew update
+  changed_when: false
+
+- name: Determine which managed formulae are outdated
+  ansible.builtin.command:
+    argv: "{{ ['brew', 'outdated', '--formula', '--verbose'] + homebrew_mandatory_formulae + homebrew_optional_formulae }}"
+  register: upgrade_outdated_formulae
+  changed_when: false
+  failed_when: false
+
+- name: Determine which managed casks are outdated
+  ansible.builtin.command:
+    argv: "{{ ['brew', 'outdated', '--cask', '--greedy', '--verbose'] + homebrew_mandatory_casks + homebrew_optional_casks }}"
+  register: upgrade_outdated_casks
+  changed_when: false
+  failed_when: false
+
+- name: Show pending upgrades
+  ansible.builtin.debug:
+    msg: |-
+      ── Pending upgrades (preview) ───────────────────────────────
+      Homebrew formulae:
+      {{ upgrade_outdated_formulae.stdout | default('') | trim or '  (up to date)' }}
+
+      Homebrew casks:
+      {{ upgrade_outdated_casks.stdout | default('') | trim or '  (up to date)' }}
+
+      Also refreshed to latest on apply (not pre-diffable):
+        Ansible Galaxy collections, Node.js {{ upgrade_nvm_node }}.
+      ─────────────────────────────────────────────────────────────
+
+- name: Apply the confirmed upgrades
+  when:
+    - upgrade_assume_yes | default(false) | bool
+    - not ansible_check_mode
+  block:
+    - name: Upgrade managed Homebrew formulae to latest
+      community.general.homebrew:
+        name: "{{ homebrew_mandatory_formulae + homebrew_optional_formulae }}"
+        state: latest
+
+    - name: Upgrade managed Homebrew casks to latest
+      community.general.homebrew_cask:
+        name: "{{ homebrew_mandatory_casks + homebrew_optional_casks }}"
+        state: latest
+        greedy: "{{ upgrade_casks_greedy | bool }}"
+
+    - name: Update Ansible Galaxy collections
+      ansible.builtin.command:
+        argv:
+          - ansible-galaxy
+          - collection
+          - install
+          - -r
+          - "{{ playbook_dir }}/requirements.yml"
+          - --upgrade
+      register: upgrade_galaxy
+      changed_when: "'Installing' in upgrade_galaxy.stdout"
+
+    - name: Check if nvm is available
+      ansible.builtin.stat:
+        path: "{{ homebrew_prefix }}/opt/nvm/nvm.sh"
+      register: upgrade_nvm_script
+
+    - name: Upgrade default Node.js to newest via nvm ({{ upgrade_nvm_node }})
+      ansible.builtin.shell: |
+        export NVM_DIR="$HOME/.nvm"
+        source "{{ homebrew_prefix }}/opt/nvm/nvm.sh"
+        nvm install '{{ upgrade_nvm_node }}' --latest-npm
+        nvm alias default '{{ upgrade_nvm_node }}'
+      args:
+        executable: /bin/zsh
+      register: upgrade_nvm_result
+      changed_when: "'Downloading and installing' in upgrade_nvm_result.stdout"
+      when: upgrade_nvm_script.stat.exists
+
+- name: Explain how to apply when not confirmed
+  ansible.builtin.debug:
+    msg: >-
+      Preview only — no upgrades applied. Run `drift-update` to upgrade
+      (it confirms in your terminal first), or pass `-e upgrade_assume_yes=true`
+      to apply non-interactively.
+  when: >-
+    not (upgrade_assume_yes | default(false) | bool)
+    or ansible_check_mode

@@ -1,0 +1,6 @@
+---
+- name: Shell config changed
+  ansible.builtin.debug:
+    msg: |
+      Shell configuration changed. Start a new terminal session or run
+      `exec zsh` (or `source ~/.zshrc`) to pick up the changes.

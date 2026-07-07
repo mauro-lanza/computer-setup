@@ -1,0 +1,53 @@
+---
+# Clone a single catalogued repository if it is missing, then run its
+# post_clone hooks. Non-destructive by design: an existing checkout is never
+# fetched, reset, or modified — we only ever create what is absent. This makes
+# re-runs safe on machines where you have local, uncommitted work.
+#
+# repo_item schema (see repositories.example.yml):
+#   folder:     destination path (absolute, or use {{ repositories_base_dir }})
+#   remote:     clone URL (ssh or https)
+#   branch:     optional — checkout ref (defaults to the remote HEAD)
+#   active:     optional bool (default true) — set false to skip without deleting
+#   post_clone: optional list of shell commands, run once in the repo on clone
+- name: "Resurrect repository: {{ repo_item.folder }}"
+  when: repo_item.active | default(true) | bool
+  block:
+    - name: "Check whether the checkout already exists: {{ repo_item.folder }}"
+      ansible.builtin.stat:
+        path: "{{ repo_item.folder }}/.git"
+      register: repositories_git_dir
+
+    - name: "Ensure repository parent directory exists: {{ repo_item.folder | dirname }}"
+      ansible.builtin.file:
+        path: "{{ repo_item.folder | dirname }}"
+        state: directory
+        mode: "0755"
+      when: not repositories_git_dir.stat.exists
+
+    - name: "Clone repository: {{ repo_item.remote }}"
+      ansible.builtin.git:
+        repo: "{{ repo_item.remote }}"
+        dest: "{{ repo_item.folder }}"
+        version: "{{ repo_item.branch | default(omit) }}"
+        update: false
+        accept_hostkey: true
+      when: not repositories_git_dir.stat.exists
+      register: repositories_clone
+
+    # shell (not command): post_clone entries are arbitrary user strings that
+    # commonly need shell features (redirects, &&). Runs only on a fresh clone,
+    # per-repo with chdir — so it can't be a play-level handler. Skipped under
+    # --check (the clone dir isn't created during a dry run, and side-effecting
+    # hooks shouldn't run then anyway).
+    - name: "Run post-clone hooks: {{ repo_item.folder }}"  # noqa: command-instead-of-shell no-handler
+      ansible.builtin.shell: "{{ post_clone_cmd }}"
+      args:
+        chdir: "{{ repo_item.folder }}"
+      loop: "{{ repo_item.post_clone | default([]) }}"
+      loop_control:
+        loop_var: post_clone_cmd
+      when:
+        - repositories_clone.changed | default(false) | bool
+        - not ansible_check_mode
+      changed_when: true

@@ -1,0 +1,33 @@
+---
+# Match macOS default permissions for pre-existing system directories.
+- name: Ensure ~/Library/Logs exists
+  ansible.builtin.file:
+    path: "{{ drift_correction_log_dir }}"
+    state: directory
+    mode: "0700"
+
+- name: Ensure ~/Library/LaunchAgents exists
+  ansible.builtin.file:
+    path: "{{ home_dir }}/Library/LaunchAgents"
+    state: directory
+    mode: "0755"
+
+- name: Ensure wrapper script directory exists
+  ansible.builtin.file:
+    path: "{{ drift_correction_wrapper_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Deploy drift-check wrapper script
+  ansible.builtin.template:
+    src: drift-check.sh.j2
+    dest: "{{ drift_correction_wrapper_path }}"
+    mode: "0755"
+  notify: Reload drift-correction agent
+
+- name: Deploy drift-correction LaunchAgent plist
+  ansible.builtin.template:
+    src: com.ansible.drift-correction.plist.j2
+    dest: "{{ home_dir }}/Library/LaunchAgents/{{ drift_correction_label }}.plist"
+    mode: "0644"
+  notify: Reload drift-correction agent

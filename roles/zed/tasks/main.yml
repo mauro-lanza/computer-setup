@@ -1,0 +1,23 @@
+---
+- name: Ensure Zed config directory exists
+  ansible.builtin.file:
+    path: "{{ zed_config_dir }}"
+    state: directory
+    mode: "0755"
+
+# Resolve settings.json across content-layer files/ dirs (highest priority
+# wins), falling back to this role's own files/. Skipped if no layer provides it.
+- name: Resolve Zed settings
+  ansible.builtin.set_fact:
+    zed_settings_src: "{{ lookup('ansible.builtin.first_found', _params, errors='ignore') }}"
+  vars:
+    _params:
+      files: [zed/settings.json]
+      paths: "{{ (computer_setup_file_search_dirs | default([])) + [role_path + '/files'] }}"
+
+- name: Deploy Zed settings
+  ansible.builtin.copy:
+    src: "{{ zed_settings_src }}"
+    dest: "{{ zed_config_dir }}/settings.json"
+    mode: "0644"
+  when: zed_settings_src | default('') | length > 0

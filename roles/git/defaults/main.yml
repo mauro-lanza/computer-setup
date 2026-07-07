@@ -1,0 +1,19 @@
+---
+git_user_name: ""
+git_user_email: ""
+# Editor: defaults to vim; overridden to "code --wait" if VS Code is installed.
+git_editor: ""
+
+# All git content below is the variable interface — supplied by content layers'
+# vars.yml. Safe empty defaults so the orchestrator writes a minimal, opinion-free
+# ~/.gitconfig on its own.
+
+# Default branch for `git init` (rendered only when set).
+git_default_branch: ""
+
+# Extra config rendered into ~/.gitconfig, grouped by section (dict — merges
+# recursively across layers). The gitconfig.j2 template renders it generically.
+git_config_sections: {}
+
+# Entries written to ~/.gitignore_global (list — appends across layers).
+git_global_gitignore_entries: []

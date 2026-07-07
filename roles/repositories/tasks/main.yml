@@ -1,0 +1,40 @@
+---
+- name: Check for a repository catalog
+  ansible.builtin.stat:
+    path: "{{ repositories_catalog_file }}"
+  register: repositories_catalog
+
+# Load into a namespaced var so the user-facing catalog key stays the natural
+# `repositories:` while not clobbering the merged layer value until we choose to.
+- name: Load repository catalog
+  ansible.builtin.include_vars:
+    file: "{{ repositories_catalog_file }}"
+    name: repositories_catalog_data
+  when: repositories_catalog.stat.exists
+
+- name: Resolve the repository list from the catalog
+  ansible.builtin.set_fact:
+    repositories: "{{ repositories_catalog_data.repositories | default(repositories) }}"
+  when: repositories_catalog.stat.exists
+
+- name: Report empty catalog
+  ansible.builtin.debug:
+    msg: >-
+      No repositories to resurrect. Add entries via a content layer's vars.yml
+      (`repositories:`), to {{ repositories_catalog_file }} (see
+      repositories.example.yml), or run `repos-generate` to scaffold one.
+  when: repositories | length == 0
+
+- name: Ensure the base projects directory exists
+  ansible.builtin.file:
+    path: "{{ repositories_base_dir }}"
+    state: directory
+    mode: "0755"
+  when: repositories | length > 0
+
+- name: Resurrect catalogued repositories
+  ansible.builtin.include_tasks: clone_repo.yml
+  loop: "{{ repositories }}"
+  loop_control:
+    loop_var: repo_item
+    label: "{{ repo_item.folder | default(repo_item.remote) }}"

@@ -1,0 +1,33 @@
+---
+- name: Install formulae (and refresh Homebrew first)
+  community.general.homebrew:
+    name: "{{ homebrew_mandatory_formulae + homebrew_optional_formulae }}"
+    state: present
+    update_homebrew: "{{ homebrew_update }}"
+
+- name: Install explicitly adoptable casks
+  community.general.homebrew_cask:
+    name: >-
+      {{ (homebrew_mandatory_casks + homebrew_optional_casks)
+         | select('in', homebrew_adopt_casks)
+         | list }}
+    state: present
+    install_options: adopt
+  when: >-
+    ((homebrew_mandatory_casks + homebrew_optional_casks)
+     | select('in', homebrew_adopt_casks)
+     | list
+     | length) > 0
+
+- name: Install casks without adoption
+  community.general.homebrew_cask:
+    name: >-
+      {{ (homebrew_mandatory_casks + homebrew_optional_casks)
+         | reject('in', homebrew_adopt_casks)
+         | list }}
+    state: present
+  when: >-
+    ((homebrew_mandatory_casks + homebrew_optional_casks)
+     | reject('in', homebrew_adopt_casks)
+     | list
+     | length) > 0

@@ -1,0 +1,122 @@
+---
+# The shell role is a generic process: it deploys the orchestrator's own CLI
+# snippet, then whatever zsh content the active content layers provide. It holds
+# no shell content of its own — aliases, functions, integrations, and ~/.zshrc
+# all come from layers (files/shell/*.zsh, files/zshrc).
+
+- name: Create managed shell config directory
+  ansible.builtin.file:
+    path: "{{ shell_zsh_config_dir }}"
+    state: directory
+    mode: "0755"
+
+# Engine-owned CLI (drift-*/repos-* commands that operate computer-setup itself).
+# Always deployed, regardless of layers.
+- name: Deploy computer-setup shell CLI
+  ansible.builtin.template:
+    src: computer-setup-cli.zsh.j2
+    dest: "{{ shell_zsh_config_dir }}/{{ shell_cli_snippet_name }}"
+    mode: "0644"
+  notify: Shell config changed
+
+# ─── Layer-provided shell snippets ────────────────────────────────────────────
+# Gather files/shell/*.zsh from every active layer and deploy them into ~/.zsh,
+# prefixed with the layer priority + name so load order is deterministic (lower
+# priority first) and multiple layers never collide.
+- name: Discover layer shell snippets
+  ansible.builtin.find:
+    paths: "{{ computer_setup_plugin_cache }}/{{ item.name }}/files/shell"
+    patterns: "*.zsh"
+    file_type: file
+  loop: "{{ computer_setup_active_layers | default([]) }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: shell_layer_find
+
+- name: Build the shell snippet deploy map
+  ansible.builtin.set_fact:
+    shell_snippet_map: >-
+      {{ (shell_snippet_map | default([])) + [{
+           'src': _f.1.path,
+           'dest': shell_zsh_config_dir ~ '/'
+                   ~ ('%02d' | format(_f.0.item.priority | int))
+                   ~ '-' ~ _f.0.item.name ~ '-' ~ (_f.1.path | basename)
+         }] }}
+  loop: "{{ shell_layer_find.results | subelements('files', skip_missing=True) }}"
+  loop_control:
+    loop_var: _f
+    label: "{{ _f.0.item.name }}/{{ _f.1.path | basename }}"
+
+- name: Deploy layer shell snippets
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    mode: "0644"
+  loop: "{{ shell_snippet_map | default([]) }}"
+  loop_control:
+    label: "{{ item.dest | basename }}"
+  notify: Shell config changed
+
+# Reconcile: remove managed snippets a layer no longer provides (keep the engine
+# CLI snippet). Keeps ~/.zsh a faithful mirror of the current layer set.
+- name: List currently deployed shell snippets
+  ansible.builtin.find:
+    paths: "{{ shell_zsh_config_dir }}"
+    patterns: "*.zsh"
+    file_type: file
+  register: shell_existing
+
+- name: Remove stale shell snippets
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ shell_existing.files }}"
+  loop_control:
+    label: "{{ item.path | basename }}"
+  when:
+    - (item.path | basename) != shell_cli_snippet_name
+    - item.path not in (shell_snippet_map | default([]) | map(attribute='dest') | list)
+  notify: Shell config changed
+
+# ─── ~/.zshrc (layer content) ─────────────────────────────────────────────────
+# Resolved across layer files/ dirs (highest priority wins). The orchestrator
+# ships no ~/.zshrc of its own — a layer must provide one (it sources ~/.zsh/*.zsh
+# plus the prompt and plugins). Skipped if no layer provides it.
+- name: Resolve ~/.zshrc from layers
+  ansible.builtin.set_fact:
+    shell_zshrc_src: "{{ lookup('ansible.builtin.first_found', _params, errors='ignore') }}"
+  vars:
+    _params:
+      files: [zshrc]
+      paths: "{{ (computer_setup_file_search_dirs | default([])) + [role_path + '/files'] }}"
+
+- name: Deploy ~/.zshrc
+  ansible.builtin.copy:
+    src: "{{ shell_zshrc_src }}"
+    dest: "{{ home_dir }}/.zshrc"
+    mode: "0644"
+  when: shell_zshrc_src | default('') | length > 0
+  notify: Shell config changed
+
+# ─── ~/.p10k.zsh (layer content) ──────────────────────────────────────────────
+# Resolved across layer files/ dirs (highest priority wins), skipped if absent.
+- name: Resolve Powerlevel10k prompt configuration
+  ansible.builtin.set_fact:
+    shell_p10k_src: "{{ lookup('ansible.builtin.first_found', _params, errors='ignore') }}"
+  vars:
+    _params:
+      files: [p10k.zsh]
+      paths: "{{ (computer_setup_file_search_dirs | default([])) + [role_path + '/files'] }}"
+
+- name: Deploy Powerlevel10k prompt configuration
+  ansible.builtin.copy:
+    src: "{{ shell_p10k_src }}"
+    dest: "{{ home_dir }}/.p10k.zsh"
+    mode: "0644"
+  when: shell_p10k_src | default('') | length > 0
+  notify: Shell config changed
+
+- name: Remove legacy zsh framework directory
+  ansible.builtin.file:
+    path: "{{ home_dir }}/.oh-my-zsh"
+    state: absent
