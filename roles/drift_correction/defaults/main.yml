@@ -2,7 +2,8 @@
 # `repo_url` is defined in local.yml (play vars) — passed through here so
 # the wrapper template renders with the same URL the playbook is pulled from.
 drift_correction_repo_url: "{{ repo_url }}"
-drift_correction_prefs_file: "{{ home_dir }}/.mac-prefs.yml"
+drift_correction_repo_branch: "{{ repo_branch }}"
+drift_correction_prefs_file: "{{ computer_setup_prefs_file }}"
 # Content layers: the wrapper refreshes every layer in the plugin cache and
 # re-merges before checking, so drift covers orchestrator + all layers.
 drift_correction_plugin_cache: "{{ computer_setup_plugin_cache }}"

@@ -36,7 +36,8 @@ If you touch the merge logic, extend or run `tests/contract.yml` and confirm:
 - list vars (`repositories`, `homebrew_mandatory_formulae`, …) **append** across
   layers, and
 - scalar vars (`dbt_bigquery_project`, …) take the **highest-priority** value and
-  print an info message on overlap.
+  print an info message on overlap, and
+- machine-local prefs stay in `computer_setup_prefs_file`, not layer `vars.yml`.
 
 ## Changing the contract
 

@@ -485,6 +485,8 @@ run_playbook() {
         -e "@${PREFS_FILE}"
         -e "computer_setup_plugin_cache=${PLUGIN_CACHE}"
         -e "computer_setup_layers_manifest=${LAYERS_FILE}"
+        -e "computer_setup_prefs_file=${PREFS_FILE}"
+        -e "repo_branch=${REPO_BRANCH}"
     )
 
     if ask_yn "Preview changes first (dry-run)?"; then

@@ -10,6 +10,7 @@
     # non-interactively. HTTPS can prompt for keychain credentials; SSH uses the
     # key configured by bootstrap's GitHub auth flow.
     repo_url: "git@github.com:mauro-lanza/computer-setup.git"
+    repo_branch: main
     # This playbook targets Apple Silicon macOS exclusively.
     homebrew_prefix: /opt/homebrew
     home_dir: "{{ ansible_facts['env']['HOME'] }}"
@@ -31,6 +32,7 @@
     # active layers and their merge priority. Absent = orchestrator runs
     # standalone on its safe empty defaults (no layers).
     computer_setup_layers_manifest: "{{ home_dir }}/.config/computer-setup/layers.yml"
+    computer_setup_prefs_file: "{{ home_dir }}/.mac-prefs.yml"
     # Highest schema_version this orchestrator understands (checked per layer).
     computer_setup_schema_version: 1
 

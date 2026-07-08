@@ -1,6 +1,8 @@
 #!/bin/bash
 set -euo pipefail
 
+PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
+
 usage() {
     cat <<'EOF'
 Usage: computer-setup-layers sync --manifest PATH --cache DIR [--schema-version N]
@@ -29,11 +31,28 @@ validate_layer() {
     local name="$1" dest="$2" schema_version_max="$3"
     [[ -f "$dest/plugin.yml" ]] || die "Layer '$name' is missing plugin.yml"
 
-    local sv
+    local plugin_name sv
+    plugin_name="$(yq -r '.name // ""' "$dest/plugin.yml")"
+    [[ "$plugin_name" == "$name" ]] || die "Layer '$name' plugin.yml name is '$plugin_name'"
+
     sv="$(yq -r '.schema_version // 1' "$dest/plugin.yml")"
     if (( sv > schema_version_max )); then
         die "Layer '$name' requires schema_version ${sv}, but this orchestrator supports up to ${schema_version_max}"
     fi
+}
+
+validate_manifest_entry() {
+    local manifest="$1" index="$2" seen_names="$3"
+    local name repo priority
+
+    name="$(yq -r ".layers[$index].name // \"\"" "$manifest")"
+    repo="$(yq -r ".layers[$index].repo // \"\"" "$manifest")"
+    priority="$(yq -r ".layers[$index].priority // \"\"" "$manifest")"
+
+    [[ -n "$name" ]] || die "Layer entry $index is missing name"
+    [[ -n "$repo" ]] || die "Layer '$name' is missing repo"
+    [[ "$priority" =~ ^[0-9]+$ ]] || die "Layer '$name' priority must be a number"
+    [[ "$seen_names" != *" $name "* ]] || die "Duplicate layer name in manifest: $name"
 }
 
 sync_layers() {
@@ -61,9 +80,11 @@ sync_layers() {
 
     mkdir -p "$cache"
 
-    local i name repo dest
+    local i name repo dest seen_names=" "
     for ((i = 0; i < n; i++)); do
+        validate_manifest_entry "$manifest" "$i" "$seen_names"
         name="$(yq -r ".layers[$i].name" "$manifest")"
+        seen_names="${seen_names}${name} "
         repo="$(ssh_repo_url "$(yq -r ".layers[$i].repo" "$manifest")")"
         dest="$cache/$name"
 

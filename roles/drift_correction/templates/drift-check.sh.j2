@@ -16,6 +16,7 @@
 set -uo pipefail
 
 REPO_URL="{{ drift_correction_repo_url }}"
+REPO_BRANCH="{{ drift_correction_repo_branch }}"
 PREFS_FILE="{{ drift_correction_prefs_file }}"
 PLUGIN_CACHE="{{ drift_correction_plugin_cache }}"
 LAYERS_FILE="{{ drift_correction_layers_manifest }}"
@@ -60,6 +61,7 @@ fi
 #   -e homebrew_update=false : `state=present` never upgrades, so refreshing the
 #                              Homebrew index adds time with zero detection value.
 PULL_OUT=$("$ANSIBLE_PULL" -U "$REPO_URL" "${ARGS[@]}" \
+    -C "$REPO_BRANCH" \
     -e homebrew_update=false \
     --check --diff local.yml 2>&1)
 RC=$?

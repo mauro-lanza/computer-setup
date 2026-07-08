@@ -11,7 +11,7 @@
 
 - name: Check if preferences file exists
   ansible.builtin.stat:
-    path: "{{ home_dir }}/.mac-prefs.yml"
+    path: "{{ computer_setup_prefs_file }}"
   register: prefs_file
 
 - name: Load user preferences
@@ -19,7 +19,7 @@
   block:
     - name: Read user preferences file
       ansible.builtin.include_vars:
-        file: "{{ home_dir }}/.mac-prefs.yml"
+        file: "{{ computer_setup_prefs_file }}"
   rescue:
     - name: Warn about malformed preferences file
       ansible.builtin.debug:
@@ -31,6 +31,11 @@
   ansible.builtin.set_fact:
     computer_setup_merged_vars: {}
     computer_setup_active_layers: []
+    computer_setup_reserved_layer_keys:
+      - prefs
+      - git_user_name
+      - git_user_email
+      - use_dbt
 
 - name: Check for a layers manifest
   ansible.builtin.stat:

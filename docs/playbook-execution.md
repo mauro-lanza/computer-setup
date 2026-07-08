@@ -5,25 +5,26 @@ handles user-made changes.
 
 ## Execution Phases
 
-### Phase 1: Pre-tasks (setup & detection)
+### Phase 1: `computer_setup` role (setup & detection)
 
 1. **Gather facts** -- Ansible collects system info (OS, architecture, env
    vars).
 2. **Platform check** -- Asserts macOS + arm64. Fails immediately otherwise.
-3. **Load preferences** -- Reads `~/.mac-prefs.yml` (written by
-   `bootstrap.sh`). If missing, all optionals default to empty lists. If
-   malformed, warns and continues with defaults.
-4. **Detect gcloud SDK** -- Checks if `~/google-cloud-sdk` exists.
-5. **Detect existing dbt config** -- Checks if `~/.dbt/profiles.yml` exists.
-6. **Merge content layers** -- Reads `~/.config/computer-setup/layers.yml`, then
+3. **Load preferences** -- Reads `computer_setup_prefs_file` (normally
+   `~/.mac-prefs.yml`, written by `bootstrap.sh`). If missing, all optionals
+   default to empty lists. If malformed, warns and continues with defaults.
+4. **Merge content layers** -- Reads `~/.config/computer-setup/layers.yml`, then
    merges each layer's `vars.yml` in ascending priority (lists append, scalars
    take the highest-priority value). The merged keys become the role variable
    interface, and layer `files/`/`templates/` search paths are built for file
    and template resolution. Absent manifest = no layers, safe empty defaults.
-7. **Resolve capability flags** -- Derives `has_gcloud`, `has_dbt`, `has_zed`,
-   and `has_opencode` booleans from preferences. These gate conditional roles /
-   post-task reminders. `has_dbt` is `use_dbt` (a `~/.mac-prefs.yml` toggle)
-   **or** an already-present `~/.dbt/profiles.yml`.
+5. **Detect installed/configured tools** -- Checks for existing gcloud SDK and
+   dbt config to preserve management of already-configured machines.
+6. **Resolve capability flags** -- Derives `has_nvm`, `has_gcloud`, `has_dbt`,
+   `has_zed`, and `has_opencode` from `prefs.capabilities` with fallbacks for
+   older prefs that only stored package selections. These gate conditional roles
+   and post-task reminders. `has_dbt` is `use_dbt` **or** an already-present
+   `~/.dbt/profiles.yml`.
 
 ### Phase 2: Roles (in order)
 
@@ -95,13 +96,15 @@ handles user-made changes.
 
 22. Ensure `~/Library/Logs`, `~/Library/LaunchAgents`, `~/.local/bin`
     exist.
-23. Deploy `~/.local/bin/drift-check` wrapper script from template.
-24. Deploy LaunchAgent plist (daily at 10:00).
-25. If either file changed, handler reloads the LaunchAgent.
+23. Deploy the shared `computer-setup-layers` helper used to sync layer repos.
+24. Deploy `~/.local/bin/drift-check` wrapper script from template. It syncs
+    layers, then runs `ansible-pull --check --diff` against `repo_branch`.
+25. Deploy LaunchAgent plist (daily at 10:00).
+26. If any drift files changed, handler reloads the LaunchAgent.
 
 ### Phase 3: Post-tasks
 
-26. Check `gh auth status`, print conditional setup reminders (`gh auth
+27. Check `gh auth status`, print conditional setup reminders (`gh auth
     login` if not authenticated, `gcloud auth login` if gcloud is
     installed, 1Password sign-in if 1Password is selected).
 

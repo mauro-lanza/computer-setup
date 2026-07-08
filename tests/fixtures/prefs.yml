@@ -1,0 +1,15 @@
+---
+git_user_name: Test User
+git_user_email: test@example.com
+use_dbt: false
+
+prefs:
+  optional_formulae:
+    - nvm
+    - anomalyco/tap/opencode
+  optional_casks:
+    - zed
+  optional_vscode_extensions: []
+  capabilities:
+    - custom-base
+    - custom-override

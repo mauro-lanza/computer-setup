@@ -65,6 +65,12 @@ Catalog entries can declare `capability`; when omitted, the capability defaults
 to the catalog `id`. Selected capabilities are written to `prefs.capabilities` so
 roles can gate optional integrations without hardcoding package names.
 
+Machine-local keys (`prefs`, `git_user_name`, `git_user_email`, `use_dbt`) are
+reserved for `computer_setup_prefs_file` and are rejected from layer `vars.yml`.
+The layer sync helper validates manifest entries before use: layer names must be
+unique, required fields must be present, priorities must be numeric, and
+`plugin.yml.name` must match the manifest name.
+
 ## Managed State
 
 The orchestrator can run with no layers, but then it intentionally manages almost
