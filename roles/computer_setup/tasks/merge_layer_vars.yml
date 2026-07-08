@@ -28,14 +28,17 @@
     name: _incoming_layer_vars
   when: _layer_vars_stat.stat.exists
 
-- name: "[{{ _layer.name }}] Assert vars.yml does not define machine-local keys"
+- name: "[{{ _layer.name }}] Assert vars.yml does not define reserved keys"
   ansible.builtin.assert:
     that:
       - (_incoming_layer_vars.keys() | intersect(computer_setup_reserved_layer_keys | default([])) | length) == 0
+      - (_incoming_layer_vars.keys() | select('match', '^computer_setup_') | list | length) == 0
     fail_msg: >-
-      Layer '{{ _layer.name }}' defines machine-local key(s):
-      {{ _incoming_layer_vars.keys() | intersect(computer_setup_reserved_layer_keys | default([])) | join(', ') }}.
-      These belong in {{ computer_setup_prefs_file }}, not in layer vars.yml.
+      Layer '{{ _layer.name }}' defines reserved key(s):
+      {{ ((_incoming_layer_vars.keys() | intersect(computer_setup_reserved_layer_keys | default([])))
+          + (_incoming_layer_vars.keys() | select('match', '^computer_setup_') | list)) | unique | join(', ') }}.
+      These are machine-local prefs (use {{ computer_setup_prefs_file }}) or
+      engine-owned vars (the computer_setup_* namespace) — not layer content.
     quiet: true
   when: _layer_vars_stat.stat.exists
 

@@ -31,11 +31,22 @@
   ansible.builtin.set_fact:
     computer_setup_merged_vars: {}
     computer_setup_active_layers: []
+    # Keys a layer's vars.yml may never define. Two groups:
+    #   1. Machine-local prefs — belong in computer_setup_prefs_file.
+    #   2. Engine-owned play/role vars — a layer overriding these would break
+    #      the orchestrator itself. The computer_setup_* namespace is additionally
+    #      guarded by prefix in merge_layer_vars.yml.
     computer_setup_reserved_layer_keys:
       - prefs
       - git_user_name
       - git_user_email
       - use_dbt
+      - home_dir
+      - repo_url
+      - repo_branch
+      - homebrew_prefix
+      - vscode_code_binary
+      - repositories_base_dir
 
 - name: Check for a layers manifest
   ansible.builtin.stat:
