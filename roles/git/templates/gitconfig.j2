@@ -1,10 +1,14 @@
 # Managed by ansible — do not edit manually.
 # Source of truth: roles/git (defaults/main.yml + templates/gitconfig.j2).
 # Any manual changes here are overwritten on the next playbook run.
-{% if git_user_name | length > 0 %}
+{% if (git_user_name | length > 0) or (git_user_email | length > 0) %}
 [user]
+{% if git_user_name | length > 0 %}
 	name = {{ git_user_name }}
+{% endif %}
+{% if git_user_email | length > 0 %}
 	email = {{ git_user_email }}
+{% endif %}
 {% endif %}
 {% if git_default_branch | length > 0 %}
 [init]

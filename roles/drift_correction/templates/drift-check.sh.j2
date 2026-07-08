@@ -29,7 +29,7 @@ CONNECTIVITY_TIMEOUT={{ drift_correction_connectivity_timeout }}
 
 # Build args (include prefs + layer merge inputs only if present)
 ARGS=()
-[[ -f "$PREFS_FILE" ]] && ARGS+=(-e "@${PREFS_FILE}")
+[[ -f "$PREFS_FILE" ]] && ARGS+=(-e "@${PREFS_FILE}" -e "computer_setup_prefs_file=${PREFS_FILE}")
 [[ -n "$PLUGIN_CACHE" ]] && ARGS+=(-e "computer_setup_plugin_cache=${PLUGIN_CACHE}")
 [[ -f "$LAYERS_FILE" ]] && ARGS+=(-e "computer_setup_layers_manifest=${LAYERS_FILE}")
 
