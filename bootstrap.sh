@@ -190,7 +190,7 @@ manage_layers() {
     echo "# Content-layer manifest for computer-setup. Managed by bootstrap.sh." >> "$tmp"
     echo "layers:" >> "$tmp"
 
-    local added=0 name repo prio priv default_more
+    local added=0 name repo prio priv
     while true; do
         if [[ $added -eq 0 ]]; then
             ask_yn "Add a content layer?" "y" || break

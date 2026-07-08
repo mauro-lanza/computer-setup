@@ -1,5 +1,3 @@
 ---
 runtimes_nvm_default_node: "lts/*"
 runtimes_tfenv_terraform_version: "1.12.2"
-# Homebrew tfenv stores versions in ~/.config/tfenv/versions/
-runtimes_tfenv_versions_dir: "{{ home_dir }}/.config/tfenv/versions"
