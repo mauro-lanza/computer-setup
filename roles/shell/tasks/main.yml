@@ -23,6 +23,11 @@
 # Gather files/shell/*.zsh from every active layer and deploy them into ~/.zsh,
 # prefixed with the layer priority + name so load order is deterministic (lower
 # priority first) and multiple layers never collide.
+#
+# A snippet may opt into a capability gate with a directive on its own line:
+#   # cs:requires-capability: <name>
+# The engine then deploys it only when <name> is an active capability. This
+# keeps the orchestrator content-agnostic — it never hardcodes layer filenames.
 - name: Discover layer shell snippets
   ansible.builtin.find:
     paths: "{{ computer_setup_plugin_cache }}/{{ item.name }}/files/shell"
@@ -46,9 +51,14 @@
   loop_control:
     loop_var: _f
     label: "{{ _f.0.item.name }}/{{ _f.1.path | basename }}"
+  vars:
+    _snippet_required_capability: >-
+      {{ (lookup('ansible.builtin.file', _f.1.path)
+          | regex_search('(?m)^#\s*cs:requires-capability:\s*(\S+)', '\1')
+          | default([], true)) | join('') }}
   when: >-
-    not ((_f.1.path | basename) == '40-nvm.zsh'
-         and not (has_nvm | default(false) | bool))
+    _snippet_required_capability | length == 0
+    or _snippet_required_capability in (computer_setup_capabilities | default([]))
 
 - name: Build the candidate shell snippet paths
   ansible.builtin.set_fact:

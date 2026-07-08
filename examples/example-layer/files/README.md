@@ -19,4 +19,12 @@
 #   aliases, functions, PATH tweaks, and tool integrations. They are copied
 #   verbatim (not templated), so write plain zsh and self-guard on tool presence.
 #
+#   Optional capability gate — add a directive line to a snippet to deploy it
+#   only when a capability is selected (see catalog.yml `capability`):
+#
+#       # cs:requires-capability: nvm
+#
+#   Without the directive a snippet is deployed to every machine. The
+#   orchestrator parses this generically — it never hardcodes snippet filenames.
+#
 # Drop any of these here to have this layer provide (or override) them.
