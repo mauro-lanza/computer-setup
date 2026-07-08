@@ -6,12 +6,9 @@
   become: false
 
   vars:
-    # SSH (not HTTPS): the drift-correction LaunchAgent pulls this repo
-    # non-interactively at 10:00 daily. HTTPS prompts for credentials it can't
-    # provide and fails. The ~/.ssh/github key (no passphrase, in known_hosts)
-    # authenticates without a prompt. Used by the drift wrapper and the
-    # `drift-apply` shell function. bootstrap.sh keeps its own HTTPS URL for the
-    # very first pull on a fresh Mac (before any SSH key exists).
+    # SSH (not HTTPS): drift-check and drift-apply pull this repo
+    # non-interactively. HTTPS can prompt for keychain credentials; SSH uses the
+    # key configured by bootstrap's GitHub auth flow.
     repo_url: "git@github.com:mauro-lanza/computer-setup.git"
     # This playbook targets Apple Silicon macOS exclusively.
     homebrew_prefix: /opt/homebrew
@@ -38,130 +35,10 @@
     computer_setup_schema_version: 1
 
   pre_tasks:
-    - name: Initialize playbook (platform, prefs, capability flags)
+    - name: Initialize computer-setup orchestration
+      ansible.builtin.import_role:
+        name: computer_setup
       tags: [always]
-      block:
-        - name: Assert supported platform (macOS Apple Silicon)
-          ansible.builtin.assert:
-            that:
-              - ansible_facts['system'] == 'Darwin'
-              - ansible_facts['architecture'] == 'arm64'
-            fail_msg: >-
-              This playbook supports macOS on Apple Silicon (arm64) only.
-              Detected: {{ ansible_facts['system'] }} / {{ ansible_facts['architecture'] }}.
-            success_msg: "Platform check passed: macOS arm64"
-
-        - name: Check if preferences file exists
-          ansible.builtin.stat:
-            path: "{{ home_dir }}/.mac-prefs.yml"
-          register: prefs_file
-
-        - name: Load user preferences
-          when: prefs_file.stat.exists
-          block:
-            - name: Read user preferences file
-              ansible.builtin.include_vars:
-                file: "{{ home_dir }}/.mac-prefs.yml"
-          rescue:
-            - name: Warn about malformed preferences file
-              ansible.builtin.debug:
-                msg: >-
-                  WARNING: ~/.mac-prefs.yml is malformed or unreadable.
-                  Re-run bootstrap.sh to regenerate. Continuing with defaults.
-
-        # ─── Content-layer merge ───────────────────────────────────────────
-        # Read the persisted layer manifest, then merge each layer's vars.yml in
-        # ascending priority order. Lists append across layers; scalars take the
-        # highest-priority value (with an info message on overlap). The merged
-        # keys become the role variable interface. Absent manifest = no layers,
-        # orchestrator runs on its safe empty defaults.
-        - name: Seed the accumulated layer vars
-          ansible.builtin.set_fact:
-            computer_setup_merged_vars: {}
-            computer_setup_active_layers: []
-
-        - name: Check for a layers manifest
-          ansible.builtin.stat:
-            path: "{{ computer_setup_layers_manifest }}"
-          register: layers_manifest_stat
-
-        - name: Load and merge content layers
-          when: layers_manifest_stat.stat.exists
-          block:
-            - name: Read the layers manifest
-              ansible.builtin.include_vars:
-                file: "{{ computer_setup_layers_manifest }}"
-                name: _layers_manifest
-
-            - name: Resolve active layers (ascending priority — highest wins last)
-              ansible.builtin.set_fact:
-                computer_setup_active_layers: >-
-                  {{ (_layers_manifest.layers | default([]))
-                     | sort(attribute='priority') }}
-
-            - name: Merge each layer's vars.yml
-              ansible.builtin.include_tasks: tasks/merge_layer_vars.yml
-              loop: "{{ computer_setup_active_layers }}"
-              loop_control:
-                loop_var: _layer
-                label: "{{ _layer.name }} (priority {{ _layer.priority }})"
-
-            - name: Expose merged layer vars as the role interface
-              ansible.builtin.set_fact:
-                "{{ item.key }}": "{{ item.value }}"
-              loop: "{{ computer_setup_merged_vars | dict2items }}"
-              loop_control:
-                label: "{{ item.key }}"
-
-        # File resolution: roles look up static files (p10k.zsh, editor settings)
-        # across layer files/ dirs in DESCENDING priority (highest wins), falling
-        # back to the role's own files/. Built here once for all roles to use.
-        - name: Build the cross-layer file search path
-          ansible.builtin.set_fact:
-            computer_setup_file_search_dirs: >-
-              {{ (computer_setup_active_layers | reverse | list)
-                 | map(attribute='name')
-                 | map('regex_replace', '^(.*)$',
-                       computer_setup_plugin_cache + '/\1/files')
-                 | list }}
-
-        # Template resolution: same idea for rendered templates (e.g. dbt
-        # profiles.yml.j2) — layer templates/ dirs in descending priority.
-        - name: Build the cross-layer template search path
-          ansible.builtin.set_fact:
-            computer_setup_template_search_dirs: >-
-              {{ (computer_setup_active_layers | reverse | list)
-                 | map(attribute='name')
-                 | map('regex_replace', '^(.*)$',
-                       computer_setup_plugin_cache + '/\1/templates')
-                 | list }}
-
-        - name: Check if gcloud SDK is installed
-          ansible.builtin.stat:
-            path: "{{ home_dir }}/google-cloud-sdk"
-          register: gcloud_sdk_dir
-
-        - name: Check if dbt is already configured on this machine
-          ansible.builtin.stat:
-            path: "{{ home_dir }}/.dbt/profiles.yml"
-          register: dbt_profiles_stat
-
-        - name: Resolve preferences and capability flags
-          ansible.builtin.set_fact:
-            homebrew_optional_formulae: "{{ _prefs.get('optional_formulae', []) }}"
-            homebrew_optional_casks: "{{ _prefs.get('optional_casks', []) }}"
-            vscode_optional_extensions: "{{ _prefs.get('optional_vscode_extensions', []) }}"
-            has_nvm: "{{ 'nvm' in _prefs.get('optional_formulae', []) }}"
-            has_gcloud: "{{ 'gcloud-cli' in _prefs.get('optional_casks', []) or gcloud_sdk_dir.stat.exists }}"
-            # dbt is enabled either explicitly (use_dbt in ~/.mac-prefs.yml, set
-            # by bootstrap.sh) or implicitly when this machine already has a
-            # ~/.dbt/profiles.yml — so existing setups keep being managed without
-            # a re-bootstrap, while fresh machines stay clean until opted in.
-            has_dbt: "{{ (use_dbt | default(false) | bool) or dbt_profiles_stat.stat.exists }}"
-            has_zed: "{{ 'zed' in _prefs.get('optional_casks', []) }}"
-            has_opencode: "{{ 'anomalyco/tap/opencode' in _prefs.get('optional_formulae', []) }}"
-          vars:
-            _prefs: "{{ prefs | default({}) }}"
 
   roles:
     - { role: homebrew, tags: [homebrew] }

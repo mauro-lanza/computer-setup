@@ -1,18 +1,11 @@
 ---
 # Merge a single content layer's vars.yml into the accumulated merged set.
-#
-# Called in a loop from local.yml over `computer_setup_active_layers` (sorted by
-# ascending priority, so the highest-priority layer is applied last and wins on
-# scalar conflicts). Lists append across layers via combine(list_merge=append_rp).
-#
-# Loop var: `_layer` — a manifest entry: { name, priority, path? }.
+# Loop var: `_layer` — a manifest entry: { name, priority }.
 
 - name: "[{{ _layer.name }}] Read plugin manifest"
   ansible.builtin.include_vars:
     file: "{{ computer_setup_plugin_cache }}/{{ _layer.name }}/plugin.yml"
     name: _layer_plugin
-  # A missing manifest is a broken layer — fail loudly rather than silently
-  # skipping content the user asked for.
 
 - name: "[{{ _layer.name }}] Assert supported schema_version"
   ansible.builtin.assert:
@@ -53,6 +46,5 @@
   ansible.builtin.set_fact:
     computer_setup_merged_vars: >-
       {{ computer_setup_merged_vars
-         | combine(_incoming_layer_vars | default({}),
-                   recursive=true, list_merge='append_rp') }}
+         | combine(_incoming_layer_vars | default({}), recursive=true, list_merge='append_rp') }}
   when: _layer_vars_stat.stat.exists

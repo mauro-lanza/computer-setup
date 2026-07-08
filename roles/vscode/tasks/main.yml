@@ -37,15 +37,14 @@
     mode: "0755"
   when: vscode_stat.stat.exists
 
-# Resolve settings.json across content-layer files/ dirs (highest priority
-# wins), falling back to this role's own files/. Skipped if no layer provides it.
 - name: Resolve VS Code user settings
-  ansible.builtin.set_fact:
-    vscode_settings_src: "{{ lookup('ansible.builtin.first_found', _params, errors='ignore') }}"
+  ansible.builtin.include_role:
+    name: computer_setup
+    tasks_from: resolve_layer_file
   vars:
-    _params:
-      files: [vscode/settings.json]
-      paths: "{{ (computer_setup_file_search_dirs | default([])) + [role_path + '/files'] }}"
+    computer_setup_lookup_key: vscode/settings.json
+    computer_setup_lookup_result_var: vscode_settings_src
+    computer_setup_lookup_fallback_dir: "{{ role_path }}/files"
   when: vscode_stat.stat.exists
 
 - name: Deploy VS Code user settings

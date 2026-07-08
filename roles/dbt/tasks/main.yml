@@ -5,16 +5,14 @@
     state: directory
     mode: "0755"
 
-# The dbt profile content (BigQuery targets, etc.) is layer-provided. Resolve a
-# profiles.yml.j2 across layer templates/ dirs (highest priority wins) and render
-# it. Skipped entirely if no layer supplies one.
 - name: Resolve dbt profiles template from layers
-  ansible.builtin.set_fact:
-    dbt_profiles_src: "{{ lookup('ansible.builtin.first_found', _params, errors='ignore') }}"
+  ansible.builtin.include_role:
+    name: computer_setup
+    tasks_from: resolve_layer_template
   vars:
-    _params:
-      files: [profiles.yml.j2]
-      paths: "{{ (computer_setup_template_search_dirs | default([])) + [role_path + '/templates'] }}"
+    computer_setup_lookup_key: profiles.yml.j2
+    computer_setup_lookup_result_var: dbt_profiles_src
+    computer_setup_lookup_fallback_dir: "{{ role_path }}/templates"
 
 - name: Deploy dbt profiles.yml
   ansible.builtin.template:

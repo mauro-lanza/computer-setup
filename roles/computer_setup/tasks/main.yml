@@ -1,0 +1,107 @@
+---
+- name: Assert supported platform (macOS Apple Silicon)
+  ansible.builtin.assert:
+    that:
+      - ansible_facts['system'] == 'Darwin'
+      - ansible_facts['architecture'] == 'arm64'
+    fail_msg: >-
+      This playbook supports macOS on Apple Silicon (arm64) only.
+      Detected: {{ ansible_facts['system'] }} / {{ ansible_facts['architecture'] }}.
+    success_msg: "Platform check passed: macOS arm64"
+
+- name: Check if preferences file exists
+  ansible.builtin.stat:
+    path: "{{ home_dir }}/.mac-prefs.yml"
+  register: prefs_file
+
+- name: Load user preferences
+  when: prefs_file.stat.exists
+  block:
+    - name: Read user preferences file
+      ansible.builtin.include_vars:
+        file: "{{ home_dir }}/.mac-prefs.yml"
+  rescue:
+    - name: Warn about malformed preferences file
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: ~/.mac-prefs.yml is malformed or unreadable.
+          Re-run bootstrap.sh to regenerate. Continuing with defaults.
+
+- name: Seed the accumulated layer vars
+  ansible.builtin.set_fact:
+    computer_setup_merged_vars: {}
+    computer_setup_active_layers: []
+
+- name: Check for a layers manifest
+  ansible.builtin.stat:
+    path: "{{ computer_setup_layers_manifest }}"
+  register: layers_manifest_stat
+
+- name: Load and merge content layers
+  when: layers_manifest_stat.stat.exists
+  block:
+    - name: Read the layers manifest
+      ansible.builtin.include_vars:
+        file: "{{ computer_setup_layers_manifest }}"
+        name: _layers_manifest
+
+    - name: Resolve active layers (ascending priority — highest wins last)
+      ansible.builtin.set_fact:
+        computer_setup_active_layers: >-
+          {{ (_layers_manifest.layers | default([]))
+             | sort(attribute='priority') }}
+
+    - name: Merge each layer's vars.yml
+      ansible.builtin.include_tasks: merge_layer_vars.yml
+      loop: "{{ computer_setup_active_layers }}"
+      loop_control:
+        loop_var: _layer
+        label: "{{ _layer.name }} (priority {{ _layer.priority }})"
+
+    - name: Expose merged layer vars as the role interface
+      ansible.builtin.set_fact:
+        "{{ item.key }}": "{{ item.value }}"
+      loop: "{{ computer_setup_merged_vars | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+
+- name: Build the cross-layer file search path
+  ansible.builtin.set_fact:
+    computer_setup_file_search_dirs: >-
+      {{ (computer_setup_active_layers | reverse | list)
+         | map(attribute='name')
+         | map('regex_replace', '^(.*)$', computer_setup_plugin_cache + '/\1/files')
+         | list }}
+
+- name: Build the cross-layer template search path
+  ansible.builtin.set_fact:
+    computer_setup_template_search_dirs: >-
+      {{ (computer_setup_active_layers | reverse | list)
+         | map(attribute='name')
+         | map('regex_replace', '^(.*)$', computer_setup_plugin_cache + '/\1/templates')
+         | list }}
+
+- name: Check if gcloud SDK is installed
+  ansible.builtin.stat:
+    path: "{{ home_dir }}/google-cloud-sdk"
+  register: gcloud_sdk_dir
+
+- name: Check if dbt is already configured on this machine
+  ansible.builtin.stat:
+    path: "{{ home_dir }}/.dbt/profiles.yml"
+  register: dbt_profiles_stat
+
+- name: Resolve preferences and capability flags
+  ansible.builtin.set_fact:
+    homebrew_optional_formulae: "{{ _prefs.get('optional_formulae', []) }}"
+    homebrew_optional_casks: "{{ _prefs.get('optional_casks', []) }}"
+    vscode_optional_extensions: "{{ _prefs.get('optional_vscode_extensions', []) }}"
+    computer_setup_capabilities: "{{ _prefs.get('capabilities', []) }}"
+    has_nvm: "{{ 'nvm' in _capabilities or 'nvm' in _prefs.get('optional_formulae', []) }}"
+    has_gcloud: "{{ 'gcloud' in _capabilities or 'gcloud-cli' in _prefs.get('optional_casks', []) or gcloud_sdk_dir.stat.exists }}"
+    has_dbt: "{{ (use_dbt | default(false) | bool) or dbt_profiles_stat.stat.exists }}"
+    has_zed: "{{ 'zed' in _capabilities or 'zed' in _prefs.get('optional_casks', []) }}"
+    has_opencode: "{{ 'opencode' in _capabilities or 'anomalyco/tap/opencode' in _prefs.get('optional_formulae', []) }}"
+  vars:
+    _prefs: "{{ prefs | default({}) }}"
+    _capabilities: "{{ _prefs.get('capabilities', []) }}"

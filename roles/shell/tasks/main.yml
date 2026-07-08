@@ -116,12 +116,13 @@
 # ships no ~/.zshrc of its own — a layer must provide one (it sources ~/.zsh/*.zsh
 # plus the prompt and plugins). Skipped if no layer provides it.
 - name: Resolve ~/.zshrc from layers
-  ansible.builtin.set_fact:
-    shell_zshrc_src: "{{ lookup('ansible.builtin.first_found', _params, errors='ignore') }}"
+  ansible.builtin.include_role:
+    name: computer_setup
+    tasks_from: resolve_layer_file
   vars:
-    _params:
-      files: [zshrc]
-      paths: "{{ (computer_setup_file_search_dirs | default([])) + [role_path + '/files'] }}"
+    computer_setup_lookup_key: zshrc
+    computer_setup_lookup_result_var: shell_zshrc_src
+    computer_setup_lookup_fallback_dir: "{{ role_path }}/files"
 
 - name: Deploy ~/.zshrc
   ansible.builtin.copy:
@@ -134,12 +135,13 @@
 # ─── ~/.p10k.zsh (layer content) ──────────────────────────────────────────────
 # Resolved across layer files/ dirs (highest priority wins), skipped if absent.
 - name: Resolve Powerlevel10k prompt configuration
-  ansible.builtin.set_fact:
-    shell_p10k_src: "{{ lookup('ansible.builtin.first_found', _params, errors='ignore') }}"
+  ansible.builtin.include_role:
+    name: computer_setup
+    tasks_from: resolve_layer_file
   vars:
-    _params:
-      files: [p10k.zsh]
-      paths: "{{ (computer_setup_file_search_dirs | default([])) + [role_path + '/files'] }}"
+    computer_setup_lookup_key: p10k.zsh
+    computer_setup_lookup_result_var: shell_p10k_src
+    computer_setup_lookup_fallback_dir: "{{ role_path }}/files"
 
 - name: Deploy Powerlevel10k prompt configuration
   ansible.builtin.copy:

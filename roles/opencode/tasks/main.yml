@@ -7,15 +7,14 @@
 
 # The GitHub MCP token is injected at runtime via the OC_GITHUB_PERSONAL_ACCESS_TOKEN
 # environment variable ({env:...} in the config) — no secret is stored in the repo.
-# Resolved across content-layer files/ dirs (highest priority wins), falling back
-# to this role's own files/. Skipped if no layer provides it.
 - name: Resolve opencode config
-  ansible.builtin.set_fact:
-    opencode_config_src: "{{ lookup('ansible.builtin.first_found', _params, errors='ignore') }}"
+  ansible.builtin.include_role:
+    name: computer_setup
+    tasks_from: resolve_layer_file
   vars:
-    _params:
-      files: [opencode.json]
-      paths: "{{ (computer_setup_file_search_dirs | default([])) + [role_path + '/files'] }}"
+    computer_setup_lookup_key: opencode.json
+    computer_setup_lookup_result_var: opencode_config_src
+    computer_setup_lookup_fallback_dir: "{{ role_path }}/files"
 
 - name: Deploy opencode config
   ansible.builtin.copy:
