@@ -48,17 +48,35 @@ if ! /usr/bin/curl -fsS --max-time "$CONNECTIVITY_TIMEOUT" -o /dev/null "$CONNEC
 fi
 
 # Refresh every content layer in the plugin cache so the merge reflects the
-# latest layer content (drift covers orchestrator + all layers). Best-effort:
-# a layer that can't fast-forward is left as-is rather than failing the check.
+# latest layer content (drift covers orchestrator + all layers). Missing cache
+# entries are re-cloned from the manifest; existing layers are updated
+# best-effort, leaving non-fast-forwardable repos as-is.
 if [[ -n "$LAYERS_FILE" && -f "$LAYERS_FILE" && -n "$PLUGIN_CACHE" ]]; then
-    while IFS= read -r _layer_name; do
-        [[ -z "$_layer_name" ]] && continue
+    mkdir -p "$PLUGIN_CACHE"
+    while IFS=$'\t' read -r _layer_name _layer_repo; do
+        [[ -z "$_layer_name" || -z "$_layer_repo" ]] && continue
+        case "$_layer_repo" in
+            https://github.com/*)
+                _layer_repo="git@github.com:${_layer_repo#https://github.com/}"
+                ;;
+            http://github.com/*)
+                _layer_repo="git@github.com:${_layer_repo#http://github.com/}"
+                ;;
+            github.com:*)
+                _layer_repo="git@${_layer_repo}"
+                ;;
+        esac
         _layer_dir="$PLUGIN_CACHE/$_layer_name"
         if [[ -d "$_layer_dir/.git" ]]; then
+            /usr/bin/git -C "$_layer_dir" remote set-url origin "$_layer_repo" >> "$LOG_FILE" 2>&1 \
+                || echo "WARN: could not set SSH origin for layer '$_layer_name'" >> "$LOG_FILE"
             /usr/bin/git -C "$_layer_dir" pull --ff-only >> "$LOG_FILE" 2>&1 \
                 || echo "WARN: could not fast-forward layer '$_layer_name'" >> "$LOG_FILE"
+        else
+            /usr/bin/git clone --depth 1 "$_layer_repo" "$_layer_dir" >> "$LOG_FILE" 2>&1 \
+                || echo "WARN: could not clone missing layer '$_layer_name' from $_layer_repo" >> "$LOG_FILE"
         fi
-    done < <({{ homebrew_prefix }}/bin/yq -r '.layers[].name' "$LAYERS_FILE" 2>/dev/null || true)
+    done < <({{ homebrew_prefix }}/bin/yq -r '.layers[] | [.name, .repo] | @tsv' "$LAYERS_FILE" 2>/dev/null || true)
 fi
 
 # Run ansible-pull in check mode. Capture output for parsing.

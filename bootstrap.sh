@@ -22,12 +22,11 @@ CONFIG_DIR="$HOME/.config/computer-setup"
 LAYERS_FILE="$CONFIG_DIR/layers.yml"
 PLUGIN_CACHE="$HOME/.local/share/computer-setup/plugins"
 
-# Orchestrator repo. Public, so the first pull works anonymously over HTTPS on a
-# fresh Mac (before any SSH key exists). resolve_repo_url() upgrades to SSH once
-# SSH auth is present to avoid keychain prompts on re-runs.
+# Orchestrator repo. Bootstrap authenticates GitHub before cloning layers or
+# running ansible-pull, so GitHub repos are accessed over SSH consistently.
 ORCH_OWNER="mauro-lanza"
 ORCH_NAME="computer-setup"
-REPO_URL="https://github.com/${ORCH_OWNER}/${ORCH_NAME}.git"
+REPO_URL="git@github.com:${ORCH_OWNER}/${ORCH_NAME}.git"
 REPO_BRANCH="${BOOTSTRAP_BRANCH:-main}"
 
 # Highest plugin schema_version this orchestrator understands.
@@ -140,15 +139,15 @@ install_galaxy_collections() {
     ok "Collections installed"
 }
 
-# GitHub auth MUST complete here, before any private layer is cloned. Uses the
-# gh device flow (browser) and uploads an SSH key so subsequent SSH clones of
-# private layers and repositories work without prompts.
+# GitHub auth MUST complete before layers are cloned. Uses the gh device flow
+# (browser) and uploads an SSH key so subsequent SSH clones of layers and
+# repositories work without prompts.
 ensure_gh_auth() {
     if gh auth status &>/dev/null; then
         ok "GitHub CLI already authenticated"
         return
     fi
-    info "GitHub authentication is required to clone private content layers."
+    info "GitHub authentication is required to clone content layers over SSH."
     info "A browser device-code flow will open and an SSH key will be uploaded."
     if ! gh auth login --hostname github.com --git-protocol ssh --web; then
         error "GitHub authentication failed. Re-run bootstrap once authenticated."
@@ -204,7 +203,7 @@ manage_layers() {
             warn "  Name cannot be empty"
         done
         while true; do
-            read -rp "  Git repo URL (https:// or git@): " repo
+            read -rp "  Git repo URL (git@ preferred; GitHub HTTPS is converted to SSH): " repo
             [[ -n "$repo" ]] && break
             warn "  Repo URL cannot be empty"
         done
@@ -212,7 +211,7 @@ manage_layers() {
         prio="${prio:-$(( (added + 1) * 10 ))}"
 
         if [[ "$repo" == git@* ]]; then priv=true; else priv=false; fi
-        if ask_yn "  Private repo (clone over SSH)?" "$([[ $priv == true ]] && echo y || echo n)"; then
+        if ask_yn "  Private layer?" "$([[ $priv == true ]] && echo y || echo n)"; then
             priv=true
         else
             priv=false
@@ -255,6 +254,29 @@ validate_layer() {
     fi
 }
 
+ssh_repo_url() {
+    local repo="$1"
+    case "$repo" in
+        git@*)
+            printf '%s\n' "$repo"
+            ;;
+        https://github.com/*)
+            repo="${repo#https://github.com/}"
+            printf 'git@github.com:%s\n' "$repo"
+            ;;
+        http://github.com/*)
+            repo="${repo#http://github.com/}"
+            printf 'git@github.com:%s\n' "$repo"
+            ;;
+        github.com:*)
+            printf 'git@%s\n' "$repo"
+            ;;
+        *)
+            printf '%s\n' "$repo"
+            ;;
+    esac
+}
+
 # Clone/update each layer into the stable plugin cache.
 clone_layers() {
     [[ ! -f "$LAYERS_FILE" ]] && return
@@ -269,9 +291,11 @@ clone_layers() {
     for ((i = 0; i < n; i++)); do
         name="$(yq -r ".layers[$i].name" "$LAYERS_FILE")"
         repo="$(yq -r ".layers[$i].repo" "$LAYERS_FILE")"
+        repo="$(ssh_repo_url "$repo")"
         dest="$PLUGIN_CACHE/$name"
         if [[ -d "$dest/.git" ]]; then
             info "Updating layer '$name'..."
+            git -C "$dest" remote set-url origin "$repo" || warn "Could not set SSH origin for '$name'"
             git -C "$dest" pull --ff-only || warn "Could not fast-forward '$name' — leaving as-is"
         else
             info "Cloning layer '$name' from $repo..."
@@ -506,16 +530,10 @@ write_prefs() {
 # PHASE 3 — Run Ansible
 # ═════════════════════════════════════════════════════════════════════════════
 
-# Prefer the SSH remote when SSH auth is present (avoids macOS keychain prompts
-# on re-runs). Falls back to the anonymous HTTPS URL on a fresh Mac.
+# Keep GitHub access on SSH. This avoids macOS keychain prompts for HTTPS tokens.
 resolve_repo_url() {
-    if ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new \
-           -T git@github.com 2>&1 | grep -q 'successfully authenticated'; then
-        REPO_URL="git@github.com:${ORCH_OWNER}/${ORCH_NAME}.git"
-        ok "GitHub SSH auth detected — using SSH remote (no keychain prompts)"
-    else
-        info "No GitHub SSH auth yet — using HTTPS remote for this run"
-    fi
+    REPO_URL="git@github.com:${ORCH_OWNER}/${ORCH_NAME}.git"
+    ok "Using GitHub SSH remote (no keychain prompts)"
 }
 
 run_playbook() {

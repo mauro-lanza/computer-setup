@@ -9,3 +9,8 @@ shell_zsh_config_dir: "{{ home_dir }}/.zsh"
 # Filename of the orchestrator's own CLI snippet (engine-owned: drift/repos
 # helpers). Named so it is never mistaken for, or removed as, a layer snippet.
 shell_cli_snippet_name: "50-computer-setup-cli.zsh"
+
+# Tracks layer snippets created by this role. Cleanup only removes paths listed
+# here from a previous run, so user-created files in ~/.zsh are never inferred as
+# managed based on their filename alone.
+shell_snippet_manifest_path: "{{ shell_zsh_config_dir }}/.computer-setup-snippets"

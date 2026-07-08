@@ -33,11 +33,11 @@ Changing jobs = swap one layer, touch nothing else.
 ## Quick start
 
 ```bash
-# One-liner on a fresh Mac (orchestrator is public — pulls anonymously):
+# One-liner on a fresh Mac:
 curl -fsSL https://raw.githubusercontent.com/mauro-lanza/computer-setup/main/bootstrap.sh | bash
 
-# Or clone first (gives you the repo for later edits):
-git clone https://github.com/mauro-lanza/computer-setup.git
+# Or clone first after GitHub SSH auth (gives you the repo for later edits):
+git clone git@github.com:mauro-lanza/computer-setup.git
 cd computer-setup
 ./bootstrap.sh
 ```
@@ -46,11 +46,11 @@ cd computer-setup
 
 1. **Prerequisites + GitHub auth** — platform check → Xcode CLT → Homebrew →
    `yq`/`git`/`gh`/`ansible` → `gh auth login` (browser device flow + SSH key).
-   Auth completes *before* any private layer is cloned.
+   Auth completes before any layer is cloned.
 2. **Layer selection & fetch** — define/modify your layer manifest (persisted to
    `~/.config/computer-setup/layers.yml`), then clone each layer into the plugin
-   cache (`~/.local/share/computer-setup/plugins/<name>/`). Public layers clone
-   over HTTPS, private over SSH. Each layer's `schema_version` is validated.
+   cache (`~/.local/share/computer-setup/plugins/<name>/`). GitHub layers clone
+   over SSH. Each layer's `schema_version` is validated.
 3. **Build preferences** — merge every layer's `catalog.yml` into one menu, prompt
    for git identity, optional tools, and feature toggles, then write
    `~/.mac-prefs.yml`.
@@ -66,7 +66,7 @@ Layers merge in ascending `priority` order (higher wins on scalar conflicts):
 | Catalog items | Union, dedup by `id` |
 | **List** vars (`repositories`, `homebrew_mandatory_formulae`, …) | **Append** across layers |
 | **Scalar** vars (`dbt_bigquery_project`, …) | **Override**, highest priority wins, with an info message on overlap |
-| Files (`p10k.zsh`, editor settings) | Resolved across layers by priority (highest wins), falling back to a role's bundled copy |
+| Files (`p10k.zsh`, editor settings) | Resolved across layers by priority (highest wins); skipped when no layer provides the file |
 
 ## Writing your own layer
 

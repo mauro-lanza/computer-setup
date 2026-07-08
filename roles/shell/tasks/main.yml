@@ -46,6 +46,22 @@
   loop_control:
     loop_var: _f
     label: "{{ _f.0.item.name }}/{{ _f.1.path | basename }}"
+  when: >-
+    not ((_f.1.path | basename) == '40-nvm.zsh'
+         and not (has_nvm | default(false) | bool))
+
+- name: Build the candidate shell snippet paths
+  ansible.builtin.set_fact:
+    shell_snippet_candidate_paths: >-
+      {{ (shell_snippet_candidate_paths | default([])) + [
+           shell_zsh_config_dir ~ '/'
+           ~ ('%02d' | format(_f.0.item.priority | int))
+           ~ '-' ~ _f.0.item.name ~ '-' ~ (_f.1.path | basename)
+         ] }}
+  loop: "{{ shell_layer_find.results | subelements('files', skip_missing=True) }}"
+  loop_control:
+    loop_var: _f
+    label: "{{ _f.0.item.name }}/{{ _f.1.path | basename }}"
 
 - name: Deploy layer shell snippets
   ansible.builtin.copy:
@@ -57,26 +73,43 @@
     label: "{{ item.dest | basename }}"
   notify: Shell config changed
 
-# Reconcile: remove managed snippets a layer no longer provides (keep the engine
-# CLI snippet). Keeps ~/.zsh a faithful mirror of the current layer set.
-- name: List currently deployed shell snippets
-  ansible.builtin.find:
-    paths: "{{ shell_zsh_config_dir }}"
-    patterns: "*.zsh"
-    file_type: file
-  register: shell_existing
+# Reconcile: remove only layer snippets this role created on a previous run and
+# no longer creates now. User-created ~/.zsh/*.zsh files are not inferred as
+# managed from their filename.
+- name: Check previous shell snippet manifest
+  ansible.builtin.stat:
+    path: "{{ shell_snippet_manifest_path }}"
+  register: shell_snippet_manifest
+
+- name: Read previous shell snippet manifest
+  ansible.builtin.slurp:
+    path: "{{ shell_snippet_manifest_path }}"
+  register: shell_snippet_manifest_data
+  when: shell_snippet_manifest.stat.exists
+
+- name: Resolve stale shell snippets from previous manifest
+  ansible.builtin.set_fact:
+    shell_stale_snippets: >-
+      {{ (((shell_snippet_manifest_data.content | default('') | b64decode).splitlines()
+           if shell_snippet_manifest.stat.exists else [])
+          + (shell_snippet_candidate_paths | default([])))
+         | unique
+         | difference(shell_snippet_map | default([]) | map(attribute='dest') | list) }}
 
 - name: Remove stale shell snippets
   ansible.builtin.file:
-    path: "{{ item.path }}"
+    path: "{{ item }}"
     state: absent
-  loop: "{{ shell_existing.files }}"
+  loop: "{{ shell_stale_snippets }}"
   loop_control:
-    label: "{{ item.path | basename }}"
-  when:
-    - (item.path | basename) != shell_cli_snippet_name
-    - item.path not in (shell_snippet_map | default([]) | map(attribute='dest') | list)
+    label: "{{ item | basename }}"
   notify: Shell config changed
+
+- name: Write current shell snippet manifest
+  ansible.builtin.copy:
+    dest: "{{ shell_snippet_manifest_path }}"
+    mode: "0644"
+    content: "{{ (shell_snippet_map | default([]) | map(attribute='dest') | list | sort | join('\n')) ~ '\n' }}"
 
 # ─── ~/.zshrc (layer content) ─────────────────────────────────────────────────
 # Resolved across layer files/ dirs (highest priority wins). The orchestrator

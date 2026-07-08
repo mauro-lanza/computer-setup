@@ -8,12 +8,12 @@
 #
 # Fields:
 #   name:     unique layer name; also the plugin-cache directory name
-#   repo:     git URL (https:// for public/anonymous, git@ for private/SSH)
+#   repo:     git URL. GitHub HTTPS URLs are converted to SSH by bootstrap.
 #   priority: merge order (higher wins scalars)
-#   private:  clone over SSH (true) or anonymous HTTPS (false)
+#   private:  documents whether the layer is private; cloning uses SSH.
 layers:
   - name: public
-    repo: https://github.com/mauro-lanza/computer-setup-layer-public.git
+    repo: git@github.com:mauro-lanza/computer-setup-layer-public.git
     priority: 10
     private: false
 

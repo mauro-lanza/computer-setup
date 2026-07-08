@@ -151,6 +151,7 @@
             homebrew_optional_formulae: "{{ _prefs.get('optional_formulae', []) }}"
             homebrew_optional_casks: "{{ _prefs.get('optional_casks', []) }}"
             vscode_optional_extensions: "{{ _prefs.get('optional_vscode_extensions', []) }}"
+            has_nvm: "{{ 'nvm' in _prefs.get('optional_formulae', []) }}"
             has_gcloud: "{{ 'gcloud-cli' in _prefs.get('optional_casks', []) or gcloud_sdk_dir.stat.exists }}"
             # dbt is enabled either explicitly (use_dbt in ~/.mac-prefs.yml, set
             # by bootstrap.sh) or implicitly when this machine already has a

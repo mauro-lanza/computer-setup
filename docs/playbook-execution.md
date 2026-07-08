@@ -143,7 +143,7 @@ handles user-made changes.
 
 | What you change manually | Behaviour |
 |---|---|
-| Extra files in `~/.zsh/` | A managed snippet a layer no longer provides is removed on the next run; unmanaged files you add there are left on disk. Add shell behavior to a layer instead. |
+| Extra files in `~/.zsh/` | Unmanaged files you add there are left on disk. Only generated layer snippets that match the managed naming scheme are removed when no active layer provides them. Add durable shell behavior to a layer instead. |
 | `~/.mac-prefs.yml` edited manually | Read as-is. Malformed YAML triggers the rescue block and falls back to defaults. |
 | Local changes in a catalogued repo (`repositories` role) | Never touched. Cloning uses `update: false` and only ever clones repos that are entirely absent — existing checkouts are never fetched or reset. |
 

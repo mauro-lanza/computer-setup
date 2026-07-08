@@ -27,9 +27,8 @@ ansible-galaxy collection install -r requirements.yml
 Run the checks locally:
 
 ```bash
-ansible-playbook --syntax-check local.yml
+./scripts/check.sh
 ansible-lint
-bash -n bootstrap.sh
 ```
 
 If you touch the merge logic, exercise it against a staged plugin cache (a

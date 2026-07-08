@@ -2,8 +2,8 @@
 # Managed by ansible — do not edit manually
 #
 # macos-capture — compare this machine's LIVE macOS defaults against the values
-# declared in the `macos` Ansible role, and emit paste-ready YAML so you can
-# adopt the live state back into roles/macos/defaults/main.yml. This closes the
+# declared by the active content layers, and emit paste-ready YAML so you can
+# adopt the live state back into a layer vars.yml. This closes the
 # IaC loop: tweak a setting in System Settings, then capture the diff into code.
 #
 # Read-only — it never changes any setting.
@@ -24,15 +24,15 @@ MANAGED=(
 
 usage() {
     cat <<'EOF'
-macos-capture — diff live macOS defaults against the declared `macos` role values.
+macos-capture — diff live macOS defaults against the declared layer values.
 
   macos-capture             Diff managed keys; print YAML for those that differ
   macos-capture --all       Print YAML for every managed key (not just diffs)
   macos-capture --domain D  Dump ALL keys for domain D (discover new keys)
   macos-capture -h|--help   Show this help
 
-Read-only; never changes settings. Paste the emitted YAML into
-roles/macos/defaults/main.yml to adopt this machine's live values.
+Read-only; never changes settings. Paste the emitted YAML into a layer vars.yml
+to adopt this machine's live values.
 EOF
 }
 
@@ -124,7 +124,7 @@ if [[ -n "$yaml" ]]; then
         echo "# All ${total} managed key(s) — live values in role schema:"
     else
         echo "# ${diffs} of ${total} managed key(s) differ from declared — live values to adopt:"
-        echo "# (paste into roles/macos/defaults/main.yml, replacing the matching entries)"
+        echo "# (paste into a layer vars.yml, replacing the matching entries)"
     fi
     printf '%s' "$yaml"
 else

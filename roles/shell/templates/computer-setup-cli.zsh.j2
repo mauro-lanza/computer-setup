@@ -17,8 +17,12 @@ drift-check() {
 
 drift-apply() {
     local prefs="$HOME/.mac-prefs.yml"
+    local plugin_cache="{{ computer_setup_plugin_cache }}"
+    local layers_manifest="{{ computer_setup_layers_manifest }}"
     local args=()
     [[ -f "$prefs" ]] && args+=(-e "@${prefs}")
+    [[ -n "$plugin_cache" ]] && args+=(-e "computer_setup_plugin_cache=${plugin_cache}")
+    [[ -f "$layers_manifest" ]] && args+=(-e "computer_setup_layers_manifest=${layers_manifest}")
     ansible-pull -U "{{ repo_url }}" "${args[@]}" local.yml "$@"
 }
 
