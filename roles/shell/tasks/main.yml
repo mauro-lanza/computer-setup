@@ -38,40 +38,37 @@
     label: "{{ item.name }}"
   register: shell_layer_find
 
-- name: Build the shell snippet deploy map
+# Build one candidate list carrying every discovered snippet's source, its
+# deterministic managed dest (priority + layer name + filename), and whether its
+# capability gate is satisfied. The deploy map and the candidate-path list (used
+# for stale cleanup) are then both derived from this — the dest is computed once.
+- name: Build the shell snippet candidate list
   ansible.builtin.set_fact:
-    shell_snippet_map: >-
-      {{ (shell_snippet_map | default([])) + [{
+    shell_snippet_candidates: >-
+      {{ (shell_snippet_candidates | default([])) + [{
            'src': _f.1.path,
            'dest': shell_zsh_config_dir ~ '/'
                    ~ ('%02d' | format(_f.0.item.priority | int))
-                   ~ '-' ~ _f.0.item.name ~ '-' ~ (_f.1.path | basename)
+                   ~ '-' ~ _f.0.item.name ~ '-' ~ (_f.1.path | basename),
+           'enabled': (_cap | length == 0)
+                      or (_cap in (computer_setup_capabilities | default([])))
          }] }}
   loop: "{{ shell_layer_find.results | subelements('files', skip_missing=True) }}"
   loop_control:
     loop_var: _f
     label: "{{ _f.0.item.name }}/{{ _f.1.path | basename }}"
   vars:
-    _snippet_required_capability: >-
+    _cap: >-
       {{ (lookup('ansible.builtin.file', _f.1.path)
           | regex_search('(?m)^#\s*cs:requires-capability:\s*(\S+)', '\1')
           | default([], true)) | join('') }}
-  when: >-
-    _snippet_required_capability | length == 0
-    or _snippet_required_capability in (computer_setup_capabilities | default([]))
 
-- name: Build the candidate shell snippet paths
+- name: Derive the deploy map and candidate paths
   ansible.builtin.set_fact:
-    shell_snippet_candidate_paths: >-
-      {{ (shell_snippet_candidate_paths | default([])) + [
-           shell_zsh_config_dir ~ '/'
-           ~ ('%02d' | format(_f.0.item.priority | int))
-           ~ '-' ~ _f.0.item.name ~ '-' ~ (_f.1.path | basename)
-         ] }}
-  loop: "{{ shell_layer_find.results | subelements('files', skip_missing=True) }}"
-  loop_control:
-    loop_var: _f
-    label: "{{ _f.0.item.name }}/{{ _f.1.path | basename }}"
+    # Only gate-satisfied snippets are deployed (extra 'enabled' key is harmless).
+    shell_snippet_map: "{{ shell_snippet_candidates | default([]) | selectattr('enabled') | list }}"
+    # Every discovered snippet's dest — so a now-disabled one is cleaned up.
+    shell_snippet_candidate_paths: "{{ shell_snippet_candidates | default([]) | map(attribute='dest') | list }}"
 
 - name: Deploy layer shell snippets
   ansible.builtin.copy:
