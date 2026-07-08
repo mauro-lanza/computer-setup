@@ -1,0 +1,93 @@
+#!/bin/bash
+set -euo pipefail
+
+usage() {
+    cat <<'EOF'
+Usage: computer-setup-layers sync --manifest PATH --cache DIR [--schema-version N]
+
+Synchronize content layers from a manifest into the plugin cache. GitHub HTTPS
+URLs are normalized to SSH before cloning or updating remotes.
+EOF
+}
+
+log() { printf '%s\n' "$*"; }
+warn() { printf 'WARN: %s\n' "$*" >&2; }
+die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+
+ssh_repo_url() {
+    local repo="$1"
+    case "$repo" in
+        git@*) printf '%s\n' "$repo" ;;
+        https://github.com/*) printf 'git@github.com:%s\n' "${repo#https://github.com/}" ;;
+        http://github.com/*) printf 'git@github.com:%s\n' "${repo#http://github.com/}" ;;
+        github.com:*) printf 'git@%s\n' "$repo" ;;
+        *) printf '%s\n' "$repo" ;;
+    esac
+}
+
+validate_layer() {
+    local name="$1" dest="$2" schema_version_max="$3"
+    [[ -f "$dest/plugin.yml" ]] || die "Layer '$name' is missing plugin.yml"
+
+    local sv
+    sv="$(yq -r '.schema_version // 1' "$dest/plugin.yml")"
+    if (( sv > schema_version_max )); then
+        die "Layer '$name' requires schema_version ${sv}, but this orchestrator supports up to ${schema_version_max}"
+    fi
+}
+
+sync_layers() {
+    local manifest="" cache="" schema_version_max=1
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --manifest) manifest="$2"; shift 2 ;;
+            --cache) cache="$2"; shift 2 ;;
+            --schema-version) schema_version_max="$2"; shift 2 ;;
+            -h|--help) usage; exit 0 ;;
+            *) die "Unknown argument: $1" ;;
+        esac
+    done
+
+    [[ -n "$manifest" ]] || die "--manifest is required"
+    [[ -n "$cache" ]] || die "--cache is required"
+    [[ -f "$manifest" ]] || die "Layer manifest does not exist: $manifest"
+
+    local n
+    n="$(yq -r '.layers | length' "$manifest")"
+    if [[ "$n" -eq 0 ]]; then
+        warn "No layers to sync"
+        return 0
+    fi
+
+    mkdir -p "$cache"
+
+    local i name repo dest
+    for ((i = 0; i < n; i++)); do
+        name="$(yq -r ".layers[$i].name" "$manifest")"
+        repo="$(ssh_repo_url "$(yq -r ".layers[$i].repo" "$manifest")")"
+        dest="$cache/$name"
+
+        if [[ -d "$dest/.git" ]]; then
+            log "Updating layer '$name'..."
+            git -C "$dest" remote set-url origin "$repo" || warn "Could not set SSH origin for '$name'"
+            git -C "$dest" pull --ff-only || warn "Could not fast-forward '$name' — leaving as-is"
+        else
+            log "Cloning layer '$name' from $repo..."
+            git clone --depth 1 "$repo" "$dest"
+        fi
+
+        validate_layer "$name" "$dest" "$schema_version_max"
+    done
+}
+
+main() {
+    local command="${1:-}"
+    shift || true
+    case "$command" in
+        sync) sync_layers "$@" ;;
+        -h|--help|"") usage ;;
+        *) die "Unknown command: $command" ;;
+    esac
+}
+
+main "$@"

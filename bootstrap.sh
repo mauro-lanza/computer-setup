@@ -36,6 +36,7 @@ export HOMEBREW_NO_ANALYTICS=1
 
 # When piped via curl, BASH_SOURCE may be empty. Fall back to current dir.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || pwd)"
+LAYER_SYNC_SCRIPT="$SCRIPT_DIR/scripts/computer-setup-layers"
 
 # ─── Colors ───────────────────────────────────────────────────────────────────
 RED='\033[0;31m'
@@ -240,72 +241,21 @@ manage_layers() {
     show_layers
 }
 
-validate_layer() {
-    local name="$1" dest="$2"
-    if [[ ! -f "$dest/plugin.yml" ]]; then
-        error "Layer '$name' is missing plugin.yml — not a valid content layer."
-        exit 1
-    fi
-    local sv
-    sv="$(yq -r '.schema_version // 1' "$dest/plugin.yml")"
-    if (( sv > SCHEMA_VERSION_MAX )); then
-        error "Layer '$name' requires schema_version ${sv}, but this orchestrator supports up to ${SCHEMA_VERSION_MAX}. Update computer-setup."
-        exit 1
-    fi
-}
-
-ssh_repo_url() {
-    local repo="$1"
-    case "$repo" in
-        git@*)
-            printf '%s\n' "$repo"
-            ;;
-        https://github.com/*)
-            repo="${repo#https://github.com/}"
-            printf 'git@github.com:%s\n' "$repo"
-            ;;
-        http://github.com/*)
-            repo="${repo#http://github.com/}"
-            printf 'git@github.com:%s\n' "$repo"
-            ;;
-        github.com:*)
-            printf 'git@%s\n' "$repo"
-            ;;
-        *)
-            printf '%s\n' "$repo"
-            ;;
-    esac
-}
-
 # Clone/update each layer into the stable plugin cache.
 clone_layers() {
     [[ ! -f "$LAYERS_FILE" ]] && return
-    local n; n="$(yq -r '.layers | length' "$LAYERS_FILE")"
-    if [[ "$n" -eq 0 ]]; then
-        warn "No layers to fetch."
-        return
+    if [[ ! -x "$LAYER_SYNC_SCRIPT" ]]; then
+        local repo_raw="https://raw.githubusercontent.com/${ORCH_OWNER}/${ORCH_NAME}/${REPO_BRANCH}"
+        LAYER_SYNC_SCRIPT="$(mktemp)"
+        trap 'rm -f "$LAYER_SYNC_SCRIPT"' RETURN
+        curl -fsSL "$repo_raw/scripts/computer-setup-layers" -o "$LAYER_SYNC_SCRIPT"
+        chmod +x "$LAYER_SYNC_SCRIPT"
     fi
-    mkdir -p "$PLUGIN_CACHE"
 
-    local i name repo dest
-    for ((i = 0; i < n; i++)); do
-        name="$(yq -r ".layers[$i].name" "$LAYERS_FILE")"
-        repo="$(yq -r ".layers[$i].repo" "$LAYERS_FILE")"
-        repo="$(ssh_repo_url "$repo")"
-        dest="$PLUGIN_CACHE/$name"
-        if [[ -d "$dest/.git" ]]; then
-            info "Updating layer '$name'..."
-            git -C "$dest" remote set-url origin "$repo" || warn "Could not set SSH origin for '$name'"
-            git -C "$dest" pull --ff-only || warn "Could not fast-forward '$name' — leaving as-is"
-        else
-            info "Cloning layer '$name' from $repo..."
-            if ! git clone --depth 1 "$repo" "$dest"; then
-                error "Failed to clone layer '$name' from $repo"
-                exit 1
-            fi
-        fi
-        validate_layer "$name" "$dest"
-    done
+    "$LAYER_SYNC_SCRIPT" sync \
+        --manifest "$LAYERS_FILE" \
+        --cache "$PLUGIN_CACHE" \
+        --schema-version "$SCHEMA_VERSION_MAX"
     ok "All layers fetched to ${PLUGIN_CACHE}"
 }
 
@@ -313,16 +263,13 @@ clone_layers() {
 # PHASE 2 — Build preferences
 # ═════════════════════════════════════════════════════════════════════════════
 
-# Merged catalog across all layers → parallel arrays:
-#   ITEM_ID ITEM_DESC ITEM_TYPE ITEM_PKGS ITEM_REQ_VSCODE
+# Merged catalog across all layers as TSV rows:
+#   id desc type packages requires_vscode capability
 # Layers are processed in DESCENDING priority so the highest-priority definition
-# of any given id wins; each id appears once (union, dedup by id).
+# of any given id wins; each id appears once (union, dedup by id). Capability
+# defaults to id and is written to ~/.mac-prefs.yml for optional role gates.
 load_catalog() {
-    ITEM_ID=()
-    ITEM_DESC=()
-    ITEM_TYPE=()
-    ITEM_PKGS=()
-    ITEM_REQ_VSCODE=()
+    MERGED_CATALOG_FILE="$(mktemp)"
 
     if [[ ! -f "$LAYERS_FILE" ]]; then
         warn "No layer manifest — catalog is empty (no optional tools offered)."
@@ -338,22 +285,20 @@ load_catalog() {
             warn "Layer '$name' has an invalid catalog.yml — skipping it."
             continue
         fi
-        while IFS=$'\t' read -r id desc type pkgs req_vscode; do
+        while IFS=$'\t' read -r id desc type pkgs req_vscode capability; do
             [[ -z "$id" ]] && continue
             [[ "$seen" == *" $id "* ]] && continue
             seen="${seen}${id} "
-            ITEM_ID+=("$id")
-            ITEM_DESC+=("$desc")
-            ITEM_TYPE+=("$type")
-            ITEM_PKGS+=("$pkgs")
-            ITEM_REQ_VSCODE+=("$req_vscode")
-        done < <(yq -r '.catalog[]? | [.id, .desc, .type, .packages, (.requires_vscode // false)] | @tsv' "$cat")
+            printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$id" "$desc" "$type" "$pkgs" "$req_vscode" "${capability:-$id}" >> "$MERGED_CATALOG_FILE"
+        done < <(yq -r '.catalog[]? | [.id, .desc, .type, .packages, (.requires_vscode // false), (.capability // .id)] | @tsv' "$cat")
     done
 
-    if [[ ${#ITEM_ID[@]} -eq 0 ]]; then
+    local count
+    count="$(wc -l < "$MERGED_CATALOG_FILE" | tr -d ' ')"
+    if [[ "$count" -eq 0 ]]; then
         warn "Merged catalog is empty — no optional tools to offer."
     else
-        ok "Merged catalog: ${#ITEM_ID[@]} optional item(s) across layers"
+        ok "Merged catalog: ${count} optional item(s) across layers"
     fi
 }
 
@@ -382,11 +327,8 @@ load_prior_prefs() {
     prior_casks=$(yq -r '.prefs.optional_casks[]?' "$PREFS_FILE" 2>/dev/null || true)
     prior_vscode=$(yq -r '.prefs.optional_vscode_extensions[]?' "$PREFS_FILE" 2>/dev/null || true)
 
-    local i id type pkgs source_list pkg
-    for ((i=0; i<${#ITEM_ID[@]}; i++)); do
-        id="${ITEM_ID[$i]}"
-        type="${ITEM_TYPE[$i]}"
-        pkgs="${ITEM_PKGS[$i]}"
+    local id desc type pkgs requires_vscode capability source_list pkg
+    while IFS=$'\t' read -r id desc type pkgs requires_vscode capability; do
         case "$type" in
             formula) source_list="$prior_formulae" ;;
             cask)    source_list="$prior_casks" ;;
@@ -399,7 +341,7 @@ load_prior_prefs() {
                 break
             fi
         done
-    done
+    done < "$MERGED_CATALOG_FILE"
 }
 
 # ─── Git identity ────────────────────────────────────────────────────────────
@@ -428,7 +370,7 @@ gather_git_identity() {
 # ─── Optional tool selection ─────────────────────────────────────────────────
 gather_optional_tools() {
     echo
-    if [[ ${#ITEM_ID[@]} -eq 0 ]]; then
+    if [[ ! -s "$MERGED_CATALOG_FILE" ]]; then
         return
     fi
     if $HAS_PRIOR_PREFS; then
@@ -442,19 +384,15 @@ gather_optional_tools() {
     SELECTED_FORMULAE=()
     SELECTED_CASKS=()
     SELECTED_VSCODE=()
+    SELECTED_CAPABILITIES=()
 
     local vscode_available=false
     if command -v code &>/dev/null; then
         vscode_available=true
     fi
 
-    local i id desc type pkgs requires_vscode default pkg
-    for ((i=0; i<${#ITEM_ID[@]}; i++)); do
-        id="${ITEM_ID[$i]}"
-        desc="${ITEM_DESC[$i]}"
-        type="${ITEM_TYPE[$i]}"
-        pkgs="${ITEM_PKGS[$i]}"
-        requires_vscode="${ITEM_REQ_VSCODE[$i]}"
+    local id desc type pkgs requires_vscode capability default pkg
+    while IFS=$'\t' read -r id desc type pkgs requires_vscode capability; do
 
         if [[ "$requires_vscode" == "true" && "$vscode_available" != true ]]; then
             continue
@@ -463,6 +401,7 @@ gather_optional_tools() {
         if is_prior_selected "$id"; then default="y"; else default="n"; fi
 
         if ask_yn "  Install ${desc}?" "$default"; then
+            SELECTED_CAPABILITIES+=("${capability:-$id}")
             case "$type" in
                 formula)
                     for pkg in $pkgs; do SELECTED_FORMULAE+=("$pkg"); done
@@ -476,7 +415,7 @@ gather_optional_tools() {
                     ;;
             esac
         fi
-    done
+    done < "$MERGED_CATALOG_FILE"
 }
 
 # ─── Feature toggles (not tied to a package) ─────────────────────────────────
@@ -520,6 +459,7 @@ write_prefs() {
         yaml_list optional_formulae "${SELECTED_FORMULAE[@]+"${SELECTED_FORMULAE[@]}"}"
         yaml_list optional_casks "${SELECTED_CASKS[@]+"${SELECTED_CASKS[@]}"}"
         yaml_list optional_vscode_extensions "${SELECTED_VSCODE[@]+"${SELECTED_VSCODE[@]}"}"
+        yaml_list capabilities "${SELECTED_CAPABILITIES[@]+"${SELECTED_CAPABILITIES[@]}"}"
     } > "$PREFS_FILE"
 
     chmod 600 "$PREFS_FILE"

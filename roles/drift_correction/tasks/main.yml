@@ -18,6 +18,12 @@
     state: directory
     mode: "0755"
 
+- name: Deploy layer sync helper
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/scripts/computer-setup-layers"
+    dest: "{{ drift_correction_wrapper_dir }}/computer-setup-layers"
+    mode: "0755"
+
 - name: Deploy drift-check wrapper script
   ansible.builtin.template:
     src: drift-check.sh.j2
