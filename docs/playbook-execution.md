@@ -33,7 +33,8 @@ handles user-made changes.
 1. Install all mandatory + optional formulae (`brew update` first if
    `homebrew_update` is true). Tap-qualified names (e.g.
    `user/tap/formula`) are handled automatically by Homebrew.
-2. Install all mandatory + optional casks.
+2. Partition casks into the `homebrew_adopt_casks` allow-list (installed with
+   `--adopt`) and everything else (fresh install), then install both sets.
 
 #### git -- Configure git
 
@@ -51,46 +52,61 @@ handles user-made changes.
 7. Create `~/.zsh/` and deploy the engine-owned CLI snippet
    (`50-computer-setup-cli.zsh` — the `drift-*`/`repos-*` commands).
 8. Deploy every layer's `files/shell/*.zsh` into `~/.zsh/` (prefixed with the
-   layer priority + name), and remove managed snippets no layer provides.
+   layer priority + name), and remove managed snippets no layer provides. A
+   snippet may declare `# cs:requires-capability: <name>` to be deployed only
+   when that capability is active; the engine parses the directive generically
+   (it never hardcodes snippet filenames).
 9. Deploy the layer-provided `~/.zshrc` and `~/.p10k.zsh` (resolved across
-   layers, highest priority wins). The orchestrator ships none of its own.
+   layers, highest priority wins) via the `deploy_layer_file` primitive. The
+   orchestrator ships none of its own.
 10. Remove legacy `~/.oh-my-zsh`.
 
-#### vscode -- VS Code extensions
+#### vscode -- VS Code extensions & settings
 
-15. Detect VS Code via app bundle stat.
-16. List installed extensions, install any missing mandatory + optional ones.
+11. Detect VS Code via app bundle stat. Runs unconditionally and self-gates on
+    this stat (rather than a pre-resolved capability flag) because it executes
+    the `code` binary, which may be installed by the homebrew role in this same
+    run.
+12. List installed extensions, install any missing mandatory + optional ones.
+13. Deploy layer-provided `vscode/settings.json` (via `deploy_layer_file`).
 
-#### dbt -- Analytics config (conditional)
+#### layer_configs -- Data-driven config deployment
 
-16b. Only runs when `has_dbt` is true. Creates `~/.dbt/` and renders a
-     `profiles.yml.j2` resolved from a content layer (`dbt_cloud.yml` is left
-     unmanaged). Skipped if no layer supplies a profiles template.
+14. For each enabled entry, resolve a layer file/template and deploy it via the
+    `deploy_layer_file` primitive (highest-priority layer wins; no-op when no
+    layer provides it). Built-in entries and their gates:
+    - `zed/settings.json` -> `~/.config/zed/settings.json` (when `has_zed`).
+    - `opencode.json` -> `~/.config/opencode/opencode.json` (when `has_opencode`;
+      the GitHub MCP token is injected at runtime via an env var, never stored).
+    - `profiles.yml.j2` -> `~/.dbt/profiles.yml` (template, when `has_dbt`;
+      `dbt_cloud.yml` is left unmanaged).
+
+    Content layers can append entries; adding a managed config needs no new role.
 
 #### macos -- System preferences
 
-17. Apply the `macos_defaults` declared by content layers via `osx_defaults`.
-18. If Rectangle.app exists, apply `macos_rectangle_defaults`.
-19. If any Dock/Finder defaults changed, handler kills Dock and Finder to
+15. Apply the `macos_defaults` declared by content layers via `osx_defaults`.
+16. If Rectangle.app exists, apply `macos_rectangle_defaults`.
+17. If any Dock/Finder defaults changed, handler kills Dock and Finder to
     apply.
-19b. Deploy `~/.local/bin/macos-capture` — a read-only helper that diffs this
-     machine's live defaults against the declared values and emits paste-ready
-     YAML (the reverse of enforcement; see the README).
+18. Deploy `~/.local/bin/macos-capture` — a read-only helper that diffs this
+    machine's live defaults against the declared values and emits paste-ready
+    YAML (the reverse of enforcement; see the README).
 
 #### runtimes -- Language toolchains
 
-20. If NVM is installed and the default alias doesn't match the declared
+19. If NVM is installed and the default alias doesn't match the declared
     version, install + alias it.
-21. If tfenv is installed and the active Terraform version differs from the
+20. If tfenv is installed and the active Terraform version differs from the
     declared version, install + use it.
 
 #### repositories -- Project catalog (opt-in, `never` tag)
 
-21b. Skipped on normal runs (bootstrap and the daily drift check). Runs only
-     via `--tags repositories` / the `repos-resurrect` helper. Loads
-     `~/.repositories.yml` and clones any missing repos (non-destructive:
-     existing checkouts are never touched), running each entry's `post_clone`
-     hooks once on first clone.
+21. Skipped on normal runs (bootstrap and the daily drift check). Runs only
+    via `--tags repositories` / the `repos-resurrect` helper. Loads
+    `~/.repositories.yml` and clones any missing repos (non-destructive:
+    existing checkouts are never touched), running each entry's `post_clone`
+    hooks once on first clone.
 
 #### drift_correction -- Daily sync monitoring
 

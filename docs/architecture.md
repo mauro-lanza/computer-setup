@@ -59,14 +59,21 @@ The top-level playbook delegates setup work to the `computer_setup` role:
 | `roles/computer_setup/tasks/main.yml` | Platform check, prefs loading, layer var merge, search path setup, capability flags. |
 | `roles/computer_setup/tasks/resolve_layer_file.yml` | Resolve one static file from active layers by priority. |
 | `roles/computer_setup/tasks/resolve_layer_template.yml` | Resolve one template from active layers by priority. |
+| `roles/computer_setup/tasks/deploy_layer_file.yml` | Resolve **and** deploy one layer file/template to a destination (creates the parent dir, copies or templates, no-op when unprovided). The primitive behind editor/tool configs, the prompt, dbt profiles, and `~/.zshrc`. |
 | `scripts/computer-setup-layers` | Sync layer repos into the plugin cache for bootstrap and drift. |
 
 Catalog entries can declare `capability`; when omitted, the capability defaults
 to the catalog `id`. Selected capabilities are written to `prefs.capabilities` so
-roles can gate optional integrations without hardcoding package names.
+roles can gate optional integrations without hardcoding package names. The
+`layer_configs` role deploys data-driven file/template configs gated by these
+capabilities, and a layer shell snippet can gate itself with a
+`# cs:requires-capability: <name>` directive that the engine parses generically.
 
 Machine-local keys (`prefs`, `git_user_name`, `git_user_email`, `use_dbt`) are
-reserved for `computer_setup_prefs_file` and are rejected from layer `vars.yml`.
+reserved for `computer_setup_prefs_file` and are rejected from layer `vars.yml`,
+as are engine-owned play vars (`home_dir`, `repo_url`, `repo_branch`,
+`homebrew_prefix`, `vscode_code_binary`, `repositories_base_dir`) and the whole
+`computer_setup_*` namespace — a layer cannot override the orchestrator itself.
 The layer sync helper validates manifest entries before use: layer names must be
 unique, required fields must be present, priorities must be numeric, and
 `plugin.yml.name` must match the manifest name.

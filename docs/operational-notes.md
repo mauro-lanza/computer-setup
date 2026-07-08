@@ -61,11 +61,13 @@ subsequent runs see them as present and skip the privileged step.
 
 ## PATH priority: managed vs. manual tools
 
-`shell/templates/path.zsh.j2` prepends `shell_extra_paths` in order, so
-`~/.local/bin` ends up **highest priority** — above `/opt/homebrew/bin`.
-Consequence: a manually-installed binary in `~/.local/bin` (e.g. a curl'd
-`duckdb`) will **shadow** the Homebrew-managed one. After adding such a tool
-to the catalog, remove the manual copy so the brew version wins:
+The public layer's `files/shell/10-path.zsh` prepends `/opt/homebrew/bin`,
+`/opt/homebrew/sbin`, and `~/.local/bin` (each prepended in turn, so `~/.local/bin`
+ends up **highest priority** — above `/opt/homebrew/bin`). PATH is layer content,
+not an orchestrator template. Consequence: a manually-installed binary in
+`~/.local/bin` (e.g. a curl'd `duckdb`) will **shadow** the Homebrew-managed one.
+After adding such a tool to the catalog, remove the manual copy so the brew
+version wins:
 
 ```bash
 rm -f ~/.local/bin/duckdb
