@@ -30,28 +30,12 @@
   register: vscode_ext_install
   changed_when: "'already installed' not in (vscode_ext_install.stdout | default(''))"
 
-- name: Ensure VS Code user config directory exists
-  ansible.builtin.file:
-    path: "{{ vscode_user_config_dir }}"
-    state: directory
-    mode: "0755"
-  when: vscode_stat.stat.exists
-
-- name: Resolve VS Code user settings
+- name: Deploy VS Code user settings from layers
   ansible.builtin.include_role:
     name: computer_setup
-    tasks_from: resolve_layer_file
+    tasks_from: deploy_layer_file
   vars:
     computer_setup_lookup_key: vscode/settings.json
-    computer_setup_lookup_result_var: vscode_settings_src
+    computer_setup_deploy_dest: "{{ vscode_user_config_dir }}/settings.json"
     computer_setup_lookup_fallback_dir: "{{ role_path }}/files"
   when: vscode_stat.stat.exists
-
-- name: Deploy VS Code user settings
-  ansible.builtin.copy:
-    src: "{{ vscode_settings_src }}"
-    dest: "{{ vscode_user_config_dir }}/settings.json"
-    mode: "0644"
-  when:
-    - vscode_stat.stat.exists
-    - vscode_settings_src | default('') | length > 0

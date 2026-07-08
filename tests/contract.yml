@@ -33,6 +33,40 @@
         computer_setup_lookup_result_var: contract_template_src
         computer_setup_lookup_fallback_dir: "{{ playbook_dir }}/missing-templates"
 
+    - name: Create a scratch dir for deploy assertions
+      ansible.builtin.tempfile:
+        state: directory
+      register: contract_scratch
+
+    - name: Deploy fixture file via the engine primitive
+      ansible.builtin.include_role:
+        name: computer_setup
+        tasks_from: deploy_layer_file
+      vars:
+        computer_setup_lookup_key: contract.txt
+        computer_setup_deploy_dest: "{{ contract_scratch.path }}/nested/contract.txt"
+        computer_setup_lookup_fallback_dir: "{{ playbook_dir }}/missing-files"
+
+    - name: Deploy fixture template via the engine primitive
+      ansible.builtin.include_role:
+        name: computer_setup
+        tasks_from: deploy_layer_file
+      vars:
+        computer_setup_lookup_key: contract.j2
+        computer_setup_deploy_dest: "{{ contract_scratch.path }}/nested/contract.out"
+        computer_setup_lookup_fallback_dir: "{{ playbook_dir }}/missing-templates"
+        computer_setup_deploy_kind: template
+
+    - name: Read back the deployed file
+      ansible.builtin.slurp:
+        src: "{{ contract_scratch.path }}/nested/contract.txt"
+      register: contract_deployed_file
+
+    - name: Read back the deployed template
+      ansible.builtin.slurp:
+        src: "{{ contract_scratch.path }}/nested/contract.out"
+      register: contract_deployed_template
+
     - name: Assert layer merge and resolution contract
       ansible.builtin.assert:
         that:
@@ -47,3 +81,11 @@
           - has_opencode | bool
           - contract_file_src.endswith('/override/files/contract.txt')
           - contract_template_src.endswith('/override/templates/contract.j2')
+          # deploy_layer_file: highest-priority layer wins, parent dir is created
+          - (contract_deployed_file.content | b64decode | trim) == 'override file'
+          - (contract_deployed_template.content | b64decode | trim) == 'override template'
+
+    - name: Clean up scratch dir
+      ansible.builtin.file:
+        path: "{{ contract_scratch.path }}"
+        state: absent

@@ -1,0 +1,56 @@
+---
+# Resolve a single file/template from the active content layers (highest
+# priority wins, role-bundled fallback last) and deploy it to a destination.
+# No-op when no layer provides the key — the engine ships no content of its own.
+#
+# This is the engine primitive behind every "a layer supplies this config file"
+# role (editor settings, prompt, dbt profiles, ~/.zshrc, …). It composes the
+# resolve step (see resolve_layer_file/template) with the deploy step so a
+# consuming role is a single include with a handful of vars.
+#
+# Inputs:
+#   computer_setup_lookup_key           key resolved across layer search dirs
+#   computer_setup_deploy_dest          destination path (parent dir is created)
+#   computer_setup_lookup_fallback_dir  role-bundled fallback directory
+#   computer_setup_deploy_kind          'file' (copy) | 'template' (default 'file')
+#   computer_setup_deploy_mode          file mode (default '0644')
+#   computer_setup_deploy_notify        handler name(s) to notify (default none)
+
+- name: "Resolve layer {{ computer_setup_deploy_kind | default('file') }}: {{ computer_setup_lookup_key }}"
+  ansible.builtin.set_fact:
+    _cs_deploy_src: "{{ lookup('ansible.builtin.first_found', _params, errors='ignore') }}"
+  vars:
+    _search_dirs: >-
+      {{ (computer_setup_template_search_dirs
+          if (computer_setup_deploy_kind | default('file')) == 'template'
+          else computer_setup_file_search_dirs) | default([]) }}
+    _params:
+      files: ["{{ computer_setup_lookup_key }}"]
+      paths: "{{ _search_dirs + [computer_setup_lookup_fallback_dir] }}"
+
+- name: "Ensure parent directory exists: {{ computer_setup_deploy_dest | dirname }}"
+  ansible.builtin.file:
+    path: "{{ computer_setup_deploy_dest | dirname }}"
+    state: directory
+    mode: "0755"
+  when: _cs_deploy_src | default('') | length > 0
+
+- name: "Deploy layer template: {{ computer_setup_deploy_dest | basename }}"
+  ansible.builtin.template:
+    src: "{{ _cs_deploy_src }}"
+    dest: "{{ computer_setup_deploy_dest }}"
+    mode: "{{ computer_setup_deploy_mode | default('0644') }}"
+  when:
+    - (computer_setup_deploy_kind | default('file')) == 'template'
+    - _cs_deploy_src | default('') | length > 0
+  notify: "{{ computer_setup_deploy_notify | default([]) }}"
+
+- name: "Deploy layer file: {{ computer_setup_deploy_dest | basename }}"
+  ansible.builtin.copy:
+    src: "{{ _cs_deploy_src }}"
+    dest: "{{ computer_setup_deploy_dest }}"
+    mode: "{{ computer_setup_deploy_mode | default('0644') }}"
+  when:
+    - (computer_setup_deploy_kind | default('file')) != 'template'
+    - _cs_deploy_src | default('') | length > 0
+  notify: "{{ computer_setup_deploy_notify | default([]) }}"

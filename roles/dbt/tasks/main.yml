@@ -1,22 +1,10 @@
 ---
-- name: Ensure ~/.dbt directory exists
-  ansible.builtin.file:
-    path: "{{ dbt_config_dir }}"
-    state: directory
-    mode: "0755"
-
-- name: Resolve dbt profiles template from layers
+- name: Deploy dbt profiles.yml from layers
   ansible.builtin.include_role:
     name: computer_setup
-    tasks_from: resolve_layer_template
+    tasks_from: deploy_layer_file
   vars:
     computer_setup_lookup_key: profiles.yml.j2
-    computer_setup_lookup_result_var: dbt_profiles_src
+    computer_setup_deploy_dest: "{{ dbt_config_dir }}/profiles.yml"
     computer_setup_lookup_fallback_dir: "{{ role_path }}/templates"
-
-- name: Deploy dbt profiles.yml
-  ansible.builtin.template:
-    src: "{{ dbt_profiles_src }}"
-    dest: "{{ dbt_config_dir }}/profiles.yml"
-    mode: "0644"
-  when: dbt_profiles_src | default('') | length > 0
+    computer_setup_deploy_kind: template
