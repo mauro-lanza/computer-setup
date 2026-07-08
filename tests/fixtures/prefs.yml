@@ -9,6 +9,7 @@ prefs:
     - anomalyco/tap/opencode
   optional_casks:
     - zed
+    - visual-studio-code
   optional_vscode_extensions: []
   capabilities:
     - custom-base

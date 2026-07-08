@@ -107,6 +107,11 @@
     path: "{{ home_dir }}/.dbt/profiles.yml"
   register: dbt_profiles_stat
 
+- name: Check if VS Code is already installed
+  ansible.builtin.stat:
+    path: "{{ vscode_code_binary }}"
+  register: vscode_binary_stat
+
 - name: Resolve preferences and capability flags
   ansible.builtin.set_fact:
     homebrew_optional_formulae: "{{ _prefs.get('optional_formulae', []) }}"
@@ -118,6 +123,14 @@
     has_dbt: "{{ (use_dbt | default(false) | bool) or dbt_profiles_stat.stat.exists }}"
     has_zed: "{{ 'zed' in _capabilities or 'zed' in _prefs.get('optional_casks', []) }}"
     has_opencode: "{{ 'opencode' in _capabilities or 'anomalyco/tap/opencode' in _prefs.get('optional_formulae', []) }}"
+    # Selected OR already present. Selection covers a same-run install (homebrew
+    # runs before the vscode role); presence keeps an already-installed VS Code
+    # managed. The role still stats the binary before executing `code`.
+    has_vscode: >-
+      {{ 'vscode' in _capabilities
+         or 'visual-studio-code' in _prefs.get('optional_casks', [])
+         or 'visual-studio-code' in (homebrew_mandatory_casks | default([]))
+         or vscode_binary_stat.stat.exists }}
   vars:
     _prefs: "{{ prefs | default({}) }}"
     _capabilities: "{{ _prefs.get('capabilities', []) }}"

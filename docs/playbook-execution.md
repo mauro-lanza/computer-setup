@@ -21,10 +21,12 @@ handles user-made changes.
 5. **Detect installed/configured tools** -- Checks for existing gcloud SDK and
    dbt config to preserve management of already-configured machines.
 6. **Resolve capability flags** -- Derives `has_nvm`, `has_gcloud`, `has_dbt`,
-   `has_zed`, and `has_opencode` from `prefs.capabilities` with fallbacks for
-   older prefs that only stored package selections. These gate conditional roles
-   and post-task reminders. `has_dbt` is `use_dbt` **or** an already-present
-   `~/.dbt/profiles.yml`.
+   `has_zed`, `has_opencode`, and `has_vscode` from `prefs.capabilities` with
+   fallbacks for older prefs that only stored package selections. These gate
+   conditional roles and post-task reminders. Several are "selected **or** already
+   present": `has_dbt` is `use_dbt` or an existing `~/.dbt/profiles.yml`;
+   `has_gcloud` includes an existing SDK dir; `has_vscode` includes an existing
+   `code` binary (so an already-installed VS Code stays managed).
 
 ### Phase 2: Roles (in order)
 
@@ -63,10 +65,11 @@ handles user-made changes.
 
 #### vscode -- VS Code extensions & settings
 
-11. Detect VS Code via app bundle stat. Runs unconditionally and self-gates on
-    this stat (rather than a pre-resolved capability flag) because it executes
-    the `code` binary, which may be installed by the homebrew role in this same
-    run.
+11. Gated on `has_vscode` (VS Code selected **or** already present) so all VS
+    Code concerns stay together and consistent with the other optional tools.
+    The role then stats the `code` binary as an execution guard — selection
+    covers a same-run install (homebrew runs first), and the stat prevents
+    running `code` if the install did not actually land.
 12. List installed extensions, install any missing mandatory + optional ones.
 13. Deploy layer-provided `vscode/settings.json` (via `deploy_layer_file`).
 

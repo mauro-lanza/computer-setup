@@ -46,11 +46,12 @@
     - { role: homebrew, tags: [homebrew] }
     - { role: git, tags: [git] }
     - { role: shell, tags: [shell] }
-    # vscode runs unconditionally and self-gates on a role-time stat: it
-    # executes the `code` binary to install extensions (which may be installed
-    # by the homebrew role in this same run), so it can't gate on a capability
-    # flag resolved in pre_tasks. Pure file/template configs go in layer_configs.
-    - { role: vscode, tags: [vscode] }
+    # vscode owns all VS Code concerns together (extensions + settings) and is
+    # gated on has_vscode (selected OR already present), consistent with the
+    # other optional tools. Selection covers a same-run install (homebrew runs
+    # first); the role still stats the `code` binary before executing it, since
+    # extension installs need the binary to actually be there.
+    - { role: vscode, tags: [vscode], when: has_vscode | default(false) | bool }
     - { role: layer_configs, tags: [layer_configs, zed, opencode, dbt] }
     - { role: macos, tags: [macos] }
     - { role: runtimes, tags: [runtimes] }
