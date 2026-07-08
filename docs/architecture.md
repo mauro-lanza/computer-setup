@@ -19,7 +19,7 @@ Each layer is a git repo with this structure:
 
 ```text
 plugin.yml     # required manifest: name, schema_version, priority, provides
-catalog.yml    # optional bootstrap menu items
+catalog.yml    # optional bootstrap menu items and capability gates
 vars.yml       # optional role variable values
 files/         # optional static files resolved by roles
 templates/     # optional templates resolved by roles
@@ -49,6 +49,21 @@ merged last.
 4. Catalogs are merged and `~/.mac-prefs.yml` is written.
 5. `ansible-pull` applies the orchestrator with the layer manifest/cache paths.
 6. Drift correction refreshes the orchestrator and layer cache before check-mode.
+
+## Orchestrator Primitives
+
+The top-level playbook delegates setup work to the `computer_setup` role:
+
+| Primitive | Purpose |
+|---|---|
+| `roles/computer_setup/tasks/main.yml` | Platform check, prefs loading, layer var merge, search path setup, capability flags. |
+| `roles/computer_setup/tasks/resolve_layer_file.yml` | Resolve one static file from active layers by priority. |
+| `roles/computer_setup/tasks/resolve_layer_template.yml` | Resolve one template from active layers by priority. |
+| `scripts/computer-setup-layers` | Sync layer repos into the plugin cache for bootstrap and drift. |
+
+Catalog entries can declare `capability`; when omitted, the capability defaults
+to the catalog `id`. Selected capabilities are written to `prefs.capabilities` so
+roles can gate optional integrations without hardcoding package names.
 
 ## Managed State
 

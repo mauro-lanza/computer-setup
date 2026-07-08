@@ -1,0 +1,48 @@
+---
+- name: Validate layer contract
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  vars:
+    home_dir: "{{ ansible_facts['env']['HOME'] }}"
+    computer_setup_plugin_cache: "{{ playbook_dir }}/fixtures/plugins"
+    computer_setup_layers_manifest: "{{ playbook_dir }}/fixtures/layers.yml"
+    computer_setup_schema_version: 1
+  pre_tasks:
+    - name: Initialize computer-setup orchestration
+      ansible.builtin.import_role:
+        name: computer_setup
+      tags: [always]
+  tasks:
+    - name: Resolve fixture file
+      ansible.builtin.include_role:
+        name: computer_setup
+        tasks_from: resolve_layer_file
+      vars:
+        computer_setup_lookup_key: contract.txt
+        computer_setup_lookup_result_var: contract_file_src
+        computer_setup_lookup_fallback_dir: "{{ playbook_dir }}/missing-files"
+
+    - name: Resolve fixture template
+      ansible.builtin.include_role:
+        name: computer_setup
+        tasks_from: resolve_layer_template
+      vars:
+        computer_setup_lookup_key: contract.j2
+        computer_setup_lookup_result_var: contract_template_src
+        computer_setup_lookup_fallback_dir: "{{ playbook_dir }}/missing-templates"
+
+    - name: Assert layer merge and resolution contract
+      ansible.builtin.assert:
+        that:
+          - computer_setup_active_layers | map(attribute='name') | list == ['base', 'override']
+          - contract_list == ['base', 'override']
+          - contract_scalar == 'override'
+          - homebrew_optional_formulae == ['nvm', 'anomalyco/tap/opencode']
+          - homebrew_optional_casks == ['zed']
+          - computer_setup_capabilities == ['custom-base', 'custom-override']
+          - has_nvm | bool
+          - has_zed | bool
+          - has_opencode | bool
+          - contract_file_src.endswith('/override/files/contract.txt')
+          - contract_template_src.endswith('/override/templates/contract.j2')

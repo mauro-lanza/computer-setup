@@ -1,0 +1,11 @@
+---
+contract_list:
+  - base
+contract_scalar: base
+prefs:
+  optional_formulae:
+    - nvm
+  optional_casks: []
+  optional_vscode_extensions: []
+  capabilities:
+    - custom-base

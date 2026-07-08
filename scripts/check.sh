@@ -5,9 +5,11 @@ cd "$(dirname "$0")/.."
 
 echo "==> Bash syntax"
 bash -n bootstrap.sh
+bash -n scripts/computer-setup-layers
 
 echo "==> Ansible syntax"
 ansible-playbook --syntax-check local.yml
+ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook --syntax-check tests/contract.yml
 
 echo "==> Inventory"
 ansible-inventory --list >/dev/null
@@ -23,5 +25,8 @@ ansible-playbook --list-tasks --tags repositories local.yml >/dev/null
 
 echo "==> Upgrade task graph"
 ansible-playbook --list-tasks --tags upgrade local.yml >/dev/null
+
+echo "==> Layer contract"
+ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook tests/contract.yml >/dev/null
 
 echo "Checks passed"

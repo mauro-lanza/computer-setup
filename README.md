@@ -75,9 +75,10 @@ Copy [examples/example-layer/](examples/example-layer) into a new git repo:
 ```
 your-layer/
   plugin.yml     # manifest (required): name, schema_version, priority, provides
-  catalog.yml    # optional selectable menu items (union-merged)
+  catalog.yml    # optional selectable menu items and capability gates
   vars.yml       # optional variable values (the role interface)
   files/         # optional static files roles resolve by key
+  templates/     # optional templates roles resolve by key
 ```
 
 Then add it during `bootstrap.sh` Phase 1, or edit

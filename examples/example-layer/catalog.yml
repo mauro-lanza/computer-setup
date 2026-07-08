@@ -7,6 +7,7 @@
 #   type:             formula | cask | vscode
 #   packages:         space-separated brew formulae / casks / extension IDs
 #   requires_vscode:  (optional bool) only prompt when VS Code is available
+#   capability:       (optional) role gate written to prefs; defaults to id
 
 catalog:
   - id: htop

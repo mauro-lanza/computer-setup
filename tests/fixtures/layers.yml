@@ -1,0 +1,10 @@
+---
+layers:
+  - name: base
+    repo: git@github.com:example/base.git
+    priority: 10
+    private: false
+  - name: override
+    repo: git@github.com:example/override.git
+    priority: 20
+    private: true

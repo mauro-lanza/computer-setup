@@ -31,8 +31,7 @@ Run the checks locally:
 ansible-lint
 ```
 
-If you touch the merge logic, exercise it against a staged plugin cache (a
-temp dir with a couple of layers) and confirm:
+If you touch the merge logic, extend or run `tests/contract.yml` and confirm:
 
 - list vars (`repositories`, `homebrew_mandatory_formulae`, …) **append** across
   layers, and

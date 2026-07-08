@@ -1,0 +1,12 @@
+---
+contract_list:
+  - override
+contract_scalar: override
+prefs:
+  optional_formulae:
+    - anomalyco/tap/opencode
+  optional_casks:
+    - zed
+  optional_vscode_extensions: []
+  capabilities:
+    - custom-override
