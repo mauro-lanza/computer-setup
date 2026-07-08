@@ -46,9 +46,12 @@
     - { role: homebrew, tags: [homebrew] }
     - { role: git, tags: [git] }
     - { role: shell, tags: [shell] }
+    # vscode runs unconditionally and self-gates on a role-time stat: it
+    # executes the `code` binary to install extensions (which may be installed
+    # by the homebrew role in this same run), so it can't gate on a capability
+    # flag resolved in pre_tasks. Pure file/template configs go in layer_configs.
     - { role: vscode, tags: [vscode] }
-    - { role: editor_configs, tags: [editor_configs, zed, opencode] }
-    - { role: dbt, tags: [dbt], when: has_dbt | default(false) | bool }
+    - { role: layer_configs, tags: [layer_configs, zed, opencode, dbt] }
     - { role: macos, tags: [macos] }
     - { role: runtimes, tags: [runtimes] }
     # Opt-in repository catalog — clones your projects from ~/.repositories.yml.

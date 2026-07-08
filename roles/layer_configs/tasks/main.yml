@@ -1,7 +1,7 @@
 ---
-# Deploy each enabled managed editor/tool config via the deploy_layer_file
-# engine primitive. See defaults/main.yml for the `editor_configs` schema.
-- name: Deploy managed editor/tool configs
+# Deploy each enabled managed config via the deploy_layer_file engine primitive.
+# See defaults/main.yml for the `layer_configs` schema.
+- name: Deploy managed layer configs
   ansible.builtin.include_role:
     name: computer_setup
     tasks_from: deploy_layer_file
@@ -10,7 +10,7 @@
     computer_setup_deploy_dest: "{{ item.dest }}"
     computer_setup_deploy_kind: "{{ item.kind | default('file') }}"
     computer_setup_lookup_fallback_dir: "{{ item.fallback_dir | default(role_path ~ '/files') }}"
-  loop: "{{ editor_configs }}"
+  loop: "{{ layer_configs }}"
   loop_control:
     label: "{{ item.name }} ({{ 'enabled' if (item.enabled | default(true) | bool) else 'skipped' }})"
   when: item.enabled | default(true) | bool

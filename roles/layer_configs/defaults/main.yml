@@ -1,0 +1,39 @@
+---
+# Data-driven "resolve a layer file/template, deploy it to a dest, gated by a
+# capability" configs. One declarative list replaces one-role-per-tool: every
+# entry is deployed through the deploy_layer_file engine primitive (highest-
+# priority layer wins; no-op when no active layer provides the file).
+#
+# Adding a managed config is one list entry (here or appended by a content
+# layer) plus, for optional tools, a catalog item — no new role, no playbook
+# edit. Note: roles that must *execute* an app binary (e.g. vscode installing
+# extensions, possibly installed in the same run) intentionally stay their own
+# role and stat at role time; this role is for pure file/template deployment.
+#
+# Entry schema:
+#   name:         label for loop output (and default fallback subdir)
+#   enabled:      bool gate (typically a `has_*` capability flag)
+#   key:          file/template key resolved across layers' files/ or templates/
+#   dest:         destination path (parent dir is created by the primitive)
+#   kind:         'file' (copy, default) | 'template'
+#   fallback_dir: optional role-bundled fallback (default: this role's files/)
+layer_configs:
+  - name: zed
+    enabled: "{{ has_zed | default(false) | bool }}"
+    key: zed/settings.json
+    dest: "{{ home_dir }}/.config/zed/settings.json"
+  - name: opencode
+    # The GitHub MCP token is injected at runtime via the
+    # OC_GITHUB_PERSONAL_ACCESS_TOKEN env var ({env:...} in the config) —
+    # no secret is stored in the repo.
+    enabled: "{{ has_opencode | default(false) | bool }}"
+    key: opencode.json
+    dest: "{{ home_dir }}/.config/opencode/opencode.json"
+  - name: dbt
+    # Profile content (BigQuery project/schema/threads, other targets) is the
+    # layer's concern; the orchestrator only renders whatever profiles.yml.j2 a
+    # layer supplies. ~/.dbt/dbt_cloud.yml is left unmanaged.
+    enabled: "{{ has_dbt | default(false) | bool }}"
+    key: profiles.yml.j2
+    dest: "{{ home_dir }}/.dbt/profiles.yml"
+    kind: template
