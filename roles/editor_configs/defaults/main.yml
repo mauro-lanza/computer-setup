@@ -1,0 +1,29 @@
+---
+# Data-driven editor/tool config deployment.
+#
+# Each entry names a capability gate, the layer file `key` to resolve, and the
+# `dest` to deploy it to. Enabled entries are deployed through the
+# deploy_layer_file engine primitive (highest-priority layer wins; no-op when no
+# active layer provides the file). This replaces one-role-per-editor: adding a
+# new editor is a single list entry below (or appended by a content layer) plus
+# a catalog item — no new role, no playbook edit.
+#
+# Entry schema:
+#   name:         label for loop output (and default fallback subdir)
+#   enabled:      bool gate (typically a `has_*` capability flag)
+#   key:          file/template key resolved across layers' files/ or templates/
+#   dest:         destination path (parent dir is created by the primitive)
+#   kind:         'file' (copy, default) | 'template'
+#   fallback_dir: optional role-bundled fallback (default: this role's files/)
+editor_configs:
+  - name: zed
+    enabled: "{{ has_zed | default(false) | bool }}"
+    key: zed/settings.json
+    dest: "{{ home_dir }}/.config/zed/settings.json"
+  - name: opencode
+    # The GitHub MCP token is injected at runtime via the
+    # OC_GITHUB_PERSONAL_ACCESS_TOKEN env var ({env:...} in the config) —
+    # no secret is stored in the repo.
+    enabled: "{{ has_opencode | default(false) | bool }}"
+    key: opencode.json
+    dest: "{{ home_dir }}/.config/opencode/opencode.json"

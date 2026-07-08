@@ -47,8 +47,7 @@
     - { role: git, tags: [git] }
     - { role: shell, tags: [shell] }
     - { role: vscode, tags: [vscode] }
-    - { role: zed, tags: [zed], when: has_zed | default(false) | bool }
-    - { role: opencode, tags: [opencode], when: has_opencode | default(false) | bool }
+    - { role: editor_configs, tags: [editor_configs, zed, opencode] }
     - { role: dbt, tags: [dbt], when: has_dbt | default(false) | bool }
     - { role: macos, tags: [macos] }
     - { role: runtimes, tags: [runtimes] }

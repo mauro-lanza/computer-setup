@@ -1,9 +1,0 @@
----
-- name: Deploy Zed settings from layers
-  ansible.builtin.include_role:
-    name: computer_setup
-    tasks_from: deploy_layer_file
-  vars:
-    computer_setup_lookup_key: zed/settings.json
-    computer_setup_deploy_dest: "{{ zed_config_dir }}/settings.json"
-    computer_setup_lookup_fallback_dir: "{{ role_path }}/files"

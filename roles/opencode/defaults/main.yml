@@ -1,2 +1,0 @@
----
-opencode_config_dir: "{{ home_dir }}/.config/opencode"
