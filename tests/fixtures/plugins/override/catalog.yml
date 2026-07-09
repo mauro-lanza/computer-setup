@@ -9,3 +9,5 @@ catalog:
   - id: dbt
     desc: "dbt (BigQuery profile)"
     type: feature
+    config:
+      - { src: profiles.yml.j2, dest: "/tmp/cs-contract/dbt-profiles.yml", kind: template }

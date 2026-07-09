@@ -86,6 +86,14 @@
           - has_opencode | bool
           - has_vscode | bool
           - has_dbt | bool
+          # Config deploys are the config bundles of ACTIVE capabilities, in
+          # capability order (zed at pos 3, dbt at pos 5; vscode has no config —
+          # its settings stay in the vscode role).
+          - computer_setup_config_deploys | length == 2
+          - computer_setup_config_deploys[0].src == 'zed/settings.json'
+          - computer_setup_config_deploys[0].dest == '/tmp/cs-contract/zed-settings.json'
+          - computer_setup_config_deploys[1].src == 'profiles.yml.j2'
+          - computer_setup_config_deploys[1].kind == 'template'
           - contract_file_src.endswith('/override/files/contract.txt')
           - contract_template_src.endswith('/override/templates/contract.j2')
           # deploy_layer_file: highest-priority layer wins, parent dir is created

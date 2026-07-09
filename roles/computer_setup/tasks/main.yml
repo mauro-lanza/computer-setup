@@ -119,12 +119,27 @@
     path: "{{ vscode_code_binary }}"
   register: vscode_binary_stat
 
-- name: Resolve selected capabilities and the derived role interface
+- name: Resolve active capabilities (selected + adoptable-present)
   ansible.builtin.set_fact:
-    # The user's selections are the single selection token. Optional package
-    # lists and capability flags are DERIVED from the merged capability registry
-    # — the engine hardcodes no package names.
+    # The explicit selections (deterministic record).
     computer_setup_capabilities: "{{ _selected }}"
+    # Effective set everything gates on: selections plus tools we can detect and
+    # adopt on an already-configured machine. (Presence paths become data-driven
+    # via a per-capability `adopt_if_present` in a later step.)
+    computer_setup_active_capabilities: >-
+      {{ (_selected
+          + (['dbt'] if dbt_profiles_stat.stat.exists else [])
+          + (['vscode'] if vscode_binary_stat.stat.exists else [])
+          + (['gcloud'] if gcloud_sdk_dir.stat.exists else []))
+         | unique | list }}
+  vars:
+    _selected: "{{ selected_capabilities | default([]) }}"
+
+- name: Derive the role interface from capabilities
+  ansible.builtin.set_fact:
+    # Optional packages come from the SELECTED capabilities (install what you
+    # picked); config deploys come from the ACTIVE set (also manage what's
+    # already present). The engine hardcodes no package names or paths.
     homebrew_optional_formulae: >-
       {{ _selected_entries | selectattr('type', 'eq', 'formula')
          | map(attribute='packages') | map('split') | flatten | list }}
@@ -134,18 +149,22 @@
     vscode_optional_extensions: >-
       {{ _selected_entries | selectattr('type', 'eq', 'vscode')
          | map(attribute='packages') | map('split') | flatten | list }}
-    # Gating is pure capability membership, with an "or already present" fallback
-    # for the tools we can detect and adopt on an already-configured machine.
-    has_nvm: "{{ 'nvm' in _selected }}"
-    has_gcloud: "{{ 'gcloud' in _selected or gcloud_sdk_dir.stat.exists }}"
-    has_dbt: "{{ 'dbt' in _selected or dbt_profiles_stat.stat.exists }}"
-    has_zed: "{{ 'zed' in _selected }}"
-    has_opencode: "{{ 'opencode' in _selected }}"
-    has_vscode: "{{ 'vscode' in _selected or vscode_binary_stat.stat.exists }}"
+    # Flattened list of config deploys ({src, dest, kind?}) from active caps.
+    computer_setup_config_deploys: >-
+      {{ _active_entries | selectattr('config', 'defined')
+         | map(attribute='config') | flatten | list }}
+    has_nvm: "{{ 'nvm' in _active }}"
+    has_gcloud: "{{ 'gcloud' in _active }}"
+    has_dbt: "{{ 'dbt' in _active }}"
+    has_zed: "{{ 'zed' in _active }}"
+    has_opencode: "{{ 'opencode' in _active }}"
+    has_vscode: "{{ 'vscode' in _active }}"
   vars:
     _selected: "{{ selected_capabilities | default([]) }}"
-    # Only selections that exist in the merged registry — a selection whose
-    # providing layer isn't active is silently ignored (never a hard error).
+    _active: "{{ computer_setup_active_capabilities }}"
     _selected_entries: >-
       {{ _selected | select('in', computer_setup_capability_registry)
+         | map('extract', computer_setup_capability_registry) | list }}
+    _active_entries: >-
+      {{ _active | select('in', computer_setup_capability_registry)
          | map('extract', computer_setup_capability_registry) | list }}

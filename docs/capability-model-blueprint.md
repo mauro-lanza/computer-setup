@@ -191,9 +191,13 @@ valid and every capability's needs map to a real manager, and a clear
   are removed. *Done: engine (`merge_layer_catalog.yml`, derived interface),
   `bootstrap.sh` (writes `selected_capabilities` only), fixtures + contract all
   green.*
-- [ ] **2 — Config as capability `config:` bundles.** Retire the engine-default
+- [x] **2 — Config as capability `config:` bundles.** Retire the engine-default
   `layer_configs`; derive the deploy list from selected capabilities' `config`;
-  add `adopt_if_present`.
+  add `adopt_if_present`. *Done: engine derives `computer_setup_active_capabilities`
+  (selected ∪ adoptable-present) and `computer_setup_config_deploys`; the
+  layer_configs role consumes the derived list; config moved into the public
+  (zed/opencode) and work (dbt) catalogs. Per-entry `adopt_if_present` path is
+  deferred to step 3 (currently adoption is via the engine's presence stats).*
 - [ ] **3 — Specific managers gate on capability membership.** runtimes/vscode
   gate on `'<id>' in selected_capabilities`; fix the gcloud presence path;
   implement `adopt_if_present` semantics.

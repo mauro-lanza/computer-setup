@@ -12,3 +12,5 @@ catalog:
     desc: "Zed editor"
     type: cask
     packages: zed
+    config:
+      - { src: zed/settings.json, dest: "/tmp/cs-contract/zed-settings.json" }
