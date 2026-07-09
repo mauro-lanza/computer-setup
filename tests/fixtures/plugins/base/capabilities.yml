@@ -1,5 +1,5 @@
 ---
-catalog:
+capabilities:
   - id: nvm
     desc: "Node Version Manager"
     type: formula

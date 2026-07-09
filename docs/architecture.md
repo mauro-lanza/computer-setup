@@ -19,7 +19,7 @@ Each layer is a git repo with this structure:
 
 ```text
 plugin.yml     # required manifest: name, schema_version, priority, provides
-catalog.yml    # optional bootstrap menu items and capability gates
+capabilities.yml # selectable capability bundles (packages, config, adopt, reminders)
 vars.yml       # optional role variable values
 files/         # optional static files resolved by roles
 templates/     # optional templates resolved by roles
@@ -63,7 +63,7 @@ The top-level playbook delegates setup work to the `computer_setup` role:
 | `scripts/computer-setup-layers` | Sync layer repos into the plugin cache for bootstrap and drift. |
 
 Catalog entries can declare `capability`; when omitted, the capability defaults
-to the catalog `id`. Selected capabilities are written to `prefs.capabilities` so
+to the capability `id`. Selected capabilities are written to `prefs.capabilities` so
 roles can gate optional integrations without hardcoding package names. The
 `layer_configs` role deploys data-driven file/template configs gated by these
 capabilities, and a layer shell snippet can gate itself with a

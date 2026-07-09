@@ -268,8 +268,8 @@ clone_layers() {
 # Layers are processed in DESCENDING priority so the highest-priority definition
 # of any given id wins; each id appears once (union, dedup by id). The `id` is
 # the capability token written to ~/.mac-prefs.yml as a selection.
-load_catalog() {
-    MERGED_CATALOG_FILE="$(mktemp)"
+load_capabilities() {
+    MERGED_CAPABILITIES_FILE="$(mktemp)"
 
     if [[ ! -f "$LAYERS_FILE" ]]; then
         warn "No layer manifest — catalog is empty (no optional tools offered)."
@@ -279,22 +279,22 @@ load_catalog() {
     local seen=" " order name cat
     order="$(yq -r '.layers | sort_by(.priority) | reverse | .[].name' "$LAYERS_FILE" 2>/dev/null || true)"
     for name in $order; do
-        cat="$PLUGIN_CACHE/$name/catalog.yml"
+        cat="$PLUGIN_CACHE/$name/capabilities.yml"
         [[ -f "$cat" ]] || continue
         if ! yq '.' "$cat" >/dev/null 2>&1; then
-            warn "Layer '$name' has an invalid catalog.yml — skipping it."
+            warn "Layer '$name' has an invalid capabilities.yml — skipping it."
             continue
         fi
         while IFS=$'\t' read -r id desc type pkgs req_vscode; do
             [[ -z "$id" ]] && continue
             [[ "$seen" == *" $id "* ]] && continue
             seen="${seen}${id} "
-            printf '%s\t%s\t%s\t%s\t%s\n' "$id" "$desc" "$type" "$pkgs" "$req_vscode" >> "$MERGED_CATALOG_FILE"
-        done < <(yq -r '.catalog[]? | [.id, .desc, .type, (.packages // ""), (.requires_vscode // false)] | @tsv' "$cat")
+            printf '%s\t%s\t%s\t%s\t%s\n' "$id" "$desc" "$type" "$pkgs" "$req_vscode" >> "$MERGED_CAPABILITIES_FILE"
+        done < <(yq -r '.capabilities[]? | [.id, .desc, .type, (.packages // ""), (.requires_vscode // false)] | @tsv' "$cat")
     done
 
     local count
-    count="$(wc -l < "$MERGED_CATALOG_FILE" | tr -d ' ')"
+    count="$(wc -l < "$MERGED_CAPABILITIES_FILE" | tr -d ' ')"
     if [[ "$count" -eq 0 ]]; then
         warn "Merged catalog is empty — no optional tools to offer."
     else
@@ -354,7 +354,7 @@ gather_git_identity() {
 # derived by the engine from the merged capability registry at apply time.
 gather_optional_tools() {
     echo
-    if [[ ! -s "$MERGED_CATALOG_FILE" ]]; then
+    if [[ ! -s "$MERGED_CAPABILITIES_FILE" ]]; then
         return
     fi
     if $HAS_PRIOR_PREFS; then
@@ -386,7 +386,7 @@ gather_optional_tools() {
             # So VS Code extensions offered later this run are prompted too.
             [[ "$id" == "vscode" ]] && vscode_available=true
         fi
-    done < "$MERGED_CATALOG_FILE"
+    done < "$MERGED_CAPABILITIES_FILE"
 }
 
 # ─── Write preferences file ──────────────────────────────────────────────────
@@ -497,7 +497,7 @@ main() {
     clone_layers
 
     # ── Phase 2 ──────────────────────────────────────────────────────────────
-    load_catalog
+    load_capabilities
     load_prior_prefs
     if $HAS_PRIOR_PREFS; then
         ok "Found existing prefs at ${PREFS_FILE} — using prior answers as defaults"

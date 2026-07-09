@@ -1,0 +1,43 @@
+---
+# capabilities.yml — selectable capabilities offered in bootstrap's menu and
+# merged into the engine's capability registry (union by id across layers).
+#
+# The `id` IS the capability token. Schema per item:
+#   id:               stable primary key (never rename; remembers prior answers)
+#   desc:             human-readable label shown in the prompt
+#   type:             formula | cask | vscode | feature   (feature = no package)
+#   packages:         space-separated brew formulae / casks / extension IDs
+#                     installed when selected (omit for `feature`)
+#   requires_vscode:  (optional bool) only prompt when VS Code is available
+#   config:           (optional) files/templates deployed when the capability is
+#                     active (highest-priority layer supplies the file):
+#                       - { src: <files/ key>, dest: <path>, kind: file|template }
+#   adopt_if_present: (optional) a path; when it exists the capability is active
+#                     even if not selected (adopt an existing install)
+#   reminders:        (optional) post-setup message strings shown when active
+
+capabilities:
+  - id: htop
+    desc: "htop (interactive process viewer)"
+    type: formula
+    packages: htop
+
+  - id: vlc
+    desc: "VLC media player"
+    type: cask
+    packages: vlc
+
+  - id: vscode-spell-checker
+    desc: "VS Code: Code Spell Checker"
+    type: vscode
+    packages: streetsidesoftware.code-spell-checker
+    requires_vscode: true
+
+  # A capability with no package: selecting it just deploys a config file.
+  - id: example-tool
+    desc: "Example config-only tool"
+    type: feature
+    adopt_if_present: "{{ home_dir }}/.config/example/config.toml"
+    config:
+      - src: example/config.toml
+        dest: "{{ home_dir }}/.config/example/config.toml"

@@ -20,7 +20,7 @@
 #   verbatim (not templated), so write plain zsh and self-guard on tool presence.
 #
 #   Optional capability gate — add a directive line to a snippet to deploy it
-#   only when a capability is selected (see catalog.yml `capability`):
+#   only when a capability is selected (see capabilities.yml):
 #
 #       # cs:requires-capability: nvm
 #

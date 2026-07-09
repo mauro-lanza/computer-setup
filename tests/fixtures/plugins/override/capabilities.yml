@@ -1,5 +1,5 @@
 ---
-catalog:
+capabilities:
   # Higher-priority layer can override a lower one's entry (same id).
   - id: vscode
     desc: "Visual Studio Code"

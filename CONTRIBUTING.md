@@ -46,7 +46,7 @@ is the public API — see [docs/architecture.md](docs/architecture.md). Bump
 `schema_version` (and the orchestrator's supported max in `local.yml` /
 `bootstrap.sh`) when you make a breaking change to it.
 
-## Adding a role or catalog item
+## Adding a role, manager, or capability
 
 - New roles (managers) go under `roles/` and are added to the `roles:` list in
   `local.yml` with a tag (and a `when:` capability gate if optional). Every role
@@ -57,4 +57,4 @@ is the public API — see [docs/architecture.md](docs/architecture.md). Bump
   tool is just placing a file, it's **data** (a capability `config:` entry), not
   a new role. Only shell out to a tool's CLI when a file can't express it.
 - New optional tools are **catalog items in a layer**, not in the orchestrator.
-  See [examples/example-layer/catalog.yml](examples/example-layer/catalog.yml).
+  See [examples/example-layer/capabilities.yml](examples/example-layer/capabilities.yml).

@@ -51,7 +51,7 @@ cd computer-setup
    `~/.config/computer-setup/layers.yml`), then clone each layer into the plugin
    cache (`~/.local/share/computer-setup/plugins/<name>/`). GitHub layers clone
    over SSH. Each layer's `schema_version` is validated.
-3. **Build preferences** — merge every layer's `catalog.yml` into one menu, prompt
+3. **Build preferences** — merge every layer's `capabilities.yml` into one menu, prompt
    for git identity, optional tools, and feature toggles, then write
    `~/.mac-prefs.yml`.
 4. **Run Ansible** — `ansible-pull` this orchestrator, merging the layer vars and
@@ -75,7 +75,7 @@ Copy [examples/example-layer/](examples/example-layer) into a new git repo:
 ```
 your-layer/
   plugin.yml     # manifest (required): name, schema_version, priority, provides
-  catalog.yml    # optional selectable menu items and capability gates
+  capabilities.yml # selectable capability bundles (menu + config + adopt)
   vars.yml       # optional variable values (the role interface)
   files/         # optional static files roles resolve by key
   templates/     # optional templates roles resolve by key

@@ -1,0 +1,28 @@
+---
+# Merge one content layer's capabilities.yml into the accumulated capability
+# registry (a dict keyed by capability id). Loop var: `_layer`. Layers are
+# processed in ascending priority, so a higher-priority layer's declaration of
+# the same id overwrites (wins over) a lower one — like the scalar-merge for vars.
+#
+# The registry is the single source of truth, read by both bootstrap (to build
+# the selection menu) and the engine (to derive packages/config from the user's
+# selected_capabilities). The engine therefore never hardcodes package names.
+
+- name: "[{{ _layer.name }}] Stat capabilities.yml"
+  ansible.builtin.stat:
+    path: "{{ computer_setup_plugin_cache }}/{{ _layer.name }}/capabilities.yml"
+  register: _layer_capabilities_stat
+
+- name: "[{{ _layer.name }}] Load capabilities.yml"
+  ansible.builtin.include_vars:
+    file: "{{ computer_setup_plugin_cache }}/{{ _layer.name }}/capabilities.yml"
+    name: _incoming_capabilities
+  when: _layer_capabilities_stat.stat.exists
+
+- name: "[{{ _layer.name }}] Merge capability entries into the registry"
+  ansible.builtin.set_fact:
+    computer_setup_capability_registry: >-
+      {{ computer_setup_capability_registry
+         | combine(dict((_incoming_capabilities.capabilities | default([]) | map(attribute='id'))
+                        | zip(_incoming_capabilities.capabilities | default([])))) }}
+  when: _layer_capabilities_stat.stat.exists

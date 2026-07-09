@@ -6,7 +6,7 @@ schema_version: 1
 # higher number wins on scalar conflicts. Lists append across all layers.
 priority: 50
 # Which parts of the contract this layer supplies. Informational.
-provides: [catalog, vars, files]
+provides: [capabilities, vars, files]
 description: >-
   Reference content layer. Copy this directory into a new git repo to create
   your own layer. Delete the parts you don't need — every file except plugin.yml

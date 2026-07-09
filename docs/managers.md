@@ -32,6 +32,6 @@ managers know *how* to apply it. Tiers:
 
 | Manager | Capabilities | Summary |
 |---|---|---|
-| `computer_setup` | — | Orchestration core — platform check, layer var/catalog merge, capability registry, adoption probe, and the derived role interface (packages, config deploys, reminders). Also the deploy_layer_file primitive. |
+| `computer_setup` | — | Orchestration core — platform check, layer var/capability merge, capability registry, adoption probe, and the derived role interface (packages, config deploys, reminders). Also the deploy_layer_file primitive. |
 | `drift_correction` | — | Install the daily drift-check LaunchAgent, wrapper, and layer-sync helper. |
 | `upgrade` | — | Upgrade managed tools to latest — brew, Galaxy collections, Node (opt-in). |

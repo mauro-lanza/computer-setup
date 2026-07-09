@@ -26,7 +26,7 @@
     # ─── Content layers (plugins) ─────────────────────────────────────────────
     # Stable plugin cache (outside this checkout so the drift re-clone can't wipe
     # it). Each layer lives at <cache>/<name>/ with plugin.yml + vars.yml +
-    # catalog.yml + files/. Overridable with -e for testing.
+    # capabilities.yml + files/. Overridable with -e for testing.
     computer_setup_plugin_cache: "{{ home_dir }}/.local/share/computer-setup/plugins"
     # Persisted layer manifest written by bootstrap.sh (Phase 1). Lists the
     # active layers and their merge priority. Absent = orchestrator runs

@@ -3,8 +3,8 @@ manager:
   name: computer_setup
   tier: engine
   summary: >-
-    Orchestration core — platform check, layer var/catalog merge, capability
+    Orchestration core — platform check, layer var/capability merge, capability
     registry, adoption probe, and the derived role interface (packages, config
     deploys, reminders). Also the deploy_layer_file primitive.
   capabilities: []
-  consumes: [selected_capabilities, "layer plugin.yml/vars.yml/catalog.yml"]
+  consumes: [selected_capabilities, "layer plugin.yml/vars.yml/capabilities.yml"]

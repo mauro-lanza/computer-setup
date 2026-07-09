@@ -97,15 +97,15 @@
          | map('regex_replace', '^(.*)$', computer_setup_plugin_cache + '/\1/templates')
          | list }}
 
-- name: Merge each layer's catalog.yml into the capability registry
-  ansible.builtin.include_tasks: merge_layer_catalog.yml
+- name: Merge each layer's capabilities.yml into the capability registry
+  ansible.builtin.include_tasks: merge_layer_capabilities.yml
   loop: "{{ computer_setup_active_layers }}"
   loop_control:
     loop_var: _layer
     label: "{{ _layer.name }}"
 
 - name: Probe for adoptable capabilities already present
-  # A capability may declare `adopt_if_present: <path>` in its catalog entry.
+  # A capability may declare `adopt_if_present: <path>` in its capability entry.
   # When that path exists, the capability is treated as active even if it was
   # not explicitly selected — so an already-configured machine is adopted and
   # kept managed. Fully data-driven: the engine hardcodes no tool paths.
