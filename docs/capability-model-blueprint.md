@@ -198,9 +198,13 @@ valid and every capability's needs map to a real manager, and a clear
   layer_configs role consumes the derived list; config moved into the public
   (zed/opencode) and work (dbt) catalogs. Per-entry `adopt_if_present` path is
   deferred to step 3 (currently adoption is via the engine's presence stats).*
-- [ ] **3 — Specific managers gate on capability membership.** runtimes/vscode
-  gate on `'<id>' in selected_capabilities`; fix the gcloud presence path;
-  implement `adopt_if_present` semantics.
+- [x] **3 — Specific managers gate on capability membership.** runtimes/vscode
+  gate on `'<id>' in computer_setup_active_capabilities`; fix the gcloud presence
+  path; implement `adopt_if_present` semantics. *Done: `has_*` flags removed
+  entirely — everything gates on active-capability membership; adoption is
+  data-driven via a per-capability `adopt_if_present: <path>` probe in the engine
+  (no hardcoded tool paths); gcloud path corrected to the Homebrew location;
+  nvm/tfenv/gcloud/vscode (public) and dbt (work) declare adopt paths.*
 - [ ] **4 — Reminders as capability data**; gcloud/opencode shell snippets adopt
   the `# cs:requires-capability:` directive (consistency with nvm).
 - [ ] **5 — Manager manifests** (`meta/manager.yml`) + generated `docs/managers.md`

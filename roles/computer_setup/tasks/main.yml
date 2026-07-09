@@ -104,36 +104,31 @@
     loop_var: _layer
     label: "{{ _layer.name }}"
 
-- name: Check if gcloud SDK is installed
+- name: Probe for adoptable capabilities already present
+  # A capability may declare `adopt_if_present: <path>` in its catalog entry.
+  # When that path exists, the capability is treated as active even if it was
+  # not explicitly selected — so an already-configured machine is adopted and
+  # kept managed. Fully data-driven: the engine hardcodes no tool paths.
   ansible.builtin.stat:
-    path: "{{ home_dir }}/google-cloud-sdk"
-  register: gcloud_sdk_dir
-
-- name: Check if dbt is already configured on this machine
-  ansible.builtin.stat:
-    path: "{{ home_dir }}/.dbt/profiles.yml"
-  register: dbt_profiles_stat
-
-- name: Check if VS Code is already installed
-  ansible.builtin.stat:
-    path: "{{ vscode_code_binary }}"
-  register: vscode_binary_stat
+    path: "{{ item.value.adopt_if_present }}"
+  loop: >-
+    {{ computer_setup_capability_registry | dict2items
+       | selectattr('value.adopt_if_present', 'defined') | list }}
+  loop_control:
+    label: "{{ item.key }}"
+  register: _adopt_probe
 
 - name: Resolve active capabilities (selected + adoptable-present)
   ansible.builtin.set_fact:
     # The explicit selections (deterministic record).
     computer_setup_capabilities: "{{ _selected }}"
-    # Effective set everything gates on: selections plus tools we can detect and
-    # adopt on an already-configured machine. (Presence paths become data-driven
-    # via a per-capability `adopt_if_present` in a later step.)
-    computer_setup_active_capabilities: >-
-      {{ (_selected
-          + (['dbt'] if dbt_profiles_stat.stat.exists else [])
-          + (['vscode'] if vscode_binary_stat.stat.exists else [])
-          + (['gcloud'] if gcloud_sdk_dir.stat.exists else []))
-         | unique | list }}
+    # Effective set everything gates on: selections plus adopted-present tools.
+    computer_setup_active_capabilities: "{{ (_selected + _present) | unique | list }}"
   vars:
     _selected: "{{ selected_capabilities | default([]) }}"
+    _present: >-
+      {{ _adopt_probe.results | default([])
+         | selectattr('stat.exists') | map(attribute='item.key') | list }}
 
 - name: Derive the role interface from capabilities
   ansible.builtin.set_fact:
@@ -153,12 +148,6 @@
     computer_setup_config_deploys: >-
       {{ _active_entries | selectattr('config', 'defined')
          | map(attribute='config') | flatten | list }}
-    has_nvm: "{{ 'nvm' in _active }}"
-    has_gcloud: "{{ 'gcloud' in _active }}"
-    has_dbt: "{{ 'dbt' in _active }}"
-    has_zed: "{{ 'zed' in _active }}"
-    has_opencode: "{{ 'opencode' in _active }}"
-    has_vscode: "{{ 'vscode' in _active }}"
   vars:
     _selected: "{{ selected_capabilities | default([]) }}"
     _active: "{{ computer_setup_active_capabilities }}"

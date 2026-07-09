@@ -81,11 +81,17 @@
           - homebrew_optional_formulae == ['nvm', 'anomalyco/tap/opencode']
           - homebrew_optional_casks == ['zed', 'visual-studio-code']
           - vscode_optional_extensions == []
-          - has_nvm | bool
-          - has_zed | bool
-          - has_opencode | bool
-          - has_vscode | bool
-          - has_dbt | bool
+          # Gating is capability membership in the active set. 'adopted' is not
+          # selected but its adopt_if_present path exists, so it becomes active.
+          - "'nvm' in computer_setup_active_capabilities"
+          - "'zed' in computer_setup_active_capabilities"
+          - "'vscode' in computer_setup_active_capabilities"
+          - "'dbt' in computer_setup_active_capabilities"
+          - "'adopted' in computer_setup_active_capabilities"
+          - "'adopted' not in computer_setup_capabilities"
+          # A selected-but-unregistered capability is still "active" (a selection),
+          # it just contributes no packages/config (asserted above).
+          - "'ghost' in computer_setup_active_capabilities"
           # Config deploys are the config bundles of ACTIVE capabilities, in
           # capability order (zed at pos 3, dbt at pos 5; vscode has no config —
           # its settings stay in the vscode role).

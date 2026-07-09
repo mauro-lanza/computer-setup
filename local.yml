@@ -47,11 +47,10 @@
     - { role: git, tags: [git] }
     - { role: shell, tags: [shell] }
     # vscode owns all VS Code concerns together (extensions + settings) and is
-    # gated on has_vscode (selected OR already present), consistent with the
-    # other optional tools. Selection covers a same-run install (homebrew runs
-    # first); the role still stats the `code` binary before executing it, since
-    # extension installs need the binary to actually be there.
-    - { role: vscode, tags: [vscode], when: has_vscode | default(false) | bool }
+    # gated on the vscode capability being active (selected OR the code binary
+    # already present, via adopt_if_present). Selection covers a same-run install
+    # (homebrew runs first); the role still stats the binary before executing it.
+    - { role: vscode, tags: [vscode], when: "'vscode' in (computer_setup_active_capabilities | default([]))" }
     - { role: layer_configs, tags: [layer_configs, zed, opencode, dbt] }
     - { role: macos, tags: [macos] }
     - { role: runtimes, tags: [runtimes] }
@@ -80,7 +79,7 @@
           {% if gh_auth.rc != 0 %}
           - Run: gh auth login (handles SSH key + GitHub auth)
           {% endif %}
-          {% if has_gcloud | default(false) | bool %}
+          {% if 'gcloud' in (computer_setup_active_capabilities | default([])) %}
           - Run: gcloud auth login (if using GCP)
           {% endif %}
           {% if '1password' in (homebrew_optional_casks | default([])) %}

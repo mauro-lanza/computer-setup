@@ -1,15 +1,20 @@
 ---
+# Specific manager for version managers (nvm, tfenv). Each tool is gated on its
+# capability being active AND the tool actually being installed — the capability
+# gate is the intent, the stat is the execution guard (we can't drive a CLI
+# that isn't there). nvm/tfenv become active by selection or via adopt_if_present.
 - name: Check if nvm is available
   ansible.builtin.stat:
     path: "{{ homebrew_prefix }}/opt/nvm/nvm.sh"
   register: runtimes_nvm_script
+  when: "'nvm' in (computer_setup_active_capabilities | default([]))"
 
 - name: Read current NVM default alias
   ansible.builtin.slurp:
     src: "{{ home_dir }}/.nvm/alias/default"
   register: runtimes_nvm_current_alias
   failed_when: false
-  when: runtimes_nvm_script.stat.exists
+  when: runtimes_nvm_script.stat.exists | default(false)
 
 - name: Install default Node.js version via NVM
   ansible.builtin.shell: |
@@ -21,7 +26,7 @@
     executable: /bin/zsh
   changed_when: true
   when:
-    - runtimes_nvm_script.stat.exists
+    - runtimes_nvm_script.stat.exists | default(false)
     - runtimes_nvm_current_alias is failed
       or (runtimes_nvm_current_alias.content | default('') | b64decode | trim) != runtimes_nvm_default_node
 
@@ -29,6 +34,7 @@
   ansible.builtin.stat:
     path: "{{ homebrew_prefix }}/bin/tfenv"
   register: runtimes_tfenv_stat
+  when: "'tfenv' in (computer_setup_active_capabilities | default([]))"
 
 - name: Read current tfenv Terraform version
   ansible.builtin.command:
@@ -38,7 +44,7 @@
   register: runtimes_tfenv_current_version
   changed_when: false
   failed_when: false
-  when: runtimes_tfenv_stat.stat.exists
+  when: runtimes_tfenv_stat.stat.exists | default(false)
 
 - name: Install and activate Terraform version via tfenv
   ansible.builtin.shell: |
@@ -48,6 +54,6 @@
     executable: /bin/zsh
   changed_when: true
   when:
-    - runtimes_tfenv_stat.stat.exists
+    - runtimes_tfenv_stat.stat.exists | default(false)
     - runtimes_tfenv_current_version.rc != 0
       or (runtimes_tfenv_current_version.stdout | trim) != runtimes_tfenv_terraform_version

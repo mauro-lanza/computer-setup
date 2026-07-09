@@ -14,3 +14,9 @@ catalog:
     packages: zed
     config:
       - { src: zed/settings.json, dest: "/tmp/cs-contract/zed-settings.json" }
+  # Not selected, but adopted because its probe path exists — exercises the
+  # data-driven adopt_if_present mechanism.
+  - id: adopted
+    desc: "Adopted-if-present demo"
+    type: feature
+    adopt_if_present: "{{ playbook_dir }}/fixtures/plugins/base/files/contract.txt"
