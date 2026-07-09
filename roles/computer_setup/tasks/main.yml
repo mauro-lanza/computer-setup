@@ -31,16 +31,16 @@
   ansible.builtin.set_fact:
     computer_setup_merged_vars: {}
     computer_setup_active_layers: []
+    computer_setup_capability_registry: {}
     # Keys a layer's vars.yml may never define. Two groups:
     #   1. Machine-local prefs — belong in computer_setup_prefs_file.
     #   2. Engine-owned play/role vars — a layer overriding these would break
     #      the orchestrator itself. The computer_setup_* namespace is additionally
     #      guarded by prefix in merge_layer_vars.yml.
     computer_setup_reserved_layer_keys:
-      - prefs
+      - selected_capabilities
       - git_user_name
       - git_user_email
-      - use_dbt
       - home_dir
       - repo_url
       - repo_branch
@@ -97,6 +97,13 @@
          | map('regex_replace', '^(.*)$', computer_setup_plugin_cache + '/\1/templates')
          | list }}
 
+- name: Merge each layer's catalog.yml into the capability registry
+  ansible.builtin.include_tasks: merge_layer_catalog.yml
+  loop: "{{ computer_setup_active_layers }}"
+  loop_control:
+    loop_var: _layer
+    label: "{{ _layer.name }}"
+
 - name: Check if gcloud SDK is installed
   ansible.builtin.stat:
     path: "{{ home_dir }}/google-cloud-sdk"
@@ -112,25 +119,31 @@
     path: "{{ vscode_code_binary }}"
   register: vscode_binary_stat
 
-- name: Resolve preferences and capability flags
+- name: Resolve selected capabilities and the derived role interface
   ansible.builtin.set_fact:
-    homebrew_optional_formulae: "{{ _prefs.get('optional_formulae', []) }}"
-    homebrew_optional_casks: "{{ _prefs.get('optional_casks', []) }}"
-    vscode_optional_extensions: "{{ _prefs.get('optional_vscode_extensions', []) }}"
-    computer_setup_capabilities: "{{ _prefs.get('capabilities', []) }}"
-    has_nvm: "{{ 'nvm' in _capabilities or 'nvm' in _prefs.get('optional_formulae', []) }}"
-    has_gcloud: "{{ 'gcloud' in _capabilities or 'gcloud-cli' in _prefs.get('optional_casks', []) or gcloud_sdk_dir.stat.exists }}"
-    has_dbt: "{{ (use_dbt | default(false) | bool) or dbt_profiles_stat.stat.exists }}"
-    has_zed: "{{ 'zed' in _capabilities or 'zed' in _prefs.get('optional_casks', []) }}"
-    has_opencode: "{{ 'opencode' in _capabilities or 'anomalyco/tap/opencode' in _prefs.get('optional_formulae', []) }}"
-    # Selected OR already present. Selection covers a same-run install (homebrew
-    # runs before the vscode role); presence keeps an already-installed VS Code
-    # managed. The role still stats the binary before executing `code`.
-    has_vscode: >-
-      {{ 'vscode' in _capabilities
-         or 'visual-studio-code' in _prefs.get('optional_casks', [])
-         or 'visual-studio-code' in (homebrew_mandatory_casks | default([]))
-         or vscode_binary_stat.stat.exists }}
+    # The user's selections are the single selection token. Optional package
+    # lists and capability flags are DERIVED from the merged capability registry
+    # — the engine hardcodes no package names.
+    computer_setup_capabilities: "{{ _selected }}"
+    homebrew_optional_formulae: >-
+      {{ _selected_entries | selectattr('type', 'eq', 'formula')
+         | map(attribute='packages') | map('split') | flatten | list }}
+    homebrew_optional_casks: >-
+      {{ _selected_entries | selectattr('type', 'eq', 'cask')
+         | map(attribute='packages') | map('split') | flatten | list }}
+    vscode_optional_extensions: >-
+      {{ _selected_entries | selectattr('type', 'eq', 'vscode')
+         | map(attribute='packages') | map('split') | flatten | list }}
+    # Gating is pure capability membership, with an "or already present" fallback
+    # for the tools we can detect and adopt on an already-configured machine.
+    has_nvm: "{{ 'nvm' in _selected }}"
+    has_gcloud: "{{ 'gcloud' in _selected or gcloud_sdk_dir.stat.exists }}"
+    has_dbt: "{{ 'dbt' in _selected or dbt_profiles_stat.stat.exists }}"
+    has_zed: "{{ 'zed' in _selected }}"
+    has_opencode: "{{ 'opencode' in _selected }}"
+    has_vscode: "{{ 'vscode' in _selected or vscode_binary_stat.stat.exists }}"
   vars:
-    _prefs: "{{ prefs | default({}) }}"
-    _capabilities: "{{ _prefs.get('capabilities', []) }}"
+    _selected: "{{ selected_capabilities | default([]) }}"
+    _selected_entries: >-
+      {{ _selected | map('extract', computer_setup_capability_registry)
+         | select('mapping') | list }}

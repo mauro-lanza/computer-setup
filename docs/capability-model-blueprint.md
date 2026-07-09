@@ -184,12 +184,13 @@ valid and every capability's needs map to a real manager, and a clear
 
 ## Refactor roadmap (one commit each; green checks between)
 
-- [~] **1 — Capability registry + `selected_capabilities`.** Engine merges each
+- [x] **1 — Capability registry + `selected_capabilities`.** Engine merges each
   layer's `catalog.yml` into a registry and derives optional package lists from
   selections; capability flags become membership-only; `dbt` becomes a
   (no-package) `feature` capability; `use_dbt` and the `prefs.optional_*` lists
-  are removed. *Engine + fixtures + contract done & green; `bootstrap.sh` rewrite
-  pending; not yet committed.*
+  are removed. *Done: engine (`merge_layer_catalog.yml`, derived interface),
+  `bootstrap.sh` (writes `selected_capabilities` only), fixtures + contract all
+  green.*
 - [ ] **2 — Config as capability `config:` bundles.** Retire the engine-default
   `layer_configs`; derive the deploy list from selected capabilities' `config`;
   add `adopt_if_present`.

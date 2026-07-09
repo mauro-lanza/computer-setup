@@ -264,10 +264,10 @@ clone_layers() {
 # ═════════════════════════════════════════════════════════════════════════════
 
 # Merged catalog across all layers as TSV rows:
-#   id desc type packages requires_vscode capability
+#   id desc type packages requires_vscode
 # Layers are processed in DESCENDING priority so the highest-priority definition
-# of any given id wins; each id appears once (union, dedup by id). Capability
-# defaults to id and is written to ~/.mac-prefs.yml for optional role gates.
+# of any given id wins; each id appears once (union, dedup by id). The `id` is
+# the capability token written to ~/.mac-prefs.yml as a selection.
 load_catalog() {
     MERGED_CATALOG_FILE="$(mktemp)"
 
@@ -285,12 +285,12 @@ load_catalog() {
             warn "Layer '$name' has an invalid catalog.yml — skipping it."
             continue
         fi
-        while IFS=$'\t' read -r id desc type pkgs req_vscode capability; do
+        while IFS=$'\t' read -r id desc type pkgs req_vscode; do
             [[ -z "$id" ]] && continue
             [[ "$seen" == *" $id "* ]] && continue
             seen="${seen}${id} "
-            printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$id" "$desc" "$type" "$pkgs" "$req_vscode" "${capability:-$id}" >> "$MERGED_CATALOG_FILE"
-        done < <(yq -r '.catalog[]? | [.id, .desc, .type, .packages, (.requires_vscode // false), (.capability // .id)] | @tsv' "$cat")
+            printf '%s\t%s\t%s\t%s\t%s\n' "$id" "$desc" "$type" "$pkgs" "$req_vscode" >> "$MERGED_CATALOG_FILE"
+        done < <(yq -r '.catalog[]? | [.id, .desc, .type, (.packages // ""), (.requires_vscode // false)] | @tsv' "$cat")
     done
 
     local count
@@ -306,9 +306,7 @@ load_catalog() {
 PRIOR_SELECTED_IDS=" "
 PRIOR_NAME=""
 PRIOR_EMAIL=""
-PRIOR_USE_DBT=false
 HAS_PRIOR_PREFS=false
-USE_DBT=false
 
 is_prior_selected() {
     [[ "$PRIOR_SELECTED_IDS" == *" $1 "* ]]
@@ -320,28 +318,12 @@ load_prior_prefs() {
 
     PRIOR_NAME=$(yq -r '.git_user_name // ""' "$PREFS_FILE" 2>/dev/null || echo "")
     PRIOR_EMAIL=$(yq -r '.git_user_email // ""' "$PREFS_FILE" 2>/dev/null || echo "")
-    PRIOR_USE_DBT=$(yq -r '.use_dbt // false' "$PREFS_FILE" 2>/dev/null || echo false)
 
-    local prior_formulae prior_casks prior_vscode
-    prior_formulae=$(yq -r '.prefs.optional_formulae[]?' "$PREFS_FILE" 2>/dev/null || true)
-    prior_casks=$(yq -r '.prefs.optional_casks[]?' "$PREFS_FILE" 2>/dev/null || true)
-    prior_vscode=$(yq -r '.prefs.optional_vscode_extensions[]?' "$PREFS_FILE" 2>/dev/null || true)
-
-    local id desc type pkgs requires_vscode capability source_list pkg
-    while IFS=$'\t' read -r id desc type pkgs requires_vscode capability; do
-        case "$type" in
-            formula) source_list="$prior_formulae" ;;
-            cask)    source_list="$prior_casks" ;;
-            vscode)  source_list="$prior_vscode" ;;
-            *)       continue ;;
-        esac
-        for pkg in $pkgs; do
-            if grep -qFx "$pkg" <<< "$source_list"; then
-                PRIOR_SELECTED_IDS="${PRIOR_SELECTED_IDS}${id} "
-                break
-            fi
-        done
-    done < "$MERGED_CATALOG_FILE"
+    # Selections are just capability ids now — remember them directly.
+    local cap
+    while IFS= read -r cap; do
+        [[ -n "$cap" ]] && PRIOR_SELECTED_IDS="${PRIOR_SELECTED_IDS}${cap} "
+    done < <(yq -r '.selected_capabilities[]?' "$PREFS_FILE" 2>/dev/null || true)
 }
 
 # ─── Git identity ────────────────────────────────────────────────────────────
@@ -368,6 +350,8 @@ gather_git_identity() {
 }
 
 # ─── Optional tool selection ─────────────────────────────────────────────────
+# Records selected capability *ids* only. Packages, config, and gating are all
+# derived by the engine from the merged capability registry at apply time.
 gather_optional_tools() {
     echo
     if [[ ! -s "$MERGED_CATALOG_FILE" ]]; then
@@ -381,9 +365,6 @@ gather_optional_tools() {
     fi
     echo
 
-    SELECTED_FORMULAE=()
-    SELECTED_CASKS=()
-    SELECTED_VSCODE=()
     SELECTED_CAPABILITIES=()
 
     local vscode_available=false
@@ -391,8 +372,8 @@ gather_optional_tools() {
         vscode_available=true
     fi
 
-    local id desc type pkgs requires_vscode capability default pkg
-    while IFS=$'\t' read -r id desc type pkgs requires_vscode capability; do
+    local id desc type pkgs requires_vscode default
+    while IFS=$'\t' read -r id desc type pkgs requires_vscode; do
 
         if [[ "$requires_vscode" == "true" && "$vscode_available" != true ]]; then
             continue
@@ -400,46 +381,23 @@ gather_optional_tools() {
 
         if is_prior_selected "$id"; then default="y"; else default="n"; fi
 
-        if ask_yn "  Install ${desc}?" "$default"; then
-            SELECTED_CAPABILITIES+=("${capability:-$id}")
-            case "$type" in
-                formula)
-                    for pkg in $pkgs; do SELECTED_FORMULAE+=("$pkg"); done
-                    ;;
-                cask)
-                    for pkg in $pkgs; do SELECTED_CASKS+=("$pkg"); done
-                    if [[ "$id" == "vscode" ]]; then vscode_available=true; fi
-                    ;;
-                vscode)
-                    for pkg in $pkgs; do SELECTED_VSCODE+=("$pkg"); done
-                    ;;
-            esac
+        if ask_yn "  Enable ${desc}?" "$default"; then
+            SELECTED_CAPABILITIES+=("$id")
+            # So VS Code extensions offered later this run are prompted too.
+            [[ "$id" == "vscode" ]] && vscode_available=true
         fi
     done < "$MERGED_CATALOG_FILE"
-}
-
-# ─── Feature toggles (not tied to a package) ─────────────────────────────────
-gather_dbt() {
-    echo
-    info "Project tooling"
-    local default="n"
-    [[ "$PRIOR_USE_DBT" == "true" ]] && default="y"
-    if ask_yn "  Configure dbt (deploy ~/.dbt/profiles.yml)?" "$default"; then
-        USE_DBT=true
-    else
-        USE_DBT=false
-    fi
 }
 
 # ─── Write preferences file ──────────────────────────────────────────────────
 yaml_list() {
     local key="$1"; shift
-    echo "  ${key}:"
+    echo "${key}:"
     if [[ $# -eq 0 ]]; then
-        echo "    []"
+        echo "  []"
     else
         for item in "$@"; do
-            echo "    - $(yaml_quote "$item")"
+            echo "  - $(yaml_quote "$item")"
         done
     fi
 }
@@ -453,13 +411,10 @@ write_prefs() {
         echo
         echo "git_user_name: $(yaml_quote "$GIT_NAME")"
         echo "git_user_email: $(yaml_quote "$GIT_EMAIL")"
-        echo "use_dbt: ${USE_DBT}"
         echo
-        echo "prefs:"
-        yaml_list optional_formulae "${SELECTED_FORMULAE[@]+"${SELECTED_FORMULAE[@]}"}"
-        yaml_list optional_casks "${SELECTED_CASKS[@]+"${SELECTED_CASKS[@]}"}"
-        yaml_list optional_vscode_extensions "${SELECTED_VSCODE[@]+"${SELECTED_VSCODE[@]}"}"
-        yaml_list capabilities "${SELECTED_CAPABILITIES[@]+"${SELECTED_CAPABILITIES[@]}"}"
+        echo "# Selection tokens. Packages, config, and gating are derived from the"
+        echo "# merged capability registry (the layers' catalogs) at apply time."
+        yaml_list selected_capabilities "${SELECTED_CAPABILITIES[@]+"${SELECTED_CAPABILITIES[@]}"}"
     } > "$PREFS_FILE"
 
     chmod 600 "$PREFS_FILE"
@@ -550,7 +505,6 @@ main() {
     fi
     gather_git_identity
     gather_optional_tools
-    gather_dbt
     write_prefs
 
     # ── Phase 3 ──────────────────────────────────────────────────────────────

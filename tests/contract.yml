@@ -74,14 +74,17 @@
           - computer_setup_active_layers | map(attribute='name') | list == ['base', 'override']
           - contract_list == ['base', 'override']
           - contract_scalar == 'override'
+          # Optional packages are derived from selected_capabilities x the merged
+          # capability registry (order follows the selection order).
+          - computer_setup_capabilities == ['nvm', 'opencode', 'zed', 'vscode', 'dbt']
           - homebrew_optional_formulae == ['nvm', 'anomalyco/tap/opencode']
           - homebrew_optional_casks == ['zed', 'visual-studio-code']
-          - computer_setup_capabilities == ['custom-base', 'custom-override']
+          - vscode_optional_extensions == []
           - has_nvm | bool
           - has_zed | bool
           - has_opencode | bool
-          # has_vscode via the cask fallback (no 'vscode' capability, no binary needed)
           - has_vscode | bool
+          - has_dbt | bool
           - contract_file_src.endswith('/override/files/contract.txt')
           - contract_template_src.endswith('/override/templates/contract.j2')
           # deploy_layer_file: highest-priority layer wins, parent dir is created

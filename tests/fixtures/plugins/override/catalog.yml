@@ -1,0 +1,11 @@
+---
+catalog:
+  # Higher-priority layer can override a lower one's entry (same id).
+  - id: vscode
+    desc: "Visual Studio Code"
+    type: cask
+    packages: visual-studio-code
+  # A capability with no package (feature) — e.g. a config-only tool.
+  - id: dbt
+    desc: "dbt (BigQuery profile)"
+    type: feature

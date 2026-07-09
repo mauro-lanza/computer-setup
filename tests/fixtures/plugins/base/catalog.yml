@@ -1,0 +1,14 @@
+---
+catalog:
+  - id: nvm
+    desc: "Node Version Manager"
+    type: formula
+    packages: nvm
+  - id: opencode
+    desc: "OpenCode CLI"
+    type: formula
+    packages: anomalyco/tap/opencode
+  - id: zed
+    desc: "Zed editor"
+    type: cask
+    packages: zed
