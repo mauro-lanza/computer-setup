@@ -5,8 +5,8 @@ manager:
   summary: "Install Homebrew formulae and casks (baseline + selected; adopt allow-list)."
   capabilities: []
   consumes:
-    - homebrew_mandatory_formulae
-    - homebrew_mandatory_casks
+    - homebrew_baseline_formulae
+    - homebrew_baseline_casks
     - homebrew_adopt_casks
     - homebrew_optional_formulae
     - homebrew_optional_casks

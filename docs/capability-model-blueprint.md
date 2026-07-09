@@ -216,12 +216,13 @@ valid and every capability's needs map to a real manager, and a clear
   `docs/managers.md`; `scripts/managers check` (wired into `scripts/check.sh`)
   validates the manifests and that the doc is current. Metadata only — no runtime
   dispatch.*
-- [~] **6 — Rename & polish**: `catalog.yml` → `capabilities.yml`;
+- [x] **6 — Rename & polish**: `catalog.yml` → `capabilities.yml`;
   `homebrew_mandatory_*` → `homebrew_baseline_*`; refresh docs, example-layer,
   and the three plugins (public/personal/work). *6a done: catalog.yml →
   capabilities.yml (file + `catalog:`→`capabilities:` key + `provides`) across
-  engine, bootstrap, fixtures, example-layer, and docs. 6b (mandatory→baseline)
-  pending.*
+  engine, bootstrap, fixtures, example-layer, and docs. 6b done:
+  `homebrew_mandatory_*`/`vscode_mandatory_*` → `*_baseline_*` (the layer's
+  baseline, not engine-mandated) across engine, plugins, and docs.*
 
 ## Terminology (locked)
 

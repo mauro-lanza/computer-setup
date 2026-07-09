@@ -33,7 +33,7 @@ ansible-lint
 
 If you touch the merge logic, extend or run `tests/contract.yml` and confirm:
 
-- list vars (`repositories`, `homebrew_mandatory_formulae`, …) **append** across
+- list vars (`repositories`, `homebrew_baseline_formulae`, …) **append** across
   layers, and
 - scalar vars (`dbt_bigquery_project`, …) take the **highest-priority** value and
   print an info message on overlap, and

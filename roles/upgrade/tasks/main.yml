@@ -25,14 +25,14 @@
 
 - name: Determine which managed formulae are outdated
   ansible.builtin.command:
-    argv: "{{ ['brew', 'outdated', '--formula', '--verbose'] + homebrew_mandatory_formulae + homebrew_optional_formulae }}"
+    argv: "{{ ['brew', 'outdated', '--formula', '--verbose'] + homebrew_baseline_formulae + homebrew_optional_formulae }}"
   register: upgrade_outdated_formulae
   changed_when: false
   failed_when: false
 
 - name: Determine which managed casks are outdated
   ansible.builtin.command:
-    argv: "{{ ['brew', 'outdated', '--cask', '--greedy', '--verbose'] + homebrew_mandatory_casks + homebrew_optional_casks }}"
+    argv: "{{ ['brew', 'outdated', '--cask', '--greedy', '--verbose'] + homebrew_baseline_casks + homebrew_optional_casks }}"
   register: upgrade_outdated_casks
   changed_when: false
   failed_when: false
@@ -58,12 +58,12 @@
   block:
     - name: Upgrade managed Homebrew formulae to latest
       community.general.homebrew:
-        name: "{{ homebrew_mandatory_formulae + homebrew_optional_formulae }}"
+        name: "{{ homebrew_baseline_formulae + homebrew_optional_formulae }}"
         state: latest
 
     - name: Upgrade managed Homebrew casks to latest
       community.general.homebrew_cask:
-        name: "{{ homebrew_mandatory_casks + homebrew_optional_casks }}"
+        name: "{{ homebrew_baseline_casks + homebrew_optional_casks }}"
         state: latest
         greedy: "{{ upgrade_casks_greedy | bool }}"
 

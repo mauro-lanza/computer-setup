@@ -6,15 +6,15 @@
 - name: Compute cask install sets
   ansible.builtin.set_fact:
     homebrew_casks_adopt: >-
-      {{ (homebrew_mandatory_casks + homebrew_optional_casks)
+      {{ (homebrew_baseline_casks + homebrew_optional_casks)
          | select('in', homebrew_adopt_casks) | list }}
     homebrew_casks_fresh: >-
-      {{ (homebrew_mandatory_casks + homebrew_optional_casks)
+      {{ (homebrew_baseline_casks + homebrew_optional_casks)
          | reject('in', homebrew_adopt_casks) | list }}
 
 - name: Install formulae (and refresh Homebrew first)
   community.general.homebrew:
-    name: "{{ homebrew_mandatory_formulae + homebrew_optional_formulae }}"
+    name: "{{ homebrew_baseline_formulae + homebrew_optional_formulae }}"
     state: present
     update_homebrew: "{{ homebrew_update }}"
 

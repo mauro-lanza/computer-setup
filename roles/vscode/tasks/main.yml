@@ -23,7 +23,7 @@
       - "{{ vscode_code_binary }}"
       - --install-extension
       - "{{ item }}"
-  loop: "{{ vscode_mandatory_extensions + vscode_optional_extensions }}"
+  loop: "{{ vscode_baseline_extensions + vscode_optional_extensions }}"
   when:
     - vscode_stat.stat.exists
     - item not in (vscode_installed_extensions.stdout_lines | default([]))

@@ -64,7 +64,7 @@ Layers merge in ascending `priority` order (higher wins on scalar conflicts):
 | Type | Strategy |
 |---|---|
 | Catalog items | Union, dedup by `id` |
-| **List** vars (`repositories`, `homebrew_mandatory_formulae`, …) | **Append** across layers |
+| **List** vars (`repositories`, `homebrew_baseline_formulae`, …) | **Append** across layers |
 | **Scalar** vars (`dbt_bigquery_project`, …) | **Override**, highest priority wins, with an info message on overlap |
 | Files (`p10k.zsh`, editor settings) | Resolved across layers by priority (highest wins); skipped when no layer provides the file |
 
