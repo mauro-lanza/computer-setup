@@ -1,10 +1,8 @@
 # Capability Model Blueprint (in-progress refactor)
 
-> **Status: living document for an active redesign.** It describes the *target*
-> architecture we are converging on, the decisions behind it, and the staged
-> roadmap to get there. `docs/architecture.md` describes what currently ships;
-> where the two disagree, this file is the intent. When the roadmap is complete,
-> fold the durable parts into `architecture.md` and keep this as design rationale.
+> **Status: the roadmap below is COMPLETE (all 6 items landed).** This document
+> is retained as design rationale for the capability model. `docs/architecture.md`
+> and `docs/managers.md` describe the shipped system; this file explains *why*.
 >
 > The project is **development-only** right now — not applied to any machine but
 > the author's, tested locally via `./scripts/check.sh` + `tests/contract.yml`.
