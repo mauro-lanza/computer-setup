@@ -75,8 +75,9 @@
           - contract_list == ['base', 'override']
           - contract_scalar == 'override'
           # Optional packages are derived from selected_capabilities x the merged
-          # capability registry (order follows the selection order).
-          - computer_setup_capabilities == ['nvm', 'opencode', 'zed', 'vscode', 'dbt']
+          # capability registry (order follows the selection order). The 'ghost'
+          # selection is absent from every catalog and must be ignored silently.
+          - computer_setup_capabilities == ['nvm', 'opencode', 'zed', 'vscode', 'dbt', 'ghost']
           - homebrew_optional_formulae == ['nvm', 'anomalyco/tap/opencode']
           - homebrew_optional_casks == ['zed', 'visual-studio-code']
           - vscode_optional_extensions == []

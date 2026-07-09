@@ -10,3 +10,4 @@ selected_capabilities:
   - zed       # base: cask zed
   - vscode    # override: cask visual-studio-code
   - dbt       # override: feature (no package)
+  - ghost     # not in any active layer's catalog — must be silently ignored

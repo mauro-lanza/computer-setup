@@ -144,6 +144,8 @@
     has_vscode: "{{ 'vscode' in _selected or vscode_binary_stat.stat.exists }}"
   vars:
     _selected: "{{ selected_capabilities | default([]) }}"
+    # Only selections that exist in the merged registry — a selection whose
+    # providing layer isn't active is silently ignored (never a hard error).
     _selected_entries: >-
-      {{ _selected | map('extract', computer_setup_capability_registry)
-         | select('mapping') | list }}
+      {{ _selected | select('in', computer_setup_capability_registry)
+         | map('extract', computer_setup_capability_registry) | list }}
