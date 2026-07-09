@@ -205,8 +205,11 @@ valid and every capability's needs map to a real manager, and a clear
   data-driven via a per-capability `adopt_if_present: <path>` probe in the engine
   (no hardcoded tool paths); gcloud path corrected to the Homebrew location;
   nvm/tfenv/gcloud/vscode (public) and dbt (work) declare adopt paths.*
-- [ ] **4 — Reminders as capability data**; gcloud/opencode shell snippets adopt
-  the `# cs:requires-capability:` directive (consistency with nvm).
+- [x] **4 — Reminders as capability data**; gcloud/opencode shell snippets adopt
+  the `# cs:requires-capability:` directive (consistency with nvm). *Done: engine
+  derives `computer_setup_reminders` from active capabilities; local.yml renders
+  them and no longer hardcodes gcloud/1password; the shell snippet directive gate
+  now uses the active set; gcloud/opencode snippets declare their capability.*
 - [ ] **5 — Manager manifests** (`meta/manager.yml`) + generated `docs/managers.md`
   + contract-test validation.
 - [ ] **6 — Rename & polish**: `catalog.yml` → `capabilities.yml`;

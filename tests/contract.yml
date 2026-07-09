@@ -100,6 +100,8 @@
           - computer_setup_config_deploys[0].dest == '/tmp/cs-contract/zed-settings.json'
           - computer_setup_config_deploys[1].src == 'profiles.yml.j2'
           - computer_setup_config_deploys[1].kind == 'template'
+          # Reminders are contributed by active capabilities (vscode is selected).
+          - "'Sign into VS Code settings sync' in computer_setup_reminders"
           - contract_file_src.endswith('/override/files/contract.txt')
           - contract_template_src.endswith('/override/templates/contract.j2')
           # deploy_layer_file: highest-priority layer wins, parent dir is created

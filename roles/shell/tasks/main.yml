@@ -51,7 +51,7 @@
                    ~ ('%02d' | format(_f.0.item.priority | int))
                    ~ '-' ~ _f.0.item.name ~ '-' ~ (_f.1.path | basename),
            'enabled': (_cap | length == 0)
-                      or (_cap in (computer_setup_capabilities | default([])))
+                      or (_cap in (computer_setup_active_capabilities | default([])))
          }] }}
   loop: "{{ shell_layer_find.results | subelements('files', skip_missing=True) }}"
   loop_control:

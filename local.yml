@@ -79,10 +79,7 @@
           {% if gh_auth.rc != 0 %}
           - Run: gh auth login (handles SSH key + GitHub auth)
           {% endif %}
-          {% if 'gcloud' in (computer_setup_active_capabilities | default([])) %}
-          - Run: gcloud auth login (if using GCP)
-          {% endif %}
-          {% if '1password' in (homebrew_optional_casks | default([])) %}
-          - Open 1Password and sign in
-          {% endif %}
+          {% for reminder in computer_setup_reminders | default([]) %}
+          - {{ reminder }}
+          {% endfor %}
       tags: [always]

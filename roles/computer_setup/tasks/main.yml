@@ -148,6 +148,10 @@
     computer_setup_config_deploys: >-
       {{ _active_entries | selectattr('config', 'defined')
          | map(attribute='config') | flatten | list }}
+    # Post-setup reminder strings contributed by active capabilities.
+    computer_setup_reminders: >-
+      {{ _active_entries | selectattr('reminders', 'defined')
+         | map(attribute='reminders') | flatten | list }}
   vars:
     _selected: "{{ selected_capabilities | default([]) }}"
     _active: "{{ computer_setup_active_capabilities }}"
