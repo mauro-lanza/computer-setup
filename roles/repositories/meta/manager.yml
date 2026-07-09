@@ -1,0 +1,7 @@
+---
+manager:
+  name: repositories
+  tier: generic
+  summary: "Clone catalogued repositories if missing, run post_clone hooks once (opt-in)."
+  capabilities: []
+  consumes: [repositories, repositories_catalog_file, repositories_base_dir]

@@ -1,0 +1,9 @@
+---
+manager:
+  name: runtimes
+  tier: specific
+  summary: >-
+    Set the default Node version (via nvm) and Terraform version (via tfenv).
+    Specific because each is driven through the tool's own CLI.
+  capabilities: [nvm, tfenv]
+  consumes: [runtimes_nvm_default_node, runtimes_tfenv_terraform_version]

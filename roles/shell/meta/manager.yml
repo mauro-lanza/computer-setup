@@ -1,0 +1,10 @@
+---
+manager:
+  name: shell
+  tier: generic
+  summary: >-
+    Deploy the engine CLI snippet, layer shell snippets (capability-gated via the
+    '# cs:requires-capability:' directive), and the layer-provided ~/.zshrc and
+    ~/.p10k.zsh.
+  capabilities: []
+  consumes: ["layer files/shell/*.zsh", "layer files/zshrc", "layer files/p10k.zsh"]

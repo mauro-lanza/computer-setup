@@ -1,0 +1,7 @@
+---
+manager:
+  name: layer_configs
+  tier: generic
+  summary: "Deploy capability config files/templates to their destinations."
+  capabilities: []
+  consumes: [computer_setup_config_deploys]

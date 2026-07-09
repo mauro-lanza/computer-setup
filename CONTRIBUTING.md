@@ -48,7 +48,13 @@ is the public API — see [docs/architecture.md](docs/architecture.md). Bump
 
 ## Adding a role or catalog item
 
-- New roles go under `roles/` and are added to the `roles:` list in `local.yml`
-  with a tag (and a `when:` gate if optional).
+- New roles (managers) go under `roles/` and are added to the `roles:` list in
+  `local.yml` with a tag (and a `when:` capability gate if optional). Every role
+  needs a `roles/<name>/meta/manager.yml` manifest (name, tier, summary,
+  capabilities, consumes); run `scripts/managers generate` to refresh
+  [docs/managers.md](docs/managers.md). `scripts/check.sh` validates it.
+- Before adding a *specific* manager, apply the litmus test: if configuring the
+  tool is just placing a file, it's **data** (a capability `config:` entry), not
+  a new role. Only shell out to a tool's CLI when a file can't express it.
 - New optional tools are **catalog items in a layer**, not in the orchestrator.
   See [examples/example-layer/catalog.yml](examples/example-layer/catalog.yml).

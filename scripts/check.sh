@@ -6,6 +6,10 @@ cd "$(dirname "$0")/.."
 echo "==> Bash syntax"
 bash -n bootstrap.sh
 bash -n scripts/computer-setup-layers
+bash -n scripts/managers
+
+echo "==> Manager registry"
+./scripts/managers check
 
 echo "==> Ansible syntax"
 ansible-playbook --syntax-check local.yml

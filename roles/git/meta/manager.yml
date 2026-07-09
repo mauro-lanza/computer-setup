@@ -1,0 +1,12 @@
+---
+manager:
+  name: git
+  tier: generic
+  summary: "Render ~/.gitconfig and ~/.gitignore_global from layer vars."
+  capabilities: []
+  consumes:
+    - git_user_name
+    - git_user_email
+    - git_default_branch
+    - git_config_sections
+    - git_global_gitignore_entries

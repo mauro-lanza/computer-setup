@@ -210,8 +210,12 @@ valid and every capability's needs map to a real manager, and a clear
   derives `computer_setup_reminders` from active capabilities; local.yml renders
   them and no longer hardcodes gcloud/1password; the shell snippet directive gate
   now uses the active set; gcloud/opencode snippets declare their capability.*
-- [ ] **5 — Manager manifests** (`meta/manager.yml`) + generated `docs/managers.md`
-  + contract-test validation.
+- [x] **5 — Manager manifests** (`meta/manager.yml`) + generated `docs/managers.md`
+  + contract-test validation. *Done: every role has a `meta/manager.yml`
+  (name/tier/summary/capabilities/consumes); `scripts/managers generate` renders
+  `docs/managers.md`; `scripts/managers check` (wired into `scripts/check.sh`)
+  validates the manifests and that the doc is current. Metadata only — no runtime
+  dispatch.*
 - [ ] **6 — Rename & polish**: `catalog.yml` → `capabilities.yml`;
   `homebrew_mandatory_*` → `homebrew_baseline_*`; refresh docs, example-layer,
   and the three plugins (public/personal/work).
