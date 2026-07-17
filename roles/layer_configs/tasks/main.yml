@@ -14,6 +14,7 @@
     computer_setup_lookup_key: "{{ item.src }}"
     computer_setup_deploy_dest: "{{ item.dest }}"
     computer_setup_deploy_kind: "{{ item.kind | default('file') }}"
+    computer_setup_deploy_mode: "{{ item.mode | default('0644') }}"
     computer_setup_lookup_fallback_dir: "{{ item.fallback_dir | default(role_path ~ '/files') }}"
   loop: "{{ computer_setup_config_deploys | default([]) }}"
   loop_control:
