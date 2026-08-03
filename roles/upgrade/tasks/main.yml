@@ -37,13 +37,17 @@
 
 - name: Determine which managed casks are outdated
   ansible.builtin.command:
-    argv: "{{ ['brew', 'outdated', '--cask', '--greedy', '--verbose'] + homebrew_baseline_casks + homebrew_optional_casks }}"
+    argv: >-
+      {{ ['brew', 'outdated', '--cask', '--verbose']
+         + ((homebrew_baseline_casks + homebrew_optional_casks)
+            | reject('in', upgrade_casks_exclude) | list) }}
   register: upgrade_outdated_casks
   changed_when: false
   failed_when: false
   when:
     - upgrade_include_casks | bool
-    - (homebrew_baseline_casks + homebrew_optional_casks) | length > 0
+    - ((homebrew_baseline_casks + homebrew_optional_casks)
+       | reject('in', upgrade_casks_exclude) | list) | length > 0
 
 - name: Show pending upgrades
   ansible.builtin.debug:
@@ -52,6 +56,8 @@
       Homebrew formulae:
       {% if (homebrew_baseline_formulae + homebrew_optional_formulae) | length == 0 %}
         (none managed)
+      {% elif upgrade_outdated_formulae.skipped | default(false) %}
+        (not checked — `brew outdated` cannot run under --check)
       {% else %}
       {{ upgrade_outdated_formulae.stdout | default('') | trim or '  (up to date)' }}
       {% endif %}
@@ -61,8 +67,13 @@
         (skipped — upgrade_include_casks=false; run `drift-update` to include casks)
       {% elif (homebrew_baseline_casks + homebrew_optional_casks) | length == 0 %}
         (none managed)
+      {% elif upgrade_outdated_casks.skipped | default(false) %}
+        (not checked — `brew outdated` cannot run under --check)
       {% else %}
       {{ upgrade_outdated_casks.stdout | default('') | trim or '  (up to date)' }}
+      {% endif %}
+      {% if upgrade_casks_exclude | length > 0 %}
+        excluded from upgrade: {{ upgrade_casks_exclude | join(', ') }}
       {% endif %}
 
       Also refreshed to latest on apply (not pre-diffable):
@@ -90,7 +101,9 @@
         name: "{{ item }}"
         state: latest
         greedy: "{{ upgrade_casks_greedy | bool }}"
-      loop: "{{ homebrew_baseline_casks + homebrew_optional_casks }}"
+      loop: >-
+        {{ (homebrew_baseline_casks + homebrew_optional_casks)
+           | reject('in', upgrade_casks_exclude) | list }}
       loop_control:
         label: "{{ item }}"
       register: upgrade_cask_results

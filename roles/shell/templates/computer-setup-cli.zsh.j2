@@ -40,9 +40,7 @@ drift-update() {
     echo "drift-update upgrades managed tools to their latest versions:"
     echo "  Homebrew formulae + casks, Ansible Galaxy collections, Node LTS."
     echo
-    echo "Some casks (e.g. Docker Desktop) need your macOS password to replace"
-    echo "files they own — run this from a real terminal so sudo can prompt."
-    echo "Quit any app being upgraded first; replacing a running app can fail"
+    echo "Quit any app being upgraded first — replacing a running app can fail"
     echo "and leave it half-installed."
     printf "Proceed? [y/N]: "
     local reply
@@ -51,7 +49,33 @@ drift-update() {
         echo "Aborted — nothing changed."
         return 0
     fi
+
+    # Pre-authorize sudo.
+    #
+    # Some casks (Docker Desktop) replace files they own as root. Ansible runs
+    # its tasks WITHOUT a controlling TTY, so brew's internal `sudo` can never
+    # prompt — it fails with "a terminal is required to read the password" no
+    # matter which terminal you launched from. Caching the credential here, where
+    # a TTY does exist, lets those upgrades run non-interactively.
+    #
+    # sudo's timestamp expires (5 min by default) and cask downloads are slow, so
+    # refresh it in the background until the run finishes.
+    local sudo_keepalive=""
+    echo
+    echo "Some cask upgrades need root. Caching your password for this run:"
+    if sudo -v; then
+        ( while true; do sudo -n true 2>/dev/null || break; sleep 50; done ) &
+        sudo_keepalive=$!
+    else
+        echo "Could not authenticate — casks that need root will be reported as failed."
+    fi
+
     drift-apply --tags upgrade -e upgrade_assume_yes=true "$@"
+    local rc=$?
+
+    [[ -n "$sudo_keepalive" ]] && kill "$sudo_keepalive" 2>/dev/null
+    sudo -k    # drop the cached credential; don't leave root primed
+    return $rc
 }
 
 drift-log() {

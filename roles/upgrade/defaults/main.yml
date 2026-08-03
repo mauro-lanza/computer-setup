@@ -21,6 +21,14 @@ upgrade_assume_yes: false
 # with the apps quit.
 upgrade_casks_greedy: false
 
+# Casks to never upgrade automatically, by cask token. Use for apps whose own
+# updater should own the job — typically ones that need root to replace their
+# files, so an upgrade from a TTY-less Ansible task can only fail. They are still
+# INSTALLED and kept present by the homebrew role; only the upgrade is skipped.
+# Update those from the app's own "Check for updates", or explicitly:
+#     brew upgrade --cask <name>
+upgrade_casks_exclude: []
+
 # Whether cask upgrades are attempted at all. Casks replace app bundles in
 # /Applications, which can trigger a sudo prompt — fatal for an unattended
 # LaunchAgent, which has no TTY to answer it (see docs/operational-notes.md).
