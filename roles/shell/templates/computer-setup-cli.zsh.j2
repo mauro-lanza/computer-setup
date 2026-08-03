@@ -49,13 +49,31 @@ drift-update() {
         echo "Aborted — nothing changed."
         return 0
     fi
-    # No sudo pre-authorization here. Caching the credential with `sudo -v`
-    # first was tried and does NOT work: an Ansible task has no controlling
-    # terminal, so brew's internal sudo still refuses with "a terminal is
-    # required to read the password" even with a valid cached ticket. Casks
-    # that need root to upgrade belong in upgrade_casks_exclude and are
-    # upgraded by their own updater, or by hand from a real shell.
+    # Casks that replace files they own (Docker Desktop) need root. Homebrew
+    # shells out to sudo, and by then we are several processes deep inside
+    # Ansible with pipes for stdin — sudo has no terminal to prompt on, and a
+    # credential cached with `sudo -v` out here is not usable in there either.
+    #
+    # The homebrew_cask module solves this properly: given `sudo_password` it
+    # writes a 0700 temp askpass script and sets SUDO_ASKPASS, which Homebrew
+    # turns into `sudo -A` (system_command.rb). Collect the password here, where
+    # a terminal exists, and hand it over through the environment — not `-e`,
+    # which would expose it in the process list.
+    local sudo_pw
+    echo
+    echo "Some casks need root to upgrade (e.g. Docker Desktop)."
+    printf "macOS password (Enter to skip those casks): "
+    read -rs sudo_pw
+    echo
+    if [[ -n "$sudo_pw" ]]; then
+        export CS_SUDO_PASSWORD="$sudo_pw"
+    fi
+    unset sudo_pw
+
     drift-apply --tags upgrade -e upgrade_assume_yes=true "$@"
+    local rc=$?
+    unset CS_SUDO_PASSWORD
+    return $rc
 }
 
 drift-log() {

@@ -101,6 +101,15 @@
         name: "{{ item }}"
         state: latest
         greedy: "{{ upgrade_casks_greedy | bool }}"
+        # Casks that replace root-owned files make Homebrew call sudo, which has
+        # no terminal this deep inside Ansible. Given a password the module
+        # writes a 0700 temp askpass script and exports SUDO_ASKPASS; Homebrew
+        # then uses `sudo -A` and never needs a TTY. Supplied through the
+        # environment by `drift-update` (never `-e`, which the process list
+        # would expose); omitted when unset, so scheduled runs are unaffected.
+        # The parameter is no_log in the module's argument spec, so Ansible
+        # masks it in all output.
+        sudo_password: "{{ lookup('env', 'CS_SUDO_PASSWORD') | default(omit, true) }}"
       loop: >-
         {{ (homebrew_baseline_casks + homebrew_optional_casks)
            | reject('in', upgrade_casks_exclude) | list }}
