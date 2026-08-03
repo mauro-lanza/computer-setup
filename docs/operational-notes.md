@@ -41,6 +41,30 @@ rm -f /opt/homebrew/bin/zed
 brew install --cask zed
 ```
 
+### Casks that need root cannot be upgraded by Ansible at all
+Some casks (Docker Desktop) delete or replace files they own as **root** during
+an upgrade. Homebrew shells out to `sudo` to do it. An Ansible task has no
+controlling terminal, so that `sudo` can never prompt:
+
+```
+sudo: a terminal is required to read the password; either use the -S
+option to read from standard input or configure an askpass helper
+```
+
+This is **not** fixable by running `drift-update` from a real terminal — the
+terminal you launch from is not the terminal the task runs in. Pre-caching the
+credential with `sudo -v` before the run was tried and does not work either; the
+cached ticket is not usable from the task's context.
+
+The supported answer is `upgrade_casks_exclude`. Listing a cask there keeps it
+installed and managed by the `homebrew` role but skips the upgrade. Most casks
+in this position update themselves anyway (`auto_updates` in `brew info`). To
+force one by hand, from a shell where sudo *can* prompt:
+
+```bash
+brew upgrade --cask docker-desktop
+```
+
 ### Self-updating casks and `greedy`
 Most GUI casks here update themselves (`auto_updates` in `brew info`): Spotify,
 Docker Desktop, VS Code, Firefox, Discord, Zed, Stats, Rectangle, gcloud-cli,
