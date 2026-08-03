@@ -17,16 +17,39 @@
   check_mode: false
   when: vscode_stat.stat.exists
 
+- name: Resolve which managed extensions are missing
+  ansible.builtin.set_fact:
+    vscode_missing_extensions: >-
+      {{ (vscode_baseline_extensions + vscode_optional_extensions)
+         | reject('in', vscode_installed_extensions.stdout_lines | default([]))
+         | list }}
+  when: vscode_stat.stat.exists
+
+# `command` does not support check mode, so the install task below is SKIPPED
+# under --check rather than reported as changed. That means the daily drift
+# agent could never see a missing extension — VS Code was the one managed
+# surface with no drift signal at all. This task is check-mode visible, so a
+# missing extension now shows up as drift. It only runs in check mode; on a real
+# apply the install task itself reports the change.
+- name: Report missing VS Code extensions as drift
+  ansible.builtin.debug:
+    msg: >-
+      {{ vscode_missing_extensions | length }} managed VS Code extension(s) not
+      installed: {{ vscode_missing_extensions | join(', ') }}
+  changed_when: true
+  when:
+    - ansible_check_mode
+    - vscode_stat.stat.exists
+    - vscode_missing_extensions | default([]) | length > 0
+
 - name: Install VS Code extensions
   ansible.builtin.command:
     argv:
       - "{{ vscode_code_binary }}"
       - --install-extension
       - "{{ item }}"
-  loop: "{{ vscode_baseline_extensions + vscode_optional_extensions }}"
-  when:
-    - vscode_stat.stat.exists
-    - item not in (vscode_installed_extensions.stdout_lines | default([]))
+  loop: "{{ vscode_missing_extensions | default([]) }}"
+  when: vscode_stat.stat.exists
   register: vscode_ext_install
   changed_when: "'already installed' not in (vscode_ext_install.stdout | default(''))"
 
