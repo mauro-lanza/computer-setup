@@ -39,6 +39,11 @@ drift-apply() {
 drift-update() {
     echo "drift-update upgrades managed tools to their latest versions:"
     echo "  Homebrew formulae + casks, Ansible Galaxy collections, Node LTS."
+    echo
+    echo "Some casks (e.g. Docker Desktop) need your macOS password to replace"
+    echo "files they own — run this from a real terminal so sudo can prompt."
+    echo "Quit any app being upgraded first; replacing a running app can fail"
+    echo "and leave it half-installed."
     printf "Proceed? [y/N]: "
     local reply
     read -r reply
