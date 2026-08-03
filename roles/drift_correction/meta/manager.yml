@@ -2,6 +2,10 @@
 manager:
   name: drift_correction
   tier: engine
-  summary: "Install the daily drift-check LaunchAgent, wrapper, and layer-sync helper."
+  summary: >-
+    Install the scheduled LaunchAgents (09:00 upgrade, 10:00 drift check), the
+    shared computer-setup-run runner, and the layer-sync helper.
   capabilities: []
-  consumes: [drift_correction_schedule_hour, drift_correction_schedule_minute, repo_url, repo_branch]
+  consumes: [drift_correction_agents, drift_correction_schedule_hour, drift_correction_schedule_minute,
+             drift_correction_upgrade_schedule_hour, drift_correction_upgrade_schedule_minute,
+             computer_setup_runner_path, repo_url, repo_branch]

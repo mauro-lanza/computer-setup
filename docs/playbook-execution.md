@@ -105,21 +105,27 @@ handles user-made changes.
 
 #### repositories -- Project catalog (opt-in, `never` tag)
 
-21. Skipped on normal runs (bootstrap and the daily drift check). Runs only
-    via `--tags repositories` / the `repos-resurrect` helper. Loads
+21. Skipped on normal runs (bootstrap and the scheduled agents). Runs only
+    via `--tags repositories`. Loads
     `~/.repositories.yml` and clones any missing repos (non-destructive:
     existing checkouts are never touched), running each entry's `post_clone`
     hooks once on first clone.
 
-#### drift_correction -- Daily sync monitoring
+#### drift_correction -- Scheduled monitoring and upgrades
 
 22. Ensure `~/Library/Logs`, `~/Library/LaunchAgents`, `~/.local/bin`
     exist.
 23. Deploy the shared `computer-setup-layers` helper used to sync layer repos.
-24. Deploy `~/.local/bin/drift-check` wrapper script from template. It syncs
-    layers, then runs `ansible-pull --check --diff` against `repo_branch`.
-25. Deploy LaunchAgent plist (daily at 10:00).
-26. If any drift files changed, handler reloads the LaunchAgent.
+24. Deploy `~/.local/bin/computer-setup-run` from template — the single entry
+    point for every `ansible-pull`. It builds the pull argument set once and
+    takes a mode: `apply` (interactive, streams), `check` (`--check --diff`) or
+    `upgrade` (`--tags upgrade`, formulae/Galaxy/Node only). Both scheduled modes
+    sync layers first, log, trim, and notify; they probe the repo over SSH and
+    exit 0 silently when it is unreachable.
+25. Deploy one LaunchAgent plist per entry in `drift_correction_agents`
+    (09:00 `upgrade`, 10:00 `check`).
+26. Remove the superseded `~/.local/bin/drift-check` wrapper and its logs.
+27. If any drift files changed, the handler reloads every agent.
 
 ### Phase 3: Post-tasks
 

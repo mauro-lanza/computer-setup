@@ -4,8 +4,9 @@ Generalized, open-source macOS provisioning framework. An Ansible **orchestrator
 (the engine) consumes pluggable **content layers** (your data), so the core stays
 public and shareable while personal and work data live in separate repos.
 
-A LaunchAgent re-runs the playbook in check mode daily and notifies you when the
-machine drifts from the declared state — across the orchestrator *and* every layer.
+Two LaunchAgents run each morning: at 09:00 managed tools are upgraded, and at
+10:00 the playbook re-runs in check mode and notifies you when the machine drifts
+from the declared state — across the orchestrator *and* every layer.
 
 ## Why layers?
 
@@ -90,12 +91,20 @@ The **variable interface** plus `schema_version` is the public API — see
 
 ## Maintenance helpers
 
-Shell functions installed by the setup:
+Shell functions installed by the setup. All of them delegate to
+`~/.local/bin/computer-setup-run`, which owns the `ansible-pull` invocation so it
+is defined in exactly one place.
 
+- `drift-check` — run the same check the 10:00 agent runs (never mutates).
 - `drift-apply` — reconcile detected drift now (`ansible-pull` for real).
-- `drift-update` — run the opt-in `upgrade` role (`--tags upgrade`).
-- `repos-resurrect` — clone the merged `repositories` list (`--tags repositories`).
+- `drift-update` — upgrade managed tools **including casks**, with a confirmation
+  prompt. The 09:00 agent already upgrades formulae, Galaxy collections and Node;
+  casks are left to this command because they can raise a `sudo` prompt that an
+  unattended agent has no TTY to answer.
+- `drift-log` — tail the rolling drift log.
 - `repos-generate` — scaffold a `~/.repositories.yml` override from this machine.
+
+To clone catalogued repos that are missing, run `drift-apply --tags repositories`.
 
 ## Documentation
 

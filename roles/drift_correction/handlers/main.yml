@@ -1,8 +1,15 @@
 ---
-- name: Reload drift-correction agent
+# Reload every scheduled agent. `bootout` before `bootstrap` because launchd
+# will not replace a loaded job in place; the `|| true` covers the first run,
+# when there is nothing to boot out yet.
+- name: Reload scheduled agents
   ansible.builtin.shell: |
-    launchctl bootout gui/$(id -u) {{ home_dir }}/Library/LaunchAgents/{{ drift_correction_label }}.plist 2>/dev/null || true
-    launchctl bootstrap gui/$(id -u) {{ home_dir }}/Library/LaunchAgents/{{ drift_correction_label }}.plist
+    launchctl bootout gui/$(id -u) "{{ home_dir }}/Library/LaunchAgents/{{ agent.label }}.plist" 2>/dev/null || true
+    launchctl bootstrap gui/$(id -u) "{{ home_dir }}/Library/LaunchAgents/{{ agent.label }}.plist"
   args:
     executable: /bin/zsh
+  loop: "{{ drift_correction_agents }}"
+  loop_control:
+    loop_var: agent
+    label: "{{ agent.label }}"
   changed_when: true

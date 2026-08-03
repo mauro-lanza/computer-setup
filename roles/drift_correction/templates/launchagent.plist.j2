@@ -1,32 +1,38 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Managed by ansible — do not edit manually.
+  One template, one agent per entry in `drift_correction_agents`. Both agents
+  invoke the same runner with a different mode argument.
+-->
 <plist version="1.0">
 <dict>
     <key>Label</key>
-    <string>{{ drift_correction_label }}</string>
+    <string>{{ agent.label }}</string>
 
     <key>ProgramArguments</key>
     <array>
-        <string>{{ drift_correction_wrapper_path }}</string>
+        <string>{{ drift_correction_runner_path }}</string>
+        <string>{{ agent.mode }}</string>
     </array>
 
     <key>StartCalendarInterval</key>
     <dict>
         <key>Hour</key>
-        <integer>{{ drift_correction_schedule_hour }}</integer>
+        <integer>{{ agent.hour }}</integer>
         <key>Minute</key>
-        <integer>{{ drift_correction_schedule_minute }}</integer>
+        <integer>{{ agent.minute }}</integer>
     </dict>
 
     <key>RunAtLoad</key>
     <false/>
 
     <key>StandardOutPath</key>
-    <string>{{ drift_correction_log_dir }}/ansible-drift-correction.stdout.log</string>
+    <string>{{ drift_correction_log_dir }}/{{ agent.label }}.stdout.log</string>
 
     <key>StandardErrorPath</key>
-    <string>{{ drift_correction_log_dir }}/ansible-drift-correction.stderr.log</string>
+    <string>{{ drift_correction_log_dir }}/{{ agent.label }}.stderr.log</string>
 
     <key>EnvironmentVariables</key>
     <dict>

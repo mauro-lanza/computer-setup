@@ -24,16 +24,32 @@
     dest: "{{ drift_correction_wrapper_dir }}/computer-setup-layers"
     mode: "0755"
 
-- name: Deploy drift-check wrapper script
+- name: Deploy the computer-setup runner script
   ansible.builtin.template:
-    src: drift-check.sh.j2
-    dest: "{{ drift_correction_wrapper_path }}"
+    src: computer-setup-run.sh.j2
+    dest: "{{ drift_correction_runner_path }}"
     mode: "0755"
-  notify: Reload drift-correction agent
+  notify: Reload scheduled agents
 
-- name: Deploy drift-correction LaunchAgent plist
+- name: Deploy scheduled LaunchAgent plists
   ansible.builtin.template:
-    src: com.ansible.drift-correction.plist.j2
-    dest: "{{ home_dir }}/Library/LaunchAgents/{{ drift_correction_label }}.plist"
+    src: launchagent.plist.j2
+    dest: "{{ home_dir }}/Library/LaunchAgents/{{ agent.label }}.plist"
     mode: "0644"
-  notify: Reload drift-correction agent
+  loop: "{{ drift_correction_agents }}"
+  loop_control:
+    loop_var: agent
+    label: "{{ agent.label }} ({{ agent.mode }} @ {{ agent.hour }}:{{ '%02d' | format(agent.minute | int) }})"
+  notify: Reload scheduled agents
+
+# Superseded by computer-setup-run: the standalone drift-check wrapper and its
+# separately-named log files are gone. Removing them keeps ~/.local/bin honest
+# (a stale drift-check on PATH would silently shadow the new runner's behaviour).
+- name: Remove superseded drift-check wrapper and logs
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - "{{ drift_correction_wrapper_dir }}/drift-check"
+    - "{{ drift_correction_log_dir }}/ansible-drift-correction.stdout.log"
+    - "{{ drift_correction_log_dir }}/ansible-drift-correction.stderr.log"

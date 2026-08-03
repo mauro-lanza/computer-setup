@@ -5,30 +5,32 @@
 # role regardless of which content layers are active.
 
 # ─── Drift correction helpers ─────────────────────────────────────────────────
-# `drift-check`  → run the same check the LaunchAgent runs (no changes applied)
+# Every command here delegates to ~/.local/bin/computer-setup-run, which owns the
+# ansible-pull invocation (repo URL, branch, prefs, plugin cache, layer manifest)
+# so it is defined in exactly one place.
+#
+# `drift-check`  → run the same check the 10:00 agent runs (no changes applied)
 # `drift-apply`  → reconcile drift by applying the playbook
+# `drift-update` → upgrade managed tools, including casks (see below)
 # `drift-log`    → tail the rolling drift log
 drift-check() {
-    "$HOME/.local/bin/drift-check" "$@"
+    "{{ computer_setup_runner_path }}" check "$@"
     local rc=$?
     [[ $rc -eq 0 ]] && echo "drift-check finished — see $HOME/Library/Logs/ansible-drift-correction.log"
     return $rc
 }
 
 drift-apply() {
-    local prefs="{{ computer_setup_prefs_file }}"
-    local plugin_cache="{{ computer_setup_plugin_cache }}"
-    local layers_manifest="{{ computer_setup_layers_manifest }}"
-    local args=()
-    [[ -f "$prefs" ]] && args+=(-e "@${prefs}" -e "computer_setup_prefs_file=${prefs}")
-    [[ -n "$plugin_cache" ]] && args+=(-e "computer_setup_plugin_cache=${plugin_cache}")
-    [[ -f "$layers_manifest" ]] && args+=(-e "computer_setup_layers_manifest=${layers_manifest}")
-    ansible-pull -U "{{ repo_url }}" -C "{{ repo_branch }}" "${args[@]}" local.yml "$@"
+    "{{ computer_setup_runner_path }}" apply "$@"
 }
 
 # Upgrade managed tools to their latest versions (brew formulae/casks, Ansible
-# Galaxy collections, node LTS). Opt-in: the daily drift check never runs these
-# — they're gated behind the `upgrade`/`never` tags.
+# Galaxy collections, node LTS).
+#
+# The 09:00 agent already upgrades formulae, Galaxy and Node every morning. It
+# deliberately skips casks: those replace app bundles in /Applications and can
+# raise a sudo prompt, which a LaunchAgent has no TTY to answer. This command is
+# how casks get upgraded — run it when you're at the keyboard.
 #
 # Confirmation happens here, in your terminal (a guaranteed TTY), rather than via
 # an in-play Ansible `pause` — a pause inside `ansible-pull` blocks forever when
@@ -52,18 +54,16 @@ drift-log() {
     [[ -f "$log" ]] && tail -n "${1:-100}" "$log" || echo "No drift log yet at $log"
 }
 
-# ─── Repository catalog helpers ─────────────────────────────────────────────────
-# `repos-resurrect`  → clone any catalogued repos that are missing
-# `repos-generate`   → scaffold a catalog from the repos already on this machine
+# ─── Repository catalog helper ──────────────────────────────────────────────────
+# `repos-generate` → scaffold a catalog from the repos already on this machine
 #
-# Opt-in: the `repositories` role is gated behind the `never` tag, so the daily
-# drift check never clones repos and bootstrap won't touch (possibly private)
-# repos before SSH auth exists. Run `repos-resurrect` yourself after
-# `gh auth login`. Cloning is non-destructive — existing checkouts are untouched.
-repos-resurrect() {
-    drift-apply --tags repositories "$@"
-}
-
+# To clone catalogued repos that are missing, run:
+#     drift-apply --tags repositories
+#
+# The `repositories` role is gated behind the `never` tag, so the scheduled
+# agents never clone repos and bootstrap won't touch (possibly private) repos
+# before SSH auth exists. Run it yourself after `gh auth login`. Cloning is
+# non-destructive — existing checkouts are untouched.
 repos-generate() {
     local base="${1:-${PROJECTS_BASE_DIR:-$HOME/Projects}}"
     if [[ ! -d "$base" ]]; then

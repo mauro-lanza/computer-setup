@@ -41,12 +41,25 @@ rm -f /opt/homebrew/bin/zed
 brew install --cask zed
 ```
 
-### The daily drift agent cannot answer sudo prompts
+### The scheduled agents cannot answer sudo prompts
 Installing casks that touch system-owned paths can trigger a `sudo`
-password prompt. The LaunchAgent (and any unattended `ansible-pull`) has no
+password prompt. A LaunchAgent (and any unattended `ansible-pull`) has no
 TTY and the cask task fails. **Do the initial cask installs interactively**,
 then re-run the playbook — once the apps are brew-managed,
 subsequent runs see them as present and skip the privileged step.
+
+This is why the 09:00 upgrade agent runs with `upgrade_include_casks=false`:
+formulae, Galaxy collections and Node all live under `{{ homebrew_prefix }}` and
+never need `sudo`, whereas cask upgrades replace app bundles in `/Applications`.
+Cask upgrades are reserved for the interactive `drift-update`.
+
+### The connectivity probe must match the transport
+The scheduled runner probes GitHub with `git ls-remote` over SSH — the exact
+transport the pull uses — not an HTTPS `curl`. An HTTPS probe passes on networks
+that allow 443 but block 22 (corporate wifi, hotels, captive portals); the pull
+then fails on SSH and fires a "drift check failed" notification indistinguishable
+from a real breakage. A closed laptop, a blocked port and an unavailable key are
+all "can't run right now", and all exit 0 silently.
 
 ## gcloud SDK
 

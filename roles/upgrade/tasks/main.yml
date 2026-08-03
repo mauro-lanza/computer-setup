@@ -36,6 +36,7 @@
   register: upgrade_outdated_casks
   changed_when: false
   failed_when: false
+  when: upgrade_include_casks | bool
 
 - name: Show pending upgrades
   ansible.builtin.debug:
@@ -45,7 +46,11 @@
       {{ upgrade_outdated_formulae.stdout | default('') | trim or '  (up to date)' }}
 
       Homebrew casks:
+      {% if upgrade_include_casks | bool %}
       {{ upgrade_outdated_casks.stdout | default('') | trim or '  (up to date)' }}
+      {% else %}
+        (skipped — upgrade_include_casks=false; run `drift-update` to include casks)
+      {% endif %}
 
       Also refreshed to latest on apply (not pre-diffable):
         Ansible Galaxy collections, Node.js {{ upgrade_nvm_node }}.
@@ -66,6 +71,7 @@
         name: "{{ homebrew_baseline_casks + homebrew_optional_casks }}"
         state: latest
         greedy: "{{ upgrade_casks_greedy | bool }}"
+      when: upgrade_include_casks | bool
 
     - name: Update Ansible Galaxy collections
       ansible.builtin.command:

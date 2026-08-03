@@ -10,5 +10,13 @@ upgrade_assume_yes: false
 # to the newest cask version. Set false to only upgrade non-auto-updating casks.
 upgrade_casks_greedy: true
 
+# Whether cask upgrades are attempted at all. Casks replace app bundles in
+# /Applications, which can trigger a sudo prompt — fatal for an unattended
+# LaunchAgent, which has no TTY to answer it (see docs/operational-notes.md).
+# The scheduled morning upgrade sets this false so it only touches Homebrew
+# formulae, Galaxy collections and Node (all inside {{ homebrew_prefix }}, no
+# sudo). Interactive `drift-update` leaves it true and upgrades everything.
+upgrade_include_casks: true
+
 # Node line to re-resolve to the newest available version on upgrade.
 upgrade_nvm_node: "{{ runtimes_nvm_default_node }}"
