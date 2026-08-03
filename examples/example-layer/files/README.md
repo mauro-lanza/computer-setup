@@ -5,13 +5,19 @@
 # role's own bundled copy. A private layer can therefore override a file shipped
 # by a public one.
 #
-# Recognized file keys (path relative to this files/ directory):
+# Engine-recognized file keys (path relative to this files/ directory).
+# These three are the only keys the orchestrator looks up by name:
 #
 #   zshrc                 → ~/.zshrc  (sources ~/.zsh/*.zsh, prompt, plugins)
 #   p10k.zsh              → Powerlevel10k prompt config      (shell role)
 #   vscode/settings.json  → VS Code user settings            (vscode role)
-#   zed/settings.json     → Zed editor settings              (zed role)
-#   opencode.json         → opencode CLI config              (opencode role)
+#
+# Everything else is a key YOUR layer invents. A capability's `config:` entry
+# names any `src` it likes and the engine resolves that string across layers —
+# it has no built-in knowledge of it. For example the public layer ships
+# `zed/settings.json` and `opencode.json` purely because its own capabilities.yml
+# references those strings; there is no zed role and no opencode role.
+# See `example-tool` in ../capabilities.yml, which uses `example/config.toml`.
 #
 # Shell snippets — files/shell/*.zsh:
 #   Every *.zsh here is deployed into ~/.zsh/ (prefixed with this layer's

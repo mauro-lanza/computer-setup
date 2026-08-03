@@ -36,6 +36,12 @@ validate_layer() {
     [[ "$plugin_name" == "$name" ]] || die "Layer '$name' plugin.yml name is '$plugin_name'"
 
     sv="$(yq -r '.schema_version // 1' "$dest/plugin.yml")"
+    # Must be a plain integer. Bash arithmetic aborts on anything else — with
+    # `schema_version: 2.0` the `((` throws a syntax error to stderr, the test
+    # evaluates false, and the layer is ACCEPTED here while the playbook's own
+    # check (`| int` = 2) rejects it mid-run. Validate the shape, then compare.
+    [[ "$sv" =~ ^[0-9]+$ ]] \
+        || die "Layer '$name' has a non-integer schema_version: '${sv}'"
     if (( sv > schema_version_max )); then
         die "Layer '$name' requires schema_version ${sv}, but this orchestrator supports up to ${schema_version_max}"
     fi
@@ -50,6 +56,13 @@ validate_manifest_entry() {
     priority="$(yq -r ".layers[$index].priority // \"\"" "$manifest")"
 
     [[ -n "$name" ]] || die "Layer entry $index is missing name"
+    # The name becomes a path segment ("$cache/$name") and is interpolated into
+    # Ansible paths, so restrict it to a safe token. Without this, `../../.ssh`
+    # clones a repo over an arbitrary directory, and a name containing spaces
+    # silently word-splits in bootstrap's capability loader.
+    [[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] \
+        || die "Layer name '$name' is invalid — use letters, digits, '.', '_', '-' (must not start with '.' or '-')"
+    [[ "$name" != *".."* ]] || die "Layer name '$name' must not contain '..'"
     [[ -n "$repo" ]] || die "Layer '$name' is missing repo"
     [[ "$priority" =~ ^[0-9]+$ ]] || die "Layer '$name' priority must be a number"
     [[ "$seen_names" != *" $name "* ]] || die "Duplicate layer name in manifest: $name"
@@ -80,7 +93,7 @@ sync_layers() {
 
     mkdir -p "$cache"
 
-    local i name repo dest seen_names=" "
+    local i name repo dest branch seen_names=" "
     for ((i = 0; i < n; i++)); do
         validate_manifest_entry "$manifest" "$i" "$seen_names"
         name="$(yq -r ".layers[$i].name" "$manifest")"
@@ -88,11 +101,33 @@ sync_layers() {
         repo="$(ssh_repo_url "$(yq -r ".layers[$i].repo" "$manifest")")"
         dest="$cache/$name"
 
+        # The plugin cache is a CACHE, not a working copy — nothing should ever
+        # be authored in it. So a failed fast-forward is repairable, and must be
+        # repaired: the old code warned and left the layer pinned at an old
+        # commit forever, after which the daily drift check happily reported
+        # "no drift" while running against stale content.
         if [[ -d "$dest/.git" ]]; then
             log "Updating layer '$name'..."
-            git -C "$dest" remote set-url origin "$repo" || warn "Could not set SSH origin for '$name'"
-            git -C "$dest" pull --ff-only || warn "Could not fast-forward '$name' — leaving as-is"
+            git -C "$dest" remote set-url origin "$repo" \
+                || die "Layer '$name': could not set origin to $repo"
+            if ! git -C "$dest" pull --ff-only; then
+                warn "Layer '$name' could not fast-forward (force-push, or the cache was modified) — resyncing from origin"
+                branch="$(git -C "$dest" symbolic-ref --short HEAD 2>/dev/null || echo HEAD)"
+                git -C "$dest" fetch --depth 1 origin "$branch" \
+                    || die "Layer '$name': fetch failed — cache is stale and cannot be repaired. Remove $dest and re-run."
+                git -C "$dest" reset --hard "origin/$branch" \
+                    || die "Layer '$name': reset failed. Remove $dest and re-run."
+                git -C "$dest" clean -fd >/dev/null 2>&1 || true
+                log "Layer '$name' resynced to origin/$branch"
+            fi
         else
+            # A non-git directory here means an interrupted clone or a stray
+            # path; `git clone` would abort the whole sync with "destination
+            # path already exists". Clear it and start clean.
+            if [[ -e "$dest" ]]; then
+                warn "Layer '$name': '$dest' exists but is not a git checkout — replacing it"
+                rm -rf "$dest"
+            fi
             log "Cloning layer '$name' from $repo..."
             git clone --depth 1 "$repo" "$dest"
         fi

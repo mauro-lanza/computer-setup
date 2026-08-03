@@ -1,0 +1,14 @@
+# Example config file supplied by a content layer.
+#
+# The `example-tool` capability in capabilities.yml declares:
+#   config:
+#     - src: example/config.toml            <- resolved against every layer's files/
+#       dest: "{{ home_dir }}/.config/example/config.toml"
+#
+# `src` is resolved across all active layers, highest priority first, so a
+# higher-priority layer shipping files/example/config.toml replaces this one
+# wholesale. The key is an arbitrary string chosen by THIS layer — the engine
+# does not know the name "example/config.toml".
+
+[example]
+greeting = "hello from the example layer"

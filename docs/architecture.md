@@ -58,7 +58,7 @@ active set — the engine hardcodes no package names or paths:
 - Roles and shell snippets gate on membership in the active set; a shell snippet
   self-declares its gate with a `# cs:requires-capability: <id>` directive.
 
-Always-on **baseline** config (mandatory-for-this-layer packages, `macos_defaults`,
+Always-on **baseline** config (packages this layer always installs, `macos_defaults`,
 `git_config_sections`, …) is plain flat layer vars, separate from opt-in
 capabilities.
 
@@ -82,8 +82,9 @@ The top-level playbook delegates setup work to the `computer_setup` role:
 | `roles/computer_setup/tasks/merge_layer_capabilities.yml` | Merge one layer's `capabilities.yml` into the capability registry. |
 | `roles/computer_setup/tasks/resolve_layer_file.yml` | Resolve one static file from active layers by priority. |
 | `roles/computer_setup/tasks/resolve_layer_template.yml` | Resolve one template from active layers by priority. |
-| `roles/computer_setup/tasks/deploy_layer_file.yml` | Resolve **and** deploy one layer file/template to a destination (creates the parent dir, copies or templates, no-op when unprovided). The primitive behind capability config, the prompt, dbt profiles, and `~/.zshrc`. |
-| `scripts/computer-setup-layers` | Sync layer repos into the plugin cache for bootstrap and drift. |
+| `roles/computer_setup/tasks/deploy_layer_file.yml` | Resolve **and** deploy one layer file/template to a destination (creates the parent dir, copies or templates, no-op when unprovided). The primitive behind every "a layer supplies this file" case: capability `config:` bundles, the prompt, VS Code settings, and `~/.zshrc`. |
+| `roles/computer_setup/tasks/merge_layer_vars.yml` | Merge one layer's `vars.yml` into play scope: enforces `schema_version`, rejects reserved keys, appends lists and overrides scalars by priority. |
+| `scripts/computer-setup-layers` | Sync layer repos into the plugin cache for bootstrap and drift. Validates layer names, `schema_version`, and self-heals a stale or diverged cache. |
 
 See [managers.md](managers.md) for the full manager registry (generated from each
 role's `meta/manager.yml`).

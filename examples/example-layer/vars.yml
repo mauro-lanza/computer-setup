@@ -20,7 +20,14 @@ repositories:
 # ─── VS Code baseline extensions (list — appends across layers) ──────────────
 # vscode_baseline_extensions: [ms-azuretools.vscode-docker]
 
-# ─── dbt (scalars — highest-priority layer wins) ─────────────────────────────
+# ─── Layer-private vars (NOT an engine interface) ────────────────────────────
+# Anything the orchestrator doesn't consume is still merged into scope, so your
+# own templates/ can read it. These dbt values are a private convention between
+# a layer's vars.yml and that same layer's templates/profiles.yml.j2 — the
+# engine has no dbt role and no knowledge of these keys.
 # dbt_bigquery_project: "my-gcp-project"
 # dbt_bigquery_dev_schema: "dbt_dev_me"
 # dbt_bigquery_threads: 8
+
+# Referenced by templates/example.conf.j2 in this layer.
+# example_greeting: "hello"

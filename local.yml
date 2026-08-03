@@ -62,7 +62,7 @@
     # Opt-in repository catalog — clones your projects from ~/.repositories.yml.
     # Gated by `never` so the daily drift check never clones repos and bootstrap
     # doesn't try to clone private repos before SSH auth exists. Run on demand
-    # with the `repos-resurrect` helper (or `--tags repositories`).
+    # with `drift-apply --tags repositories`.
     - { role: repositories, tags: [repositories, never] }
     # Opt-in upgrade path — gated by `never` so only `--tags upgrade` runs it
     # (via the `drift-update` helper). The daily drift check never touches it.

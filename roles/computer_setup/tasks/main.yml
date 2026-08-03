@@ -32,11 +32,15 @@
     computer_setup_merged_vars: {}
     computer_setup_active_layers: []
     computer_setup_capability_registry: {}
-    # Keys a layer's vars.yml may never define. Two groups:
+    # Keys a layer's vars.yml may never define. Three groups:
     #   1. Machine-local prefs — belong in computer_setup_prefs_file.
     #   2. Engine-owned play/role vars — a layer overriding these would break
     #      the orchestrator itself. The computer_setup_* namespace is additionally
     #      guarded by prefix in merge_layer_vars.yml.
+    #   3. Vars that decide what code runs, or runs unattended, on this machine.
+    #      Layer vars land in play scope via set_fact, which outranks role
+    #      defaults AND play vars — so anything here is effectively arbitrary
+    #      remote-code control if a layer repo is ever compromised.
     computer_setup_reserved_layer_keys:
       - selected_capabilities
       - git_user_name
@@ -47,6 +51,31 @@
       - homebrew_prefix
       - vscode_code_binary
       - repositories_base_dir
+      - repositories_catalog_file
+      # These are baked into the deployed runner script, which every scheduled
+      # ansible-pull executes. repo_url being reserved is pointless while the
+      # value the runner actually uses is not.
+      - drift_correction_repo_url
+      - drift_correction_repo_branch
+      - drift_correction_runner_path
+      - drift_correction_wrapper_dir
+      - drift_correction_agents
+      - drift_correction_label
+      - drift_correction_upgrade_label
+      - drift_correction_schedule_hour
+      - drift_correction_schedule_minute
+      - drift_correction_upgrade_schedule_hour
+      - drift_correction_upgrade_schedule_minute
+      # Would let a layer turn the unattended morning upgrade into a full
+      # cask upgrade, or auto-approve upgrades the operator never confirmed.
+      - upgrade_assume_yes
+      - upgrade_include_casks
+      # Ansible's own execution controls.
+      - ansible_connection
+      - ansible_python_interpreter
+      - ansible_shell_executable
+      - ansible_become
+      - ansible_become_user
 
 - name: Check for a layers manifest
   ansible.builtin.stat:

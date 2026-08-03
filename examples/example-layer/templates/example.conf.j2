@@ -1,0 +1,14 @@
+# Example TEMPLATE supplied by a content layer (kind: template).
+#
+# Templates are resolved from every layer's templates/ dir, highest priority
+# wins, then rendered with the merged variable scope — so they can reference
+# engine vars ({{ home_dir }}) and this layer's own vars.yml values.
+#
+# Declared in capabilities.yml as:
+#   config:
+#     - src: example.conf.j2
+#       dest: "{{ home_dir }}/.config/example/example.conf"
+#       kind: template
+
+home = {{ home_dir }}
+greeting = {{ example_greeting | default('hello') }}

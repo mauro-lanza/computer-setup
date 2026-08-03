@@ -33,7 +33,9 @@ capabilities:
     packages: streetsidesoftware.code-spell-checker
     requires_vscode: true
 
-  # A capability with no package: selecting it just deploys a config file.
+  # A capability with no package: selecting it just deploys config.
+  # Shows both kinds — a plain file from files/, and a rendered template
+  # from templates/.
   - id: example-tool
     desc: "Example config-only tool"
     type: feature
@@ -41,3 +43,6 @@ capabilities:
     config:
       - src: example/config.toml
         dest: "{{ home_dir }}/.config/example/config.toml"
+      - src: example.conf.j2
+        dest: "{{ home_dir }}/.config/example/example.conf"
+        kind: template

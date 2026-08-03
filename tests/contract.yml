@@ -58,6 +58,25 @@
         computer_setup_lookup_fallback_dir: "{{ playbook_dir }}/missing-templates"
         computer_setup_deploy_kind: template
 
+    # No layer provides this key and there is no role-bundled fallback. The
+    # primitive documents itself as a no-op here, but first_found(errors=ignore)
+    # returns None and `default('') | length` raised on it, so the entire
+    # "engine runs standalone / a layer omits an optional file" path hard-failed.
+    # Both fixtures always provided every key, which is why it went unnoticed.
+    - name: Deploy a key that no layer provides (must no-op, not fail)
+      ansible.builtin.include_role:
+        name: computer_setup
+        tasks_from: deploy_layer_file
+      vars:
+        computer_setup_lookup_key: no-layer-provides-this.txt
+        computer_setup_deploy_dest: "{{ contract_scratch.path }}/absent/should-not-exist.txt"
+        computer_setup_lookup_fallback_dir: "{{ playbook_dir }}/missing-files"
+
+    - name: Stat the unprovided destination
+      ansible.builtin.stat:
+        path: "{{ contract_scratch.path }}/absent/should-not-exist.txt"
+      register: contract_unprovided
+
     - name: Read back the deployed file
       ansible.builtin.slurp:
         src: "{{ contract_scratch.path }}/nested/contract.txt"
@@ -77,10 +96,15 @@
           # Optional packages are derived from selected_capabilities x the merged
           # capability registry (order follows the selection order). The 'ghost'
           # selection is absent from every capability set and must be ignored silently.
-          - computer_setup_capabilities == ['nvm', 'opencode', 'zed', 'vscode', 'dbt', 'ghost']
-          - homebrew_optional_formulae == ['nvm', 'anomalyco/tap/opencode']
+          - computer_setup_capabilities == ['nvm', 'opencode', 'zed', 'vscode', 'dbt', 'vscode-peacock', 'ghost']
+          # Union-by-id: `nvm` exists in both layers; the higher-priority one
+          # replaces it wholesale, so the package is override's, not base's.
+          - computer_setup_capability_registry['nvm'].packages == 'nvm-from-override'
+          - "'override wins' in computer_setup_capability_registry['nvm'].desc"
+          - homebrew_optional_formulae == ['nvm-from-override', 'anomalyco/tap/opencode']
           - homebrew_optional_casks == ['zed', 'visual-studio-code']
-          - vscode_optional_extensions == []
+          # type: vscode routes to extensions, not formulae/casks.
+          - vscode_optional_extensions == ['johnpapa.vscode-peacock']
           # Gating is capability membership in the active set. 'adopted' is not
           # selected but its adopt_if_present path exists, so it becomes active.
           - "'nvm' in computer_setup_active_capabilities"
@@ -107,6 +131,8 @@
           # deploy_layer_file: highest-priority layer wins, parent dir is created
           - (contract_deployed_file.content | b64decode | trim) == 'override file'
           - (contract_deployed_template.content | b64decode | trim) == 'override template'
+          # An unprovided key deploys nothing and does not create the parent dir.
+          - not contract_unprovided.stat.exists
 
     - name: Clean up scratch dir
       ansible.builtin.file:

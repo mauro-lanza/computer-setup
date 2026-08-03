@@ -90,7 +90,7 @@ rm -f ~/.local/bin/duckdb
 
 - The `homebrew` role is `state: present` only — **no prune/absent**.
   Applying never uninstalls manually-installed apps, unmanaged Homebrew
-  leaves, or extra Python versions. Removing an item from the mandatory
+  leaves, or extra Python versions. Removing an item from the baseline
   lists just stops *enforcing* it; nothing is uninstalled.
 - Cleanup of unwanted software is therefore always a **manual, deliberate**
   step, never a side effect of a run.
@@ -108,8 +108,9 @@ with `No such file or directory: /Applications/Visual`.
 Tools installed via vendor scripts leave a footprint (a `~/.tool` dir plus
 `PATH`/completion lines in `.zshrc`). To bring one under management:
 
-1. Add it as a catalog item in a content layer's `catalog.yml` and select it in
-   `~/.mac-prefs.yml`.
+1. Add it as a capability in a content layer's `capabilities.yml`, then add that
+   capability's `id` to `selected_capabilities` in `~/.mac-prefs.yml`.
+   (Selection is by capability id, not by package name.)
 2. Apply the playbook (Homebrew installs the managed copy).
 3. Remove the manual install dir and its `.zshrc` lines — the managed
    `path.zsh` already covers `/opt/homebrew/bin`.

@@ -23,12 +23,17 @@
   ansible.builtin.command: brew update
   changed_when: false
 
+# `brew outdated` with NO package arguments reports every outdated package on the
+# machine, managed or not — so with empty lists the preview would show unmanaged
+# packages as "pending" and the apply step (which passes the same empty list to
+# the homebrew module) would then upgrade nothing. Skip instead of lying.
 - name: Determine which managed formulae are outdated
   ansible.builtin.command:
     argv: "{{ ['brew', 'outdated', '--formula', '--verbose'] + homebrew_baseline_formulae + homebrew_optional_formulae }}"
   register: upgrade_outdated_formulae
   changed_when: false
   failed_when: false
+  when: (homebrew_baseline_formulae + homebrew_optional_formulae) | length > 0
 
 - name: Determine which managed casks are outdated
   ansible.builtin.command:
@@ -36,20 +41,28 @@
   register: upgrade_outdated_casks
   changed_when: false
   failed_when: false
-  when: upgrade_include_casks | bool
+  when:
+    - upgrade_include_casks | bool
+    - (homebrew_baseline_casks + homebrew_optional_casks) | length > 0
 
 - name: Show pending upgrades
   ansible.builtin.debug:
     msg: |-
       ── Pending upgrades (preview) ───────────────────────────────
       Homebrew formulae:
+      {% if (homebrew_baseline_formulae + homebrew_optional_formulae) | length == 0 %}
+        (none managed)
+      {% else %}
       {{ upgrade_outdated_formulae.stdout | default('') | trim or '  (up to date)' }}
+      {% endif %}
 
       Homebrew casks:
-      {% if upgrade_include_casks | bool %}
-      {{ upgrade_outdated_casks.stdout | default('') | trim or '  (up to date)' }}
-      {% else %}
+      {% if not (upgrade_include_casks | bool) %}
         (skipped — upgrade_include_casks=false; run `drift-update` to include casks)
+      {% elif (homebrew_baseline_casks + homebrew_optional_casks) | length == 0 %}
+        (none managed)
+      {% else %}
+      {{ upgrade_outdated_casks.stdout | default('') | trim or '  (up to date)' }}
       {% endif %}
 
       Also refreshed to latest on apply (not pre-diffable):
@@ -65,13 +78,16 @@
       community.general.homebrew:
         name: "{{ homebrew_baseline_formulae + homebrew_optional_formulae }}"
         state: latest
+      when: (homebrew_baseline_formulae + homebrew_optional_formulae) | length > 0
 
     - name: Upgrade managed Homebrew casks to latest
       community.general.homebrew_cask:
         name: "{{ homebrew_baseline_casks + homebrew_optional_casks }}"
         state: latest
         greedy: "{{ upgrade_casks_greedy | bool }}"
-      when: upgrade_include_casks | bool
+      when:
+        - upgrade_include_casks | bool
+        - (homebrew_baseline_casks + homebrew_optional_casks) | length > 0
 
     - name: Update Ansible Galaxy collections
       ansible.builtin.command:

@@ -130,6 +130,7 @@
     computer_setup_lookup_key: zshrc
     computer_setup_deploy_dest: "{{ home_dir }}/.zshrc"
     computer_setup_lookup_fallback_dir: "{{ role_path }}/files"
+    computer_setup_deploy_backup: true
     computer_setup_deploy_notify: Shell config changed
 
 # ─── ~/.p10k.zsh (layer content) ──────────────────────────────────────────────
@@ -144,7 +145,29 @@
     computer_setup_lookup_fallback_dir: "{{ role_path }}/files"
     computer_setup_deploy_notify: Shell config changed
 
+- name: Check for an unmanaged zsh framework
+  ansible.builtin.stat:
+    path: "{{ home_dir }}/.oh-my-zsh"
+  register: shell_oh_my_zsh_stat
+
+# Opt-in, not automatic. This used to run unconditionally, which meant the first
+# apply on a machine whose home directory was restored from backup silently
+# deleted any custom plugins, themes and `custom/` content under ~/.oh-my-zsh —
+# exactly when the user had not yet had a chance to move them into a layer.
+# Nothing here establishes that the directory is "legacy" on THIS machine, so
+# the decision belongs to the operator: set shell_remove_oh_my_zsh=true.
 - name: Remove legacy zsh framework directory
   ansible.builtin.file:
     path: "{{ home_dir }}/.oh-my-zsh"
     state: absent
+  when: shell_remove_oh_my_zsh | bool
+
+- name: Warn that an unmanaged zsh framework is present
+  ansible.builtin.debug:
+    msg: >-
+      ~/.oh-my-zsh exists but is not managed by computer-setup. The layer-supplied
+      ~/.zshrc does not source it, so it is inert. Remove it yourself, or re-run
+      with -e shell_remove_oh_my_zsh=true to have this role delete it.
+  when:
+    - not (shell_remove_oh_my_zsh | bool)
+    - shell_oh_my_zsh_stat.stat.exists

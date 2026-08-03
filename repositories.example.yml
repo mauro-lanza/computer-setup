@@ -3,7 +3,7 @@
 #
 # Copy to ~/.repositories.yml (NOT committed — it's per-machine, like
 # ~/.mac-prefs.yml, and may contain private remote URLs), edit to taste, then
-# clone everything with the `repos-resurrect` helper (or `--tags repositories`).
+# clone everything with `drift-apply --tags repositories`.
 #
 # Tip: scaffold this file automatically from a machine that already has your
 # repos checked out:

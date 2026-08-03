@@ -67,6 +67,14 @@ esac
     echo "──────────────────────────────────────────────────────────"
 } >> "$LOG_FILE"
 
+# ─── SSH behaviour for every git operation below ─────────────────────────────
+# EXPORTED, not scoped to the probe. A command-prefix assignment would apply to
+# `git ls-remote` alone, leaving the layer sync and the ansible-pull itself free
+# to hit an interactive "Are you sure you want to continue connecting?" or a key
+# passphrase prompt — inside a LaunchAgent with no TTY, that hangs forever.
+# BatchMode makes any such prompt an immediate failure instead.
+export GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=${CONNECTIVITY_TIMEOUT} -o StrictHostKeyChecking=accept-new"
+
 # ─── Connectivity guard ──────────────────────────────────────────────────────
 # Probe the transport we actually use: an SSH git fetch against the real repo.
 # The previous guard curled https://github.com, which passes on networks that
@@ -74,8 +82,7 @@ esac
 # then failed on SSH and fired a "drift check failed" notification that was
 # indistinguishable from a real breakage. A closed laptop, a blocked port and an
 # expired key are all "can't work right now", not "your config is broken".
-if ! GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=${CONNECTIVITY_TIMEOUT} -o StrictHostKeyChecking=accept-new" \
-     git ls-remote --exit-code "$REPO_URL" "$REPO_BRANCH" >/dev/null 2>&1; then
+if ! git ls-remote --exit-code "$REPO_URL" "$REPO_BRANCH" >/dev/null 2>&1; then
     log "RESULT: skipped — ${REPO_URL} unreachable (offline, port 22 blocked, or SSH key unavailable)"
     exit 0
 fi

@@ -34,6 +34,34 @@ SCHEMA_VERSION_MAX=1
 
 export HOMEBREW_NO_ANALYTICS=1
 
+# ─── Reattach stdin to the terminal ──────────────────────────────────────────
+# Under `curl … | bash` stdin IS the script source, so every `read` consumes the
+# not-yet-parsed remainder of this file: prompts silently take their default
+# branch and the script truncates mid-run, with no error. Since the documented
+# entry point is a pipe, re-point stdin at the controlling terminal before any
+# prompt runs. INTERACTIVE records whether we actually have one.
+INTERACTIVE=1
+if [[ ! -t 0 ]]; then
+    if [[ -r /dev/tty ]] && { exec < /dev/tty; } 2>/dev/null; then
+        :
+    else
+        INTERACTIVE=0
+    fi
+fi
+
+# Refuse to guess. A non-interactive run cannot answer "which layers?" or "what
+# is your git email?", and silently defaulting those is how you end up with an
+# empty layer manifest and no capabilities (both are destructive to re-run).
+require_tty() {
+    if [[ "$INTERACTIVE" -eq 0 ]]; then
+        error "No terminal available for prompts."
+        error "Re-run attached to a TTY, e.g.:"
+        error "    bash <(curl -fsSL ${1:-<raw-url>/bootstrap.sh})"
+        error "or clone the repo and run ./bootstrap.sh"
+        exit 1
+    fi
+}
+
 # When piped via curl, BASH_SOURCE may be empty. Fall back to current dir.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || pwd)"
 LAYER_SYNC_SCRIPT="$SCRIPT_DIR/scripts/computer-setup-layers"
@@ -53,6 +81,7 @@ error() { echo -e "${RED}✗${NC} $1" >&2; }
 # ─── Helper: yes/no prompt with custom default ───────────────────────────────
 ask_yn() {
     local prompt="$1" default="${2:-n}" yn
+    require_tty
     if [[ "$default" == "y" ]]; then
         read -rp "$prompt [Y/n]: " yn
         yn="${yn:-y}"
@@ -143,18 +172,42 @@ install_galaxy_collections() {
 # GitHub auth MUST complete before layers are cloned. Uses the gh device flow
 # (browser) and uploads an SSH key so subsequent SSH clones of layers and
 # repositories work without prompts.
+#
+# The readiness probe is an actual SSH operation, not `gh auth status`. The
+# latter only proves an API token exists — it says nothing about an SSH key
+# being uploaded or port 22 being reachable. A machine authenticated with
+# `--git-protocol https`, or on a token-only login, passes `gh auth status` and
+# then dies `Permission denied (publickey)` inside clone_layers under `set -e`.
+# Probe the transport you are about to use.
+github_ssh_ready() {
+    GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new" \
+        git ls-remote "$REPO_URL" HEAD &>/dev/null
+}
+
 ensure_gh_auth() {
-    if gh auth status &>/dev/null; then
-        ok "GitHub CLI already authenticated"
+    if github_ssh_ready; then
+        ok "GitHub SSH access confirmed"
         return
     fi
-    info "GitHub authentication is required to clone content layers over SSH."
-    info "A browser device-code flow will open and an SSH key will be uploaded."
+    if gh auth status &>/dev/null; then
+        warn "GitHub CLI is authenticated, but SSH to github.com does not work."
+        warn "That usually means no SSH key is uploaded, or port 22 is blocked here."
+        info "Re-running the login flow to add an SSH key..."
+    else
+        info "GitHub authentication is required to clone content layers over SSH."
+        info "A browser device-code flow will open and an SSH key will be uploaded."
+    fi
     if ! gh auth login --hostname github.com --git-protocol ssh --web; then
         error "GitHub authentication failed. Re-run bootstrap once authenticated."
         exit 1
     fi
-    ok "GitHub authenticated"
+    if ! github_ssh_ready; then
+        error "Still cannot reach ${REPO_URL} over SSH after authenticating."
+        error "Check that an SSH key is uploaded (gh ssh-key list) and that port 22"
+        error "is not blocked on this network."
+        exit 1
+    fi
+    ok "GitHub authenticated and SSH access confirmed"
 }
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -171,6 +224,7 @@ show_layers() {
 
 # Interactively define/modify the layer manifest, persisted to layers.yml.
 manage_layers() {
+    require_tty
     mkdir -p "$CONFIG_DIR"
     echo
     info "Content layers — pluggable repos that supply catalog options, vars, and files."
@@ -328,6 +382,7 @@ load_prior_prefs() {
 
 # ─── Git identity ────────────────────────────────────────────────────────────
 gather_git_identity() {
+    require_tty
     info "Git identity (used for commits)"
     local default_hint=""
     if [[ -n "$PRIOR_NAME" ]]; then default_hint=" [$PRIOR_NAME]"; fi

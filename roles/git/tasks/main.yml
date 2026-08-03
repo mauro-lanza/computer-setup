@@ -25,3 +25,8 @@
     src: gitconfig.j2
     dest: "{{ home_dir }}/.gitconfig"
     mode: "0644"
+    # This template renders ONLY git_config_sections from the layers, so a
+    # pre-existing ~/.gitconfig (credential.helper, user.signingkey, gpg.format,
+    # includeIf blocks for work repos) is replaced wholesale. On a migrated
+    # machine that happens before the user could move any of it into a layer.
+    backup: true

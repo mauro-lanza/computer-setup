@@ -34,8 +34,8 @@ Changing jobs = swap one layer, touch nothing else.
 ## Quick start
 
 ```bash
-# One-liner on a fresh Mac:
-curl -fsSL https://raw.githubusercontent.com/mauro-lanza/computer-setup/main/bootstrap.sh | bash
+# One-liner on a fresh Mac (must be run from a terminal — bootstrap is interactive):
+bash <(curl -fsSL https://raw.githubusercontent.com/mauro-lanza/computer-setup/main/bootstrap.sh)
 
 # Or clone first after GitHub SSH auth (gives you the repo for later edits):
 git clone git@github.com:mauro-lanza/computer-setup.git
@@ -43,19 +43,26 @@ cd computer-setup
 ./bootstrap.sh
 ```
 
-`bootstrap.sh` runs four phases:
+Bootstrap prompts for layers and git identity, so it needs a terminal. Piping
+(`curl … | bash`) also works — the script reattaches stdin to `/dev/tty` — but
+process substitution above is preferred because it never puts the script on
+stdin in the first place. With no TTY at all (CI, `nohup`), bootstrap fails with
+an explicit message rather than silently accepting every default.
 
-1. **Prerequisites + GitHub auth** — platform check → Xcode CLT → Homebrew →
+`bootstrap.sh` runs four phases (numbered as the script's own banners do, 0-3):
+
+0. **Prerequisites + GitHub auth** — platform check → Xcode CLT → Homebrew →
    `yq`/`git`/`gh`/`ansible` → `gh auth login` (browser device flow + SSH key).
-   Auth completes before any layer is cloned.
-2. **Layer selection & fetch** — define/modify your layer manifest (persisted to
+   Auth completes before any layer is cloned, and readiness is confirmed with a
+   real `git ls-remote` over SSH rather than `gh auth status`.
+1. **Layer selection & fetch** — define/modify your layer manifest (persisted to
    `~/.config/computer-setup/layers.yml`), then clone each layer into the plugin
    cache (`~/.local/share/computer-setup/plugins/<name>/`). GitHub layers clone
    over SSH. Each layer's `schema_version` is validated.
-3. **Build preferences** — merge every layer's `capabilities.yml` into one menu, prompt
+2. **Build preferences** — merge every layer's `capabilities.yml` into one menu, prompt
    for git identity, optional tools, and feature toggles, then write
    `~/.mac-prefs.yml`.
-4. **Run Ansible** — `ansible-pull` this orchestrator, merging the layer vars and
+3. **Run Ansible** — `ansible-pull` this orchestrator, merging the layer vars and
    resolving layer files.
 
 ## How layers merge
@@ -82,7 +89,7 @@ your-layer/
   templates/     # optional templates roles resolve by key
 ```
 
-Then add it during `bootstrap.sh` Phase 1, or edit
+Then add it during `bootstrap.sh` Phase 1 (layer selection), or edit
 `~/.config/computer-setup/layers.yml` directly (see
 [layers.example.yml](layers.example.yml)).
 

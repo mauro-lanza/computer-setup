@@ -1,6 +1,14 @@
 ---
 capabilities:
-  # Higher-priority layer can override a lower one's entry (same id).
+  # Union-by-id collision: `nvm` is ALSO defined in the base layer. The higher
+  # priority layer must win outright (desc AND packages), not merge field-wise.
+  # Until this fixture existed, base and override shared zero ids, so the
+  # combine() implementing the documented "higher priority wins" rule was never
+  # exercised — a regression making the LOWER layer win passed the whole suite.
+  - id: nvm
+    desc: "Node Version Manager (override wins)"
+    type: formula
+    packages: nvm-from-override
   - id: vscode
     desc: "Visual Studio Code"
     type: cask
@@ -12,3 +20,9 @@ capabilities:
     type: feature
     config:
       - { src: profiles.yml.j2, dest: "/tmp/cs-contract/dbt-profiles.yml", kind: template }
+  # type: vscode — the third branch of the package split. Previously asserted
+  # only as "== []", which would pass even if the branch returned nothing.
+  - id: vscode-peacock
+    desc: "VS Code: Peacock"
+    type: vscode
+    packages: johnpapa.vscode-peacock

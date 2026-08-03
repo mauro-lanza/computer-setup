@@ -1,0 +1,4 @@
+---
+# home_dir is engine-owned. A layer setting it would repoint every path
+# the orchestrator writes to.
+home_dir: /tmp/hijacked
