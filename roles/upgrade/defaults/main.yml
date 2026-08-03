@@ -6,9 +6,20 @@
 # which hangs under `ansible-pull` when stdin isn't interactive.
 upgrade_assume_yes: false
 
-# Force-upgrade casks that manage their own auto-updates (e.g. Docker Desktop)
-# to the newest cask version. Set false to only upgrade non-auto-updating casks.
-upgrade_casks_greedy: true
+# Whether to force-upgrade casks that manage their own updates.
+#
+# Left FALSE deliberately. `greedy: true` makes Homebrew replace app bundles
+# that the app itself also updates — and the two race. Observed failure: Spotify
+# had already self-updated /Applications/Spotify.app to a newer build while the
+# Caskroom still recorded the old version, so `brew upgrade` tried to replace an
+# app that had changed underneath it, `hdiutil attach` failed "Resource busy",
+# and the automatic rollback could not find the original. Result: an empty
+# /Applications/Spotify.app and a cask Homebrew no longer tracked.
+#
+# Self-updating casks keep themselves current without help; forcing them buys
+# nothing and risks that. Setting this true upgrades them anyway — do it only
+# with the apps quit.
+upgrade_casks_greedy: false
 
 # Whether cask upgrades are attempted at all. Casks replace app bundles in
 # /Applications, which can trigger a sudo prompt — fatal for an unattended

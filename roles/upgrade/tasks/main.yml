@@ -80,11 +80,21 @@
         state: latest
       when: (homebrew_baseline_formulae + homebrew_optional_formulae) | length > 0
 
+    # One cask at a time, and a failure does not abort the run. Passing the whole
+    # list to a single task meant the first broken cask killed everything after
+    # it — when Spotify failed mid-list, the Galaxy and Node upgrades that follow
+    # never ran at all, and the run reported only the cask error. Failures are
+    # collected and reported together at the end of the role.
     - name: Upgrade managed Homebrew casks to latest
       community.general.homebrew_cask:
-        name: "{{ homebrew_baseline_casks + homebrew_optional_casks }}"
+        name: "{{ item }}"
         state: latest
         greedy: "{{ upgrade_casks_greedy | bool }}"
+      loop: "{{ homebrew_baseline_casks + homebrew_optional_casks }}"
+      loop_control:
+        label: "{{ item }}"
+      register: upgrade_cask_results
+      ignore_errors: true
       when:
         - upgrade_include_casks | bool
         - (homebrew_baseline_casks + homebrew_optional_casks) | length > 0
@@ -117,6 +127,26 @@
       register: upgrade_nvm_result
       changed_when: "'Downloading and installing' in upgrade_nvm_result.stdout"
       when: upgrade_nvm_script.stat.exists
+
+- name: Report casks that failed to upgrade
+  ansible.builtin.fail:
+    msg: |-
+      {{ _failed | length }} cask(s) failed to upgrade; everything else completed.
+      {% for f in _failed %}
+        • {{ f.item }}: {{ (f.msg | default('')) | trim | truncate(200) }}
+      {% endfor %}
+      A cask that manages its own updates can leave Homebrew's record out of step
+      with the app on disk, and a failed upgrade can roll back badly. To recover one:
+        1. Quit the app.
+        2. brew uninstall --cask --force <name>
+        3. brew install --cask <name>
+      If /Applications/<App>.app is left as an empty directory, remove it with
+      `rmdir` before reinstalling.
+  vars:
+    _failed: >-
+      {{ upgrade_cask_results.results | default([]) | selectattr('failed', 'defined')
+         | selectattr('failed') | list }}
+  when: _failed | length > 0
 
 - name: Explain how to apply when not confirmed
   ansible.builtin.debug:

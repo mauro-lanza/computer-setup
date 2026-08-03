@@ -41,6 +41,44 @@ rm -f /opt/homebrew/bin/zed
 brew install --cask zed
 ```
 
+### Self-updating casks and `greedy`
+Most GUI casks here update themselves (`auto_updates` in `brew info`): Spotify,
+Docker Desktop, VS Code, Firefox, Discord, Zed, Stats, Rectangle, gcloud-cli,
+Antigravity, opencode-desktop. `brew upgrade --cask --greedy` forces those to be
+replaced by Homebrew anyway, and the two update paths race.
+
+Observed failure: Spotify had already self-updated `/Applications/Spotify.app`
+to a newer build while the Caskroom still recorded the previous version. The
+forced upgrade tried to replace an app that had changed underneath it,
+`hdiutil attach` failed `Resource busy`, and Homebrew's automatic rollback then
+could not find the original app to restore. The result was an **empty**
+`/Applications/Spotify.app`, a `<version>.upgrading` directory holding the real
+app, and `brew list --cask spotify` reporting *not installed*.
+
+`upgrade_casks_greedy` is therefore **false** by default. Self-updaters keep
+themselves current; forcing them buys nothing. Set it true only with the apps
+quit.
+
+**Recovering a cask left in that state:**
+
+```bash
+# 1. Quit the app.
+# 2. If /Applications/<App>.app is an empty directory, remove it:
+rmdir /Applications/Spotify.app
+# 3. Clear Homebrew's partial record and reinstall:
+brew uninstall --cask --force spotify
+brew install --cask spotify
+```
+
+The real app usually survives under
+`/opt/homebrew/Caskroom/<name>/<version>.upgrading/` if you need to recover data
+before reinstalling.
+
+Cask upgrades also run **one cask at a time**. Passing the whole list to a single
+task meant the first failure aborted everything after it — including the Ansible
+Galaxy and Node upgrades that follow. Failures are now collected and reported
+together at the end of the run.
+
 ### The scheduled agents cannot answer sudo prompts
 Installing casks that touch system-owned paths can trigger a `sudo`
 password prompt. A LaunchAgent (and any unattended `ansible-pull`) has no
