@@ -5,6 +5,9 @@
 # role's own bundled copy. A private layer can therefore override a file shipped
 # by a public one.
 #
+# Any key below may instead be supplied as ../templates/<key>.j2, which is
+# rendered rather than copied. The key is unchanged; see docs/architecture.md.
+#
 # Engine-recognized file keys (path relative to this files/ directory).
 # These three are the only keys the orchestrator looks up by name:
 #
@@ -22,8 +25,12 @@
 # Shell snippets — files/shell/*.zsh:
 #   Every *.zsh here is deployed into ~/.zsh/ (prefixed with this layer's
 #   priority + name) and sourced by the layer-provided ~/.zshrc. Use these for
-#   aliases, functions, PATH tweaks, and tool integrations. They are copied
-#   verbatim (not templated), so write plain zsh and self-guard on tool presence.
+#   aliases, functions, PATH tweaks, and tool integrations.
+#
+#   A snippet named *.zsh.j2 is RENDERED as a template (it can read merged layer
+#   vars such as homebrew_prefix) and lands at the same dest with .j2 stripped.
+#   A plain *.zsh is copied verbatim — write plain zsh and self-guard on tool
+#   presence.
 #
 #   Optional capability gate — add a directive line to a snippet to deploy it
 #   only when a capability is selected (see capabilities.yml):

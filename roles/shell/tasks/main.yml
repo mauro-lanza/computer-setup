@@ -26,10 +26,17 @@
 #   # cs:requires-capability: <name>
 # The engine then deploys it only when <name> is an active capability. This
 # keeps the orchestrator content-agnostic — it never hardcodes layer filenames.
+#
+# A snippet named `*.zsh.j2` is rendered as a template instead of copied, and
+# lands at the same dest with the .j2 stripped. That is how a snippet reaches
+# layer vars (homebrew_prefix, a Python version, an active-capability list)
+# rather than repeating them as literals.
 - name: Discover layer shell snippets
   ansible.builtin.find:
     paths: "{{ computer_setup_layer_cache }}/{{ item.name }}/files/shell"
-    patterns: "*.zsh"
+    patterns:
+      - "*.zsh"
+      - "*.zsh.j2"
     file_type: file
   loop: "{{ computer_setup_active_layers | default([]) }}"
   loop_control:
@@ -48,7 +55,9 @@
            'dest': shell_zsh_config_dir ~ '/'
                    ~ (('%0' ~ (shell_priority_width | int) ~ 'd')
                       | format(_f.0.item.priority | int))
-                   ~ '-' ~ _f.0.item.name ~ '-' ~ (_f.1.path | basename),
+                   ~ '-' ~ _f.0.item.name ~ '-'
+                   ~ (_f.1.path | basename | regex_replace('\.j2$', '')),
+           'template': _f.1.path.endswith('.j2'),
            'enabled': (_cap | length == 0)
                       or (_cap in (computer_setup_active_capabilities | default([])))
          }] }}
@@ -74,7 +83,17 @@
     src: "{{ item.src }}"
     dest: "{{ item.dest }}"
     mode: "0644"
-  loop: "{{ shell_snippet_map | default([]) }}"
+  loop: "{{ shell_snippet_map | default([]) | rejectattr('template') | list }}"
+  loop_control:
+    label: "{{ item.dest | basename }}"
+  notify: Shell config changed
+
+- name: Render layer shell snippet templates
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "{{ item.dest }}"
+    mode: "0644"
+  loop: "{{ shell_snippet_map | default([]) | selectattr('template') | list }}"
   loop_control:
     label: "{{ item.dest | basename }}"
   notify: Shell config changed

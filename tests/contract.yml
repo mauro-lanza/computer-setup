@@ -30,6 +30,19 @@
         computer_setup_deploy_dest: "{{ contract_scratch.path }}/nested/contract.txt"
         computer_setup_lookup_fallback_dir: "{{ playbook_dir }}/missing-files"
 
+    - name: Deploy a key promoted from a file to a template
+      # `promoted.conf` is supplied as files/promoted.conf by the HIGHER-priority
+      # layer and as templates/promoted.conf.j2 by the LOWER-priority one. The
+      # template must win: promotion is a property of the key, not of priority.
+      # This is what lets one value reach several config files.
+      ansible.builtin.include_role:
+        name: computer_setup
+        tasks_from: deploy_layer_file
+      vars:
+        computer_setup_lookup_key: promoted.conf
+        computer_setup_deploy_dest: "{{ contract_scratch.path }}/nested/promoted.conf"
+        computer_setup_lookup_fallback_dir: "{{ playbook_dir }}/missing-files"
+
     - name: Deploy fixture template via the engine primitive
       ansible.builtin.include_role:
         name: computer_setup
@@ -61,6 +74,11 @@
       ansible.builtin.slurp:
         src: "{{ contract_scratch.path }}/nested/contract.txt"
       register: contract_deployed_file
+
+    - name: Read back the promoted (file -> template) deployment
+      ansible.builtin.slurp:
+        src: "{{ contract_scratch.path }}/nested/promoted.conf"
+      register: contract_promoted
 
     - name: Read back the deployed template
       ansible.builtin.slurp:
@@ -109,7 +127,15 @@
           # deploy_layer_file: highest-priority layer wins, parent dir is created
           - (contract_deployed_file.content | b64decode | trim) == 'override file'
           - (contract_deployed_template.content | b64decode | trim) == 'override template'
+          # A key supplied as templates/<key>.j2 is RENDERED even when a
+          # higher-priority layer supplies files/<key> verbatim.
+          - >-
+            (contract_promoted.content | b64decode | trim)
+            == 'rendered from base: override'
           # An unprovided key deploys nothing and does not create the parent dir.
+          # This runs AFTER several successful deploys, so it also asserts the
+          # primitive resets its resolution state between invocations rather than
+          # inheriting the previous key's source.
           - not contract_unprovided.stat.exists
 
     - name: Clean up scratch dir

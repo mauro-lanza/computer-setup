@@ -9,26 +9,68 @@
 #   computer_setup_lookup_key           key resolved across layer search dirs
 #   computer_setup_deploy_dest          destination path (parent dir is created)
 #   computer_setup_lookup_fallback_dir  role-bundled fallback directory
-#   computer_setup_deploy_kind          'file' (copy) | 'template' (default 'file')
+#   computer_setup_deploy_kind          'file' (default) | 'template'
 #   computer_setup_deploy_mode          file mode (default '0644')
 #   computer_setup_deploy_backup        keep a timestamped backup of an existing
 #                                       destination (default false; set for files
 #                                       a user may have authored, e.g. ~/.zshrc)
 #   computer_setup_deploy_notify        handler name(s) to notify (default none)
+#
+# Resolution, for kind 'file' (the default), is TWO-STEP:
+#   1. `<key>.j2` in the layers' templates/ dirs  -> rendered as a template
+#   2. `<key>`    in the layers' files/ dirs      -> copied verbatim
+#
+# So a layer promotes any config file to a template by renaming it to `<key>.j2`
+# and moving it under templates/ — no caller, capability, or engine change. This
+# is what lets one value (an AI model, a Python version, homebrew_prefix) reach
+# several config files, which verbatim files/ cannot do.
+#
+# kind 'template' skips step 1 and resolves `<key>` in templates/ directly, for
+# callers whose key already carries the .j2 suffix (capability `config:` entries).
+#
+# A key should be supplied as EITHER a file or a template across all layers, not
+# both: step 1 wins over step 2 regardless of layer priority.
 
-- name: "Resolve layer {{ computer_setup_deploy_kind | default('file') }}: {{ computer_setup_lookup_key }}"
+- name: "Reset resolution state for {{ computer_setup_lookup_key }}"
+  # set_fact persists across include_tasks invocations: without this, a key that
+  # resolves to nothing would inherit the PREVIOUS key's source and deploy it to
+  # the wrong destination.
   ansible.builtin.set_fact:
-    _cs_deploy_src: "{{ lookup('ansible.builtin.first_found', _params, errors='ignore') }}"
+    _cs_tpl_src: ""
+    _cs_file_src: ""
+
+- name: "Resolve layer template: {{ computer_setup_lookup_key }}"
+  ansible.builtin.set_fact:
+    _cs_tpl_src: "{{ lookup('ansible.builtin.first_found', _params, errors='ignore') }}"
   vars:
     # One expression, not an intermediate var: the intermediate is only a list
     # via native-type resolution, which static analysers flag as string + list.
     _params:
+      files: >-
+        {{ [computer_setup_lookup_key]
+           if (computer_setup_deploy_kind | default('file')) == 'template'
+           else [computer_setup_lookup_key ~ '.j2'] }}
+      paths: >-
+        {{ (computer_setup_template_search_dirs | default([]))
+           + [computer_setup_lookup_fallback_dir] }}
+
+- name: "Resolve layer file: {{ computer_setup_lookup_key }}"
+  ansible.builtin.set_fact:
+    _cs_file_src: "{{ lookup('ansible.builtin.first_found', _params, errors='ignore') }}"
+  vars:
+    _params:
       files: ["{{ computer_setup_lookup_key }}"]
       paths: >-
-        {{ ((computer_setup_template_search_dirs
-             if (computer_setup_deploy_kind | default('file')) == 'template'
-             else computer_setup_file_search_dirs) | default([]))
+        {{ (computer_setup_file_search_dirs | default([]))
            + [computer_setup_lookup_fallback_dir] }}
+  when:
+    - (computer_setup_deploy_kind | default('file')) != 'template'
+    - _cs_tpl_src | default('', true) | length == 0
+
+- name: "Select the resolved source for {{ computer_setup_deploy_dest | basename }}"
+  ansible.builtin.set_fact:
+    _cs_deploy_src: "{{ _cs_tpl_src | default('', true) or _cs_file_src | default('', true) }}"
+    _cs_deploy_as_template: "{{ (_cs_tpl_src | default('', true) | length) > 0 }}"
 
 - name: "Ensure parent directory exists: {{ computer_setup_deploy_dest | dirname }}"
   ansible.builtin.file:
@@ -44,7 +86,7 @@
     mode: "{{ computer_setup_deploy_mode | default('0644') }}"
     backup: "{{ computer_setup_deploy_backup | default(false) | bool }}"
   when:
-    - (computer_setup_deploy_kind | default('file')) == 'template'
+    - _cs_deploy_as_template | bool
     - _cs_deploy_src | default('', true) | length > 0
   notify: "{{ computer_setup_deploy_notify | default([]) }}"
 
@@ -55,6 +97,6 @@
     mode: "{{ computer_setup_deploy_mode | default('0644') }}"
     backup: "{{ computer_setup_deploy_backup | default(false) | bool }}"
   when:
-    - (computer_setup_deploy_kind | default('file')) != 'template'
+    - not (_cs_deploy_as_template | bool)
     - _cs_deploy_src | default('', true) | length > 0
   notify: "{{ computer_setup_deploy_notify | default([]) }}"

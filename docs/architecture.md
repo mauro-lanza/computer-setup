@@ -84,6 +84,30 @@ capabilities.
 | `tasks/merge_layer_vars.yml` | Merge one layer's `vars.yml` into play scope: enforces `schema_version`, rejects reserved keys, appends lists, overrides scalars. |
 | `tasks/merge_layer_capabilities.yml` | Merge one layer's `capabilities.yml` into the capability registry. |
 | `tasks/deploy_layer_file.yml` | Resolve **and** deploy one layer file/template: creates the parent dir, copies or templates, no-ops when no layer provides the key. The primitive behind every "a layer supplies this file" case — capability `config:` bundles, the prompt, VS Code settings, `~/.zshrc`. |
+
+### File vs template resolution
+
+For a lookup key `<key>`, `deploy_layer_file` resolves in two steps:
+
+1. `<key>.j2` across the layers' `templates/` dirs → rendered as a template
+2. `<key>` across the layers' `files/` dirs → copied verbatim
+
+A layer therefore promotes any config file to a template by renaming it and
+moving it under `templates/` — no capability, role, or engine change. This is
+what lets one value reach several config files; verbatim `files/` cannot, and a
+layer var cannot reference another layer var (see below), so duplication was
+otherwise the only option. Templates render late, after the layer merge, so they
+*can* read merged layer vars.
+
+A key should be supplied as either a file or a template across all layers, not
+both: step 1 wins over step 2 regardless of layer priority.
+
+Capability `config:` entries with an explicit `kind: template` skip step 1 and
+resolve `<key>` in `templates/` directly, for keys that already carry `.j2`.
+
+Shell snippets are globbed rather than looked up, so they follow the same rule
+with a different path: `files/shell/*.zsh.j2` is rendered, `*.zsh` is copied,
+and both land at the same managed destination.
 | `scripts/computer-setup-layers` | Sync layer repos into the cache. Validates layer names, `schema_version`, and force-syncs to `origin` (fetch + hard reset), so a diverged or hand-edited cache can never silently persist. |
 
 The remaining roles (`homebrew`, `git`, `shell`, `vscode`, `layer_configs`,
