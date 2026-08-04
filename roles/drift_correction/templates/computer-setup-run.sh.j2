@@ -50,8 +50,24 @@ notify() {
 
 log() { print -r -- "$@" >> "$LOG_FILE"; }
 
+# Refresh every content layer so the merge reflects the latest layer content
+# (drift covers orchestrator + all layers).
+#
+# EVERY mode must do this before running the playbook. ansible-pull updates the
+# ORCHESTRATOR only; the layers are separate repos in a separate cache. Skipping
+# it leaves the engine ahead of the layers, and any change that spans both — a
+# var the engine stopped defining and a layer still references — fails the run.
+# `apply` used to exec straight past this, so the one mode a human runs by hand
+# was the one that could not pick up layer changes.
+sync_layers() {
+    [[ -n "$LAYERS_FILE" && -f "$LAYERS_FILE" && -n "$LAYER_CACHE" ]] || return 0
+    "$LAYER_SYNC" sync --manifest "$LAYERS_FILE" --cache "$LAYER_CACHE" \
+        --schema-version {{ computer_setup_schema_version }}
+}
+
 # ─── Interactive mode: stream, don't capture ─────────────────────────────────
 if [[ "$MODE" == "apply" ]]; then
+    sync_layers || print -u2 "WARN: layer sync failed; continuing with cached content"
     exec "$ANSIBLE_PULL" "${ARGS[@]}" local.yml "$@"
 fi
 
@@ -87,13 +103,7 @@ if ! git ls-remote --exit-code "$REPO_URL" "$REPO_BRANCH" >/dev/null 2>&1; then
     exit 0
 fi
 
-# Refresh every content layer so the merge reflects the latest layer content
-# (drift covers orchestrator + all layers).
-if [[ -n "$LAYERS_FILE" && -f "$LAYERS_FILE" && -n "$LAYER_CACHE" ]]; then
-    "$LAYER_SYNC" sync --manifest "$LAYERS_FILE" --cache "$LAYER_CACHE" \
-        --schema-version {{ computer_setup_schema_version }} >> "$LOG_FILE" 2>&1 \
-        || log "WARN: layer sync failed; continuing with cached content"
-fi
+sync_layers >> "$LOG_FILE" 2>&1 || log "WARN: layer sync failed; continuing with cached content"
 
 # ─── Mode-specific flags ─────────────────────────────────────────────────────
 # check:   -e homebrew_update=false — `state=present` never upgrades, so
