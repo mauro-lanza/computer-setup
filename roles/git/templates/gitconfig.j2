@@ -1,6 +1,9 @@
-# Managed by ansible — do not edit manually.
+# Managed by computer-setup — do not edit manually.
 # Source of truth: roles/git (defaults/main.yml + templates/gitconfig.j2).
 # Any manual changes here are overwritten on the next playbook run.
+#
+# This file is INCLUDED from ~/.gitconfig; edit that file for anything you want
+# to keep. The include is appended there, so these values are read last and win.
 {% if (git_user_name | length > 0) or (git_user_email | length > 0) %}
 [user]
 {% if git_user_name | length > 0 %}
@@ -34,4 +37,10 @@
 {% for key, value in entries.items() %}
 	{{ key }} = {{ value }}
 {% endfor %}
+{% endfor %}
+{% for identity in git_conditional_identities | default([], true) %}
+{# Rendered last on purpose: an includeIf must come after the global [user]  #}
+{# block it is meant to override, or git keeps the global identity.          #}
+[includeIf "{{ identity.condition }}"]
+	path = {{ git_managed_config_dir }}/identity-{{ identity.condition | hash('md5') }}.gitconfig
 {% endfor %}

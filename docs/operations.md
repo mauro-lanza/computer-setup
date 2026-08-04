@@ -4,6 +4,40 @@ How a run behaves, what it enforces, and hard-won findings from migrating a
 manually-configured Mac into this setup. Read this before large re-runs or when
 onboarding a machine that already has software installed outside Homebrew.
 
+## git config is included, not imposed
+
+`~/.gitconfig` is **not** owned by this role. It owns
+`~/.config/git/computer-setup.gitconfig` and reaches `~/.gitconfig` only to
+append one `include.path`. Anything you put in `~/.gitconfig` — signing keys,
+credential helpers, your own `includeIf` blocks — is preserved.
+
+The include is appended, so managed values are read **last** and still win over
+entries above them. Enforcement is kept; the collateral damage is not.
+
+**Migration.** A `~/.gitconfig` carrying this role's own marker comment is
+recognised as previously role-owned: it is backed up and reduced to a stub
+holding just the include. A file you wrote is never touched beyond the appended
+include.
+
+### Per-directory identities
+
+`git_conditional_identities` renders `includeIf` blocks, which is how a work
+layer supplies a work address (`git_user_name`/`git_user_email` are machine
+prefs and reserved from layers).
+
+Two condition forms, both passed to git verbatim:
+
+- `gitdir:<path>` — matches by location. **Git resolves symlinks first**, so the
+  pattern must be the real path: on macOS `/private/tmp/...`, never `/tmp/...`.
+  A pattern that looks right but points through a symlink silently never matches.
+- `hasconfig:remote.*.url:<pattern>` — matches by remote URL (git ≥ 2.36), and
+  is layout-independent. Use this when work and personal repositories share one
+  directory, which is the normal case here.
+
+Verify with `git -C <repo> config --get user.email` inside an affected
+repository — the condition is evaluated per repo, so checking the config file
+alone tells you nothing.
+
 ## Validating a run
 
 ```bash

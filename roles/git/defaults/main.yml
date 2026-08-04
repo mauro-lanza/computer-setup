@@ -18,3 +18,35 @@ git_config_sections: {}
 
 # Entries written to ~/.gitignore_global (list — appends across layers).
 git_global_gitignore_entries: []
+
+# ─── Where the managed config lives ──────────────────────────────────────────
+# This role owns ONE file completely, and reaches ~/.gitconfig only to add a
+# single `include.path` pointing at it. ~/.gitconfig used to be replaced
+# wholesale, which destroyed any signing key, credential helper or includeIf the
+# user already had — with no merge mode and no opt-out.
+#
+# The include is appended, so git reads the managed values LAST and they still
+# win over anything earlier in ~/.gitconfig. Enforcement is kept; the collateral
+# damage is not.
+git_managed_config_dir: "{{ home_dir }}/.config/git"
+git_managed_config_path: "{{ git_managed_config_dir }}/computer-setup.gitconfig"
+
+# Per-directory identities, rendered as `includeIf gitdir:` blocks. This is what
+# makes the work/personal layer split actually work: git_user_name/email are
+# machine-local prefs (reserved from layers), so a work layer had no way to say
+# "use my work address under this directory".
+#
+# Item schema: { condition: <git includeIf condition>, email:, name?: }
+# `name` defaults to the global git_user_name.
+#
+# `condition` is passed to git verbatim, so both forms work:
+#
+#   condition: "gitdir:~/Projects/work/"
+#       Matches by location. Git resolves symlinks first, so the pattern must be
+#       the REAL path (/private/tmp/... on macOS, not /tmp/...).
+#
+#   condition: "hasconfig:remote.*.url:git@github.com:acme/**"
+#       Matches by remote URL (git >= 2.36). Layout-independent, so work and
+#       personal checkouts can share one directory — which is what makes this
+#       usable without relocating existing clones.
+git_conditional_identities: []

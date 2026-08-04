@@ -33,11 +33,88 @@
       leaving {{ home_dir }}/.gitignore_global untouched.
   when: git_global_gitignore_entries | default([], true) | length == 0
 
-- name: Deploy managed ~/.gitconfig
+# ─── Managed git config (included, not imposed) ──────────────────────────────
+# This role owns git_managed_config_path completely and touches ~/.gitconfig
+# only to add one `include.path`. Previously ~/.gitconfig was replaced wholesale
+# on every run, destroying any signing key, credential helper or includeIf the
+# user already had.
+
+- name: Ensure the managed git config directory exists
+  ansible.builtin.file:
+    path: "{{ git_managed_config_dir }}"
+    state: directory
+    mode: "0755"
+
+- name: Deploy the managed git config
   ansible.builtin.template:
     src: gitconfig.j2
+    dest: "{{ git_managed_config_path }}"
+    mode: "0644"
+
+- name: Deploy per-directory identity files
+  ansible.builtin.template:
+    src: identity.gitconfig.j2
+    dest: "{{ git_managed_config_dir }}/identity-{{ identity.condition | hash('md5') }}.gitconfig"
+    mode: "0644"
+  loop: "{{ git_conditional_identities | default([], true) }}"
+  loop_control:
+    loop_var: identity
+    label: "{{ identity.condition }}"
+
+# Reconcile: an identity removed from the layers must stop applying. Only files
+# this role's naming scheme produces are considered, so nothing else in
+# ~/.config/git is ever removed.
+- name: Find previously deployed identity files
+  ansible.builtin.find:
+    paths: "{{ git_managed_config_dir }}"
+    patterns: "identity-*.gitconfig"
+    file_type: file
+  register: git_identity_found
+
+- name: Remove identity files no longer declared
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: >-
+    {{ (git_identity_found.files | default([]) | map(attribute='path') | list)
+       | difference(git_conditional_identities | default([], true)
+                    | map(attribute='condition') | map('hash', 'md5')
+                    | map('regex_replace', '^(.*)$',
+                          git_managed_config_dir ~ '/identity-\1.gitconfig') | list) }}
+  loop_control:
+    label: "{{ item | basename }}"
+
+# Migration: on machines set up before this change, ~/.gitconfig is entirely
+# this role's output. Leaving it would duplicate every managed value and, worse,
+# leave a stale copy that wins over the include. Detect our own marker — never
+# a file the user wrote — back it up, and reduce it to a stub.
+- name: Detect a previously role-owned ~/.gitconfig
+  ansible.builtin.lineinfile:
+    path: "{{ home_dir }}/.gitconfig"
+    regexp: '^# (Managed by ansible|Managed by computer-setup) — do not edit manually\.$'
+    state: absent
+  check_mode: true
+  changed_when: false
+  register: git_legacy_marker
+  failed_when: false
+
+- name: Replace a role-owned ~/.gitconfig with a stub
+  ansible.builtin.copy:
     dest: "{{ home_dir }}/.gitconfig"
     mode: "0644"
-    # Renders only git_config_sections, so a pre-existing ~/.gitconfig
-    # (signing keys, credential helper, includeIf blocks) is replaced wholesale.
     backup: true
+    content: |
+      # Your personal git config. computer-setup does NOT own this file.
+      #
+      # Managed settings live in the included file below and are read last, so
+      # they win over anything above. Add whatever you like here — signing keys,
+      # credential helpers, extra includeIf blocks — it will be preserved.
+  when: git_legacy_marker.found | default(0) | int > 0
+
+- name: Include the managed config from ~/.gitconfig
+  # Appended, so managed values are read LAST and still win. git_config drives
+  # git itself, so the file stays valid whatever formatting it already had.
+  community.general.git_config:
+    name: include.path
+    scope: global
+    value: "{{ git_managed_config_path }}"

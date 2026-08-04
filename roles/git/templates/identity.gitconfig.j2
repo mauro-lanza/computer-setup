@@ -1,0 +1,5 @@
+# Managed by computer-setup — do not edit manually.
+# Identity applied to repositories matching: {{ identity.condition }}
+[user]
+	name = {{ identity.name | default(git_user_name, true) }}
+	email = {{ identity.email }}
