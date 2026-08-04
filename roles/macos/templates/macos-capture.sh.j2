@@ -21,6 +21,11 @@ MANAGED=(
   "{{ d.domain }}|{{ d.key }}|{{ d.type }}|{{ d.value }}"
 {% endfor %}
 )
+# Counted here in Jinja rather than with bash's array-length expansion. That
+# expansion opens with a dollar-brace-hash sequence, and brace-hash is Jinja's
+# comment-open delimiter — inside a .j2 file it makes the template unrenderable,
+# even within a shell comment. Deliberately spelled out in prose for that reason.
+MANAGED_COUNT={{ (macos_defaults | default([]) | length) + (macos_rectangle_defaults | default([]) | length) }}
 
 usage() {
     cat <<'EOF'
@@ -70,10 +75,21 @@ esac
 printf '%-44s %-14s %-14s %s\n' "DOMAIN.KEY" "DECLARED" "LIVE" "STATUS"
 printf '%-44s %-14s %-14s %s\n' "----------" "--------" "----" "------"
 
+# No layer declared any macOS defaults, so MANAGED is empty. Bail before the
+# loop: macOS ships bash 3.2, where expanding an empty array as "${MANAGED[@]}"
+# is an "unbound variable" fatal under `set -u`. The orchestrator is documented
+# as runnable with no content layers, which is exactly when this happens.
+if [[ "$MANAGED_COUNT" -eq 0 ]]; then
+    echo
+    echo "No macOS defaults are declared by any active content layer."
+    echo "Use 'macos-capture --domain <domain>' to explore keys you could adopt."
+    exit 0
+fi
+
 yaml=""
 total=0
 diffs=0
-for entry in "${MANAGED[@]}"; do
+for entry in ${MANAGED[@]+"${MANAGED[@]}"}; do
     IFS='|' read -r domain key vtype declared <<< "$entry"
     total=$((total + 1))
 

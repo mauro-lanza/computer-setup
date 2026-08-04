@@ -28,8 +28,19 @@ Run the checks locally:
 
 ```bash
 ./scripts/check.sh
-ansible-lint
 ```
+
+`check.sh` runs everything, including `ansible-lint` (install it with
+`brew install ansible-lint`; the check is skipped, with a notice, if it is
+absent). Rules waived on architectural grounds are documented in
+[.ansible-lint](.ansible-lint) — if you need to waive another, say why there.
+
+If you touch `bootstrap.sh`'s prompt flow, extend
+[tests/bootstrap-prompts.sh](tests/bootstrap-prompts.sh). That path only ever
+executes on a fresh machine, which is exactly where nobody is watching: it once
+shipped a capability menu that selected nothing at all, silently, because the
+prompt and the capability list were both reading stdin. `bash -n` cannot see
+that class of bug — only driving the loop with scripted answers can.
 
 If you touch the merge logic, extend or run `tests/contract.yml` and confirm:
 

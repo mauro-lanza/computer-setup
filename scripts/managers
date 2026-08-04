@@ -18,6 +18,17 @@ DOC="docs/managers.md"
 
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
+# Print sorted table rows, tolerating an empty set. macOS ships bash 3.2, where
+# expanding an empty array as "${arr[@]}" under `set -u` is an "unbound
+# variable" fatal — so the moment a tier had no managers, this tool would die
+# instead of rendering an empty section. Taking the rows as positional
+# arguments (guarded at the call site) sidesteps the array-expansion rule
+# entirely, and `printf` with no rows would otherwise emit a bogus blank line.
+emit_rows() {
+    [[ $# -eq 0 ]] && return 0
+    printf '%s\n' "$@" | sort
+}
+
 validate_and_render() {
     local meta role name tier summary caps consumes
     local -a generic=() specific=() engine=()
@@ -70,19 +81,19 @@ validate_and_render() {
         echo
         echo "| Manager | Capabilities | Summary |"
         echo "|---|---|---|"
-        printf '%s\n' "${generic[@]}" | sort
+        emit_rows ${generic[@]+"${generic[@]}"}
         echo
         echo "## Specific managers"
         echo
         echo "| Manager | Capabilities | Summary |"
         echo "|---|---|---|"
-        printf '%s\n' "${specific[@]}" | sort
+        emit_rows ${specific[@]+"${specific[@]}"}
         echo
         echo "## Engine managers"
         echo
         echo "| Manager | Capabilities | Summary |"
         echo "|---|---|---|"
-        printf '%s\n' "${engine[@]}" | sort
+        emit_rows ${engine[@]+"${engine[@]}"}
     }
 }
 

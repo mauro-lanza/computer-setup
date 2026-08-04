@@ -84,19 +84,41 @@ The top-level playbook delegates setup work to the `computer_setup` role:
 | `roles/computer_setup/tasks/resolve_layer_template.yml` | Resolve one template from active layers by priority. |
 | `roles/computer_setup/tasks/deploy_layer_file.yml` | Resolve **and** deploy one layer file/template to a destination (creates the parent dir, copies or templates, no-op when unprovided). The primitive behind every "a layer supplies this file" case: capability `config:` bundles, the prompt, VS Code settings, and `~/.zshrc`. |
 | `roles/computer_setup/tasks/merge_layer_vars.yml` | Merge one layer's `vars.yml` into play scope: enforces `schema_version`, rejects reserved keys, appends lists and overrides scalars by priority. |
-| `scripts/computer-setup-layers` | Sync layer repos into the plugin cache for bootstrap and drift. Validates layer names, `schema_version`, and self-heals a stale or diverged cache. |
+| `scripts/computer-setup-layers` | Sync layer repos into the plugin cache for bootstrap and drift. Validates layer names, `schema_version`, and force-syncs the cache to `origin` (fetch + hard reset), so a diverged or hand-edited cache can never silently persist. |
 
 See [managers.md](managers.md) for the full manager registry (generated from each
 role's `meta/manager.yml`).
 
-Machine-local keys (`selected_capabilities`, `git_user_name`, `git_user_email`)
-are reserved for `computer_setup_prefs_file` and are rejected from layer
-`vars.yml`, as are engine-owned play vars (`home_dir`, `repo_url`, `repo_branch`,
-`homebrew_prefix`, `vscode_code_binary`, `repositories_base_dir`) and the whole
-`computer_setup_*` namespace — a layer cannot override the orchestrator itself.
+### Reserved keys
+
+A layer's `vars.yml` may not define certain keys. The authoritative list is
+`computer_setup_reserved_layer_keys` in
+[`roles/computer_setup/tasks/main.yml`](../roles/computer_setup/tasks/main.yml)
+— it is enforced by an assert in `merge_layer_vars.yml`, and deliberately not
+re-listed here, because an enumeration in prose is a copy that goes stale (this
+one did). The categories are:
+
+1. **Machine-local prefs** — belong in `~/.mac-prefs.yml`, not a layer
+   (`selected_capabilities`, git identity).
+2. **Engine-owned play/role vars** — a layer overriding these would break the
+   orchestrator (`home_dir`, `repo_url`, `homebrew_prefix`, the repository
+   catalog paths, …), plus the entire `computer_setup_*` namespace, which is
+   additionally guarded by prefix rather than by name.
+3. **Vars that decide what code runs, or runs unattended** — everything baked
+   into the deployed runner script and the scheduled agents
+   (`drift_correction_*`), the upgrade auto-approval switches, and Ansible's own
+   execution controls (`ansible_connection`, `ansible_python_interpreter`, …).
+
+Category 3 is the security boundary. Layer vars land in play scope via
+`set_fact`, which outranks both role defaults and play vars — so without it, a
+compromised layer repo could redirect the unattended morning `ansible-pull` at
+its own playbook. Both the reserved-key and `schema_version` guards are covered
+by `tests/negative.yml`, which asserts they actually *reject* rather than
+silently degrade.
+
 The layer sync helper validates manifest entries before use: layer names must be
-unique, required fields must be present, priorities must be numeric, and
-`plugin.yml.name` must match the manifest name.
+unique and shell/path-safe, required fields must be present, priorities must be
+numeric, and `plugin.yml.name` must match the manifest name.
 
 ## Managed State
 

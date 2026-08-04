@@ -23,13 +23,18 @@
   ansible.builtin.set_fact:
     _cs_deploy_src: "{{ lookup('ansible.builtin.first_found', _params, errors='ignore') }}"
   vars:
-    _search_dirs: >-
-      {{ (computer_setup_template_search_dirs
-          if (computer_setup_deploy_kind | default('file')) == 'template'
-          else computer_setup_file_search_dirs) | default([]) }}
+    # Built as ONE expression rather than via an intermediate `_search_dirs`
+    # var. The intermediate is a list at runtime, but only because Ansible
+    # resolves a whole-string `{{ }}` to its native type — static analysers see
+    # a string being concatenated to a list and flag it. Same result, no
+    # dependence on native-type resolution, and the lint stays honest.
     _params:
       files: ["{{ computer_setup_lookup_key }}"]
-      paths: "{{ _search_dirs + [computer_setup_lookup_fallback_dir] }}"
+      paths: >-
+        {{ ((computer_setup_template_search_dirs
+             if (computer_setup_deploy_kind | default('file')) == 'template'
+             else computer_setup_file_search_dirs) | default([]))
+           + [computer_setup_lookup_fallback_dir] }}
 
 - name: "Ensure parent directory exists: {{ computer_setup_deploy_dest | dirname }}"
   ansible.builtin.file:

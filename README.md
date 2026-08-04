@@ -59,9 +59,8 @@ an explicit message rather than silently accepting every default.
    `~/.config/computer-setup/layers.yml`), then clone each layer into the plugin
    cache (`~/.local/share/computer-setup/plugins/<name>/`). GitHub layers clone
    over SSH. Each layer's `schema_version` is validated.
-2. **Build preferences** — merge every layer's `capabilities.yml` into one menu, prompt
-   for git identity, optional tools, and feature toggles, then write
-   `~/.mac-prefs.yml`.
+2. **Build preferences** — merge every layer's `capabilities.yml` into one menu,
+   prompt for git identity and optional tools, then write `~/.mac-prefs.yml`.
 3. **Run Ansible** — `ansible-pull` this orchestrator, merging the layer vars and
    resolving layer files.
 
@@ -98,9 +97,11 @@ The **variable interface** plus `schema_version` is the public API — see
 
 ## Maintenance helpers
 
-Shell functions installed by the setup. All of them delegate to
-`~/.local/bin/computer-setup-run`, which owns the `ansible-pull` invocation so it
-is defined in exactly one place.
+Shell functions installed by the setup. The three that run the playbook
+(`drift-check`, `drift-apply`, `drift-update`) delegate to
+`~/.local/bin/computer-setup-run`, which owns the `ansible-pull` invocation so
+the scheduled agents and the interactive commands can never drift apart.
+(`bootstrap.sh` builds its own invocation — it runs before the runner exists.)
 
 - `drift-check` — run the same check the 10:00 agent runs (never mutates).
 - `drift-apply` — reconcile detected drift now (`ansible-pull` for real).
@@ -108,8 +109,17 @@ is defined in exactly one place.
   prompt. The 09:00 agent already upgrades formulae, Galaxy collections and Node;
   casks are left to this command because they can raise a `sudo` prompt that an
   unattended agent has no TTY to answer.
-- `drift-log` — tail the rolling drift log.
-- `repos-generate` — scaffold a `~/.repositories.yml` override from this machine.
+- `drift-log` — tail the rolling drift log (reads the log file directly).
+- `repos-generate` — scaffold a `~/.repositories.yml` override from this machine
+  (inspects your checkouts; does not run the playbook).
+
+Plus one standalone command in `~/.local/bin`:
+
+- `macos-capture` — read-only; diffs this machine's live macOS `defaults`
+  against the values declared by your layers and emits paste-ready YAML, so a
+  setting you tweaked in System Settings can be adopted back into a layer's
+  `vars.yml`. `macos-capture --domain <domain>` dumps every key in a domain to
+  discover new ones.
 
 To clone catalogued repos that are missing, run `drift-apply --tags repositories`.
 

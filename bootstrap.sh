@@ -40,14 +40,20 @@ export HOMEBREW_NO_ANALYTICS=1
 # branch and the script truncates mid-run, with no error. Since the documented
 # entry point is a pipe, re-point stdin at the controlling terminal before any
 # prompt runs. INTERACTIVE records whether we actually have one.
+#
+# Deliberately a function called from main(), not top-level code: tests source
+# this file for its functions, and a top-level `exec < /dev/tty` would hijack
+# the test harness's stdin and make the prompt loop untestable.
 INTERACTIVE=1
-if [[ ! -t 0 ]]; then
-    if [[ -r /dev/tty ]] && { exec < /dev/tty; } 2>/dev/null; then
-        :
-    else
-        INTERACTIVE=0
+reattach_stdin() {
+    if [[ ! -t 0 ]]; then
+        if [[ -r /dev/tty ]] && { exec < /dev/tty; } 2>/dev/null; then
+            :
+        else
+            INTERACTIVE=0
+        fi
     fi
-fi
+}
 
 # Refuse to guess. A non-interactive run cannot answer "which layers?" or "what
 # is your git email?", and silently defaulting those is how you end up with an
@@ -409,8 +415,12 @@ gather_git_identity() {
 # derived by the engine from the merged capability registry at apply time.
 gather_optional_tools() {
     echo
+    # Always defined, including on the early return below, so write_prefs never
+    # has to reason about an unset array (bash 3.2 + `set -u` is unforgiving).
+    SELECTED_CAPABILITIES=()
+
     if [[ ! -s "$MERGED_CAPABILITIES_FILE" ]]; then
-        return
+        return 0
     fi
     if $HAS_PRIOR_PREFS; then
         info "Optional tools — your previous answers are pre-filled (press Enter to keep):"
@@ -420,15 +430,21 @@ gather_optional_tools() {
     fi
     echo
 
-    SELECTED_CAPABILITIES=()
-
     local vscode_available=false
     if command -v code &>/dev/null; then
         vscode_available=true
     fi
 
+    # The capability list is read on FD 3, NOT stdin. `ask_yn` inside the body
+    # reads from stdin, and a `done < file` redirect applies to the whole
+    # compound command — body included. With the list on stdin every prompt
+    # silently consumed the NEXT capability line as its answer: half the
+    # capabilities were skipped, none were ever selected, and `read -p` printed
+    # no prompt at all (bash only renders it when stdin is a terminal). The
+    # result was an empty `selected_capabilities` on every fresh machine, with
+    # no error. Keep the list and the answers on separate descriptors.
     local id desc type pkgs requires_vscode default
-    while IFS=$'\t' read -r id desc type pkgs requires_vscode; do
+    while IFS=$'\t' read -r -u 3 id desc type pkgs requires_vscode; do
 
         if [[ "$requires_vscode" == "true" && "$vscode_available" != true ]]; then
             continue
@@ -439,9 +455,17 @@ gather_optional_tools() {
         if ask_yn "  Enable ${desc}?" "$default"; then
             SELECTED_CAPABILITIES+=("$id")
             # So VS Code extensions offered later this run are prompted too.
-            [[ "$id" == "vscode" ]] && vscode_available=true
+            if [[ "$id" == "vscode" ]]; then
+                vscode_available=true
+            fi
         fi
-    done < "$MERGED_CAPABILITIES_FILE"
+    done 3< "$MERGED_CAPABILITIES_FILE"
+
+    # A `while` loop returns the status of the last command run in its body, so
+    # a trailing failed test would propagate out of this function and trip
+    # `set -e` in main() — aborting bootstrap AFTER the last prompt but BEFORE
+    # write_prefs, leaving no preferences file at all. Return success explicitly.
+    return 0
 }
 
 # ─── Write preferences file ──────────────────────────────────────────────────
@@ -527,6 +551,8 @@ run_playbook() {
 # Main
 # ═════════════════════════════════════════════════════════════════════════════
 main() {
+    reattach_stdin
+
     echo
     echo "╔══════════════════════════════════════════════╗"
     echo "║   macOS Workstation Setup — orchestrator     ║"
@@ -571,4 +597,10 @@ main() {
     echo
 }
 
-main "$@"
+# Run the installer only when executed directly. Setting
+# COMPUTER_SETUP_BOOTSTRAP_LIB=1 lets tests/bootstrap-prompts.sh source this file
+# for its functions — the prompt loop is the one part of bootstrap that `bash -n`
+# cannot check, and it is where the interactive bugs live.
+if [[ "${COMPUTER_SETUP_BOOTSTRAP_LIB:-0}" != "1" ]]; then
+    main "$@"
+fi

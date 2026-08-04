@@ -101,24 +101,46 @@ sync_layers() {
         repo="$(ssh_repo_url "$(yq -r ".layers[$i].repo" "$manifest")")"
         dest="$cache/$name"
 
-        # The plugin cache is a CACHE, not a working copy — nothing should ever
-        # be authored in it. So a failed fast-forward is repairable, and must be
-        # repaired: the old code warned and left the layer pinned at an old
-        # commit forever, after which the daily drift check happily reported
-        # "no drift" while running against stale content.
+        # The plugin cache is a CACHE, not a working copy — nothing is ever
+        # authored here, so the only correct end state is "byte-identical to
+        # origin". Fetch and hard-reset unconditionally rather than `pull`:
+        #
+        #   * `git pull --ff-only` returns SUCCESS when the cache is AHEAD of
+        #     origin ("Already up to date" — there is nothing to fast-forward),
+        #     so a stray local commit in the cache survived every single sync.
+        #     The daily drift check then reported "no drift" while running
+        #     against modified layer content — the exact failure this code was
+        #     written to prevent, for the one case it did not cover.
+        #   * `pull` honours ambient config. The managed ~/.gitconfig sets
+        #     pull.rebase=true, so cache maintenance silently depended on the
+        #     user's global git settings.
+        #
+        # fetch + reset + clean treats ahead, behind, diverged, force-pushed and
+        # dirty identically, and is a cheap no-op when already in sync.
         if [[ -d "$dest/.git" ]]; then
             log "Updating layer '$name'..."
             git -C "$dest" remote set-url origin "$repo" \
                 || die "Layer '$name': could not set origin to $repo"
-            if ! git -C "$dest" pull --ff-only; then
-                warn "Layer '$name' could not fast-forward (force-push, or the cache was modified) — resyncing from origin"
-                branch="$(git -C "$dest" symbolic-ref --short HEAD 2>/dev/null || echo HEAD)"
-                git -C "$dest" fetch --depth 1 origin "$branch" \
+
+            branch="$(git -C "$dest" symbolic-ref --short HEAD 2>/dev/null || true)"
+            if [[ -z "$branch" ]]; then
+                # Detached HEAD: there is no branch to track. Re-cloning is
+                # cheap and unambiguously correct for a cache.
+                warn "Layer '$name': cache HEAD is detached — re-cloning"
+                rm -rf "$dest"
+                git clone --depth 1 "$repo" "$dest"
+            else
+                # Explicit refspec: without it `git fetch origin <branch>` may
+                # only write FETCH_HEAD, leaving refs/remotes/origin/<branch>
+                # stale — and the reset below would then "succeed" onto the old
+                # commit, i.e. never update the layer at all.
+                git -C "$dest" fetch --depth 1 origin \
+                    "+refs/heads/${branch}:refs/remotes/origin/${branch}" \
                     || die "Layer '$name': fetch failed — cache is stale and cannot be repaired. Remove $dest and re-run."
-                git -C "$dest" reset --hard "origin/$branch" \
+                git -C "$dest" reset --hard "refs/remotes/origin/${branch}" >/dev/null \
                     || die "Layer '$name': reset failed. Remove $dest and re-run."
-                git -C "$dest" clean -fd >/dev/null 2>&1 || true
-                log "Layer '$name' resynced to origin/$branch"
+                # -ffd also clears nested checkouts a stray clone may have left.
+                git -C "$dest" clean -ffd >/dev/null 2>&1 || true
             fi
         else
             # A non-git directory here means an interrupted clone or a stray

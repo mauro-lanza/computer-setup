@@ -1,0 +1,35 @@
+# ansible-lint configuration
+#
+# The two rules disabled below are disabled because they contradict this repo's
+# architecture, not because the findings are inconvenient. Everything else is
+# enforced. A gate that always reports 23 failures is a gate nobody reads — and
+# this project already treats "a guard that silently stops guarding" as a bug
+# (see tests/negative.yml), so the same standard applies to the linter.
+
+exclude_paths:
+  - examples/          # reference layer for humans, not a playbook we run
+  - tests/fixtures/    # deliberately minimal/invalid fixtures
+
+skip_list:
+  # var-naming[no-role-prefix]
+  #
+  # The rule wants every var set inside a role to be prefixed with that role's
+  # name. This repo's whole design is the opposite: the *variable interface* is
+  # a shared, deliberately un-prefixed contract that content layers write to and
+  # roles read from. `repositories`, `homebrew_optional_formulae` and
+  # `vscode_optional_extensions` are named for the concept, not the role that
+  # happens to derive them — the computer_setup role derives values that the
+  # homebrew/vscode/repositories roles consume, so a `computer_setup_` prefix
+  # would be actively wrong. See docs/architecture.md ("Layer Contract").
+  # Engine-internal vars that a layer must NOT set are protected by the reserved
+  # key list instead, which is enforced and tested.
+  - var-naming[no-role-prefix]
+
+  # name[template]
+  #
+  # The rule wants Jinja only at the END of a task name. The layer merge tasks
+  # are included once per layer, so the layer name has to lead — "[public] Load
+  # vars.yml" is readable in a 3-layer run; "Load vars.yml [public]" buries the
+  # only thing that distinguishes the repetitions. Same for the deploy primitive,
+  # where the kind (file/template) leads.
+  - name[template]

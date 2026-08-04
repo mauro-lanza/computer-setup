@@ -41,25 +41,37 @@ rm -f /opt/homebrew/bin/zed
 brew install --cask zed
 ```
 
-### Casks that need root cannot be upgraded by Ansible at all
+### Casks that need root: `sudo` has no TTY inside Ansible
 Some casks (Docker Desktop) delete or replace files they own as **root** during
 an upgrade. Homebrew shells out to `sudo` to do it. An Ansible task has no
-controlling terminal, so that `sudo` can never prompt:
+controlling terminal, so that `sudo` cannot prompt on its own:
 
 ```
 sudo: a terminal is required to read the password; either use the -S
 option to read from standard input or configure an askpass helper
 ```
 
-This is **not** fixable by running `drift-update` from a real terminal — the
-terminal you launch from is not the terminal the task runs in. Pre-caching the
-credential with `sudo -v` before the run was tried and does not work either; the
-cached ticket is not usable from the task's context.
+Two things that do **not** work, both tried: running `drift-update` from a real
+terminal (the terminal you launch from is not the terminal the task runs in),
+and pre-caching the credential with `sudo -v` (the cached ticket is not usable
+from the task's context).
 
-The supported answer is `upgrade_casks_exclude`. Listing a cask there keeps it
-installed and managed by the `homebrew` role but skips the upgrade. Most casks
-in this position update themselves anyway (`auto_updates` in `brew info`). To
-force one by hand, from a shell where sudo *can* prompt:
+The fix is the last line of that error message — an askpass helper.
+`community.general.homebrew_cask` implements it: given `sudo_password` it writes
+a 0700 temp askpass script and exports `SUDO_ASKPASS`, so Homebrew invokes
+`sudo -A` and never needs a TTY. `drift-update` collects the password in your
+shell (a guaranteed terminal) and hands it over via the `CS_SUDO_PASSWORD`
+environment variable — never `-e`, which would expose it in the process list.
+The parameter is `no_log` in the module's argument spec, so it is masked in all
+output. Press Enter at the prompt to skip it and those casks are simply left
+alone.
+
+This is why `upgrade_casks_exclude` is now empty in the public layer. It still
+works, and is still the right tool for a cask whose own updater should own the
+job entirely: listing a cask there keeps it installed and managed by the
+`homebrew` role but skips the upgrade. Most casks in this position update
+themselves anyway (`auto_updates` in `brew info`). To force one by hand, from a
+shell where sudo *can* prompt:
 
 ```bash
 brew upgrade --cask docker-desktop
@@ -126,8 +138,9 @@ all "can't run right now", and all exit 0 silently.
 ## gcloud SDK
 
 - The cask token is **`gcloud-cli`**. `google-cloud-sdk` is a deprecated
-  alias; using the alias in `optional_casks` breaks idempotency (brew lists
-  it under the canonical name, so the module keeps reporting *changed*).
+  alias; using the alias as a capability's `packages` value breaks idempotency
+  (brew lists it under the canonical name, so the module keeps reporting
+  *changed*).
 - Install layout: SDK at `/opt/homebrew/share/google-cloud-sdk`; `gcloud`,
   `gsutil`, `bq` symlinked into `/opt/homebrew/bin`; zsh completion linked
   into `site-functions`.
@@ -175,7 +188,7 @@ Tools installed via vendor scripts leave a footprint (a `~/.tool` dir plus
    (Selection is by capability id, not by package name.)
 2. Apply the playbook (Homebrew installs the managed copy).
 3. Remove the manual install dir and its `.zshrc` lines — the managed
-   `path.zsh` already covers `/opt/homebrew/bin`.
+   `10-path.zsh` already covers `/opt/homebrew/bin`.
 
 Migrated in this repo's history: **bun** (`~/.bun`), **gcloud**
 (`~/google-cloud-sdk`), **duckdb** (`~/.local/bin`).
@@ -197,7 +210,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- \
 ```
 
 The `-y` flag is what makes it non-interactive. By default rustup appends a
-`~/.cargo/bin` line to the shell profile — the managed `path.zsh` does **not**
+`~/.cargo/bin` line to the shell profile — the managed `10-path.zsh` does **not**
 cover `~/.cargo/bin`, so let rustup handle its own PATH (don't pass
 `--no-modify-path`). Day-to-day updates are then `rustup update`, independent
 of this repo.

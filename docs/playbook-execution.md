@@ -120,7 +120,8 @@ handles user-made changes.
 27. If Rectangle.app exists, apply `macos_rectangle_defaults`.
 28. Deploy `~/.local/bin/macos-capture` — a read-only helper that diffs this
     machine's live defaults against the declared values and emits paste-ready
-    YAML (the reverse of enforcement; see the README).
+    YAML (the reverse of enforcement; see
+    [Maintenance helpers](../README.md#maintenance-helpers)).
 
 #### runtimes -- Language toolchains
 

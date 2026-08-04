@@ -7,6 +7,15 @@ echo "==> Bash syntax"
 bash -n bootstrap.sh
 bash -n scripts/computer-setup-layers
 bash -n scripts/managers
+bash -n tests/bootstrap-prompts.sh
+
+# `bash -n` proves bootstrap.sh PARSES; it proves nothing about what the prompt
+# loop DOES. That loop only ever runs on a fresh machine, which is precisely
+# where it cannot be observed failing — it shipped two bugs that made a
+# from-scratch install select zero optional tools, silently. These tests drive
+# the loop with scripted answers so the selection path has actual coverage.
+echo "==> Bootstrap prompt behaviour"
+./tests/bootstrap-prompts.sh
 
 # Shell scripts shipped as Jinja templates are never syntax-checked by the line
 # above — they only become shell after templating. A broken edit to the runner
@@ -29,6 +38,34 @@ check_template_syntax() {
 check_template_syntax roles/drift_correction/templates/computer-setup-run.sh.j2 zsh
 check_template_syntax roles/shell/templates/computer-setup-cli.zsh.j2 zsh
 check_template_syntax roles/macos/templates/macos-capture.sh.j2 bash
+
+# The de-templating above strips Jinja with sed, so it cannot see a template that
+# Jinja itself refuses to PARSE. That is a real hazard in shell templates because
+# the syntaxes collide: `${#arr[@]}` contains `{#`, Jinja's comment-open — a
+# perfectly good bash line that makes the whole template unrenderable. The role
+# then fails at deploy time on a real machine (and only on the code path that
+# renders it), long after the checks went green. Parse each template with the
+# same Jinja2 that Ansible uses.
+echo "==> Template parses as Jinja"
+# Use the interpreter Ansible itself runs on — that is the Jinja2 that will
+# actually render these templates, and the only one guaranteed to have it
+# installed (system python3 on macOS does not).
+CS_PY="$(head -1 "$(command -v ansible)" | sed 's/^#!//')"
+[[ -x "$CS_PY" ]] || CS_PY=python3
+"$CS_PY" - <<'PY'
+import sys, pathlib
+from jinja2 import Environment
+env = Environment()
+rc = 0
+for p in sorted(pathlib.Path("roles").glob("*/templates/*.j2")):
+    try:
+        env.parse(p.read_text())
+        print(f"  ok  {p}")
+    except Exception as e:
+        print(f"  ERROR: {p}: {e}", file=sys.stderr)
+        rc = 1
+sys.exit(rc)
+PY
 
 echo "==> Manager registry"
 ./scripts/managers check
@@ -76,5 +113,17 @@ expect_layer_failure() {
 }
 expect_layer_failure reserved "defines reserved key"
 expect_layer_failure schema "requires schema_version 99"
+
+# ansible-lint was documented in CONTRIBUTING as a pre-PR step but lived outside
+# this script, so it drifted to 23 standing failures and stopped being read.
+# It is a gate now: .ansible-lint records the two rules waived on architectural
+# grounds, so a non-zero exit means something real.
+echo "==> ansible-lint"
+if command -v ansible-lint >/dev/null 2>&1; then
+    ansible-lint -q
+    echo "  ok  no findings"
+else
+    echo "  skip  ansible-lint not installed (brew install ansible-lint)"
+fi
 
 echo "Checks passed"

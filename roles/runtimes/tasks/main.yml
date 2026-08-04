@@ -17,11 +17,16 @@
   when: runtimes_nvm_script.stat.exists | default(false)
 
 - name: Install default Node.js version via NVM
+  # The version spec MUST be quoted. The default is `lts/*`, and this runs under
+  # zsh, whose NOMATCH option makes an unmatched glob a fatal error: the shell
+  # aborts with "no matches found: lts/*" before `nvm` is ever invoked, failing
+  # the task and taking the whole play with it (drift_correction runs after this
+  # role, so a fresh machine ended up with no LaunchAgents and no drift CLI).
   ansible.builtin.shell: |
     export NVM_DIR="$HOME/.nvm"
     source "{{ homebrew_prefix }}/opt/nvm/nvm.sh"
-    nvm install {{ runtimes_nvm_default_node }}
-    nvm alias default {{ runtimes_nvm_default_node }}
+    nvm install '{{ runtimes_nvm_default_node }}'
+    nvm alias default '{{ runtimes_nvm_default_node }}'
   args:
     executable: /bin/zsh
   changed_when: true
@@ -47,9 +52,12 @@
   when: runtimes_tfenv_stat.stat.exists | default(false)
 
 - name: Install and activate Terraform version via tfenv
+  # Quoted for the same reason as the nvm task above — a version spec is data,
+  # and unquoted data reaching zsh is one glob character away from a fatal
+  # NOMATCH error.
   ansible.builtin.shell: |
-    tfenv install {{ runtimes_tfenv_terraform_version }}
-    tfenv use {{ runtimes_tfenv_terraform_version }}
+    tfenv install '{{ runtimes_tfenv_terraform_version }}'
+    tfenv use '{{ runtimes_tfenv_terraform_version }}'
   args:
     executable: /bin/zsh
   changed_when: true
