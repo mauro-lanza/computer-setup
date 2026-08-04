@@ -63,24 +63,32 @@
 - name: "[{{ _layer.name }}] Assert question payloads set no reserved keys"
   ansible.builtin.assert:
     that:
-      - (_keys | intersect(computer_setup_reserved_layer_keys | default([])) | length) == 0
-      - (_keys | select('match', _reserved_prefix_re) | list | length) == 0
+      - (_blocked | length) == 0
     fail_msg: >-
       Layer '{{ _layer.name }}' declares a question setting reserved key(s):
-      {{ ((_keys | intersect(computer_setup_reserved_layer_keys | default([])))
-          + (_keys | select('match', _reserved_prefix_re) | list)) | unique | join(', ') }}.
+      {{ _blocked | join(', ') }}.
       A question's `set:` payload is layer content and cannot reach further than
-      the layer's own vars.yml can.
+      the layer's own vars.yml can, except for the machine-tier keys
+      ({{ computer_setup_machine_tier_keys | default([]) | join(', ') }}).
     quiet: true
   vars:
     _qs: "{{ _incoming_questions.questions | default([], true) }}"
     # Every key any option (or the question itself) could set.
     _keys: >-
-      {{ ((_qs | selectattr('set', 'defined') | map(attribute='set') | map('list') | flatten)
+      {{ ((_qs | selectattr('set_var', 'defined') | map(attribute='set_var') | list)
+          + (_qs | selectattr('set', 'defined') | map(attribute='set') | map('list') | flatten)
           + (_qs | selectattr('options', 'defined') | map(attribute='options') | flatten
              | selectattr('set', 'defined') | map(attribute='set') | map('list') | flatten))
          | unique | list }}
     _reserved_prefix_re: "^({{ computer_setup_reserved_layer_prefixes | default(['computer_setup_']) | join('|') }})"
+    # The machine tier: keys a question MAY set although a layer var may not,
+    # because the decision is machine-local. Subtracted from the reserved set
+    # rather than exempted case by case, so the two lists cannot drift apart.
+    _reserved: >-
+      {{ ((computer_setup_reserved_layer_keys | default([]))
+          + (_keys | select('match', _reserved_prefix_re) | list))
+         | difference(computer_setup_machine_tier_keys | default([])) }}
+    _blocked: "{{ _keys | intersect(_reserved) | unique | list }}"
   when: _layer_questions_stat.stat.exists
 
 - name: "[{{ _layer.name }}] Merge question entries into the registry"

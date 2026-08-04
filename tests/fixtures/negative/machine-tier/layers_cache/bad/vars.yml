@@ -1,0 +1,5 @@
+---
+# The machine tier is reachable by a QUESTION, never by a layer var. If this
+# were accepted, any layer could silently relocate every repository on the
+# machine — the exact thing the tier is scoped to prevent.
+repositories_base_dir: /tmp/hijacked

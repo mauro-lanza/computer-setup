@@ -109,6 +109,10 @@ expect_layer_failure capabilities "malformed capabilities.yml"
 # same one. Assert a layer cannot reach repo_url through a question.
 expect_layer_failure question "question setting reserved key"
 
+# The machine tier widens what a QUESTION may set. It must not widen what a
+# layer var may set, or the tier becomes a hole rather than a door.
+expect_layer_failure machine-tier "defines reserved key"
+
 # A gate, not an advisory: .ansible-lint waives the two rules that contradict
 # this architecture, so any finding is real. Missing ansible-lint is a FAILURE —
 # a fresh machine is where the tool is absent and where "passed" must mean it.

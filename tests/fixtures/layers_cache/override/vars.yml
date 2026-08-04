@@ -2,3 +2,7 @@
 contract_list:
   - override
 contract_scalar: override
+# A layer var colliding with an answer's payload. The answer must win (the
+# second, post-merge application), because the machine is more specific than
+# the layer that proposed the question.
+contract_editor_cmd: from-layer-var

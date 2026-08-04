@@ -515,11 +515,23 @@ gather_answers() {
         prior="$(prior_answer "$id")"
         [[ -n "$prior" ]] && default="$prior"
 
-        if [[ "$type" == "select" ]]; then
-            reply="$(ask_select "$prompt" "$default" "$options")"
-        else
-            reply="$(ask_text "$prompt" "$default")"
-        fi
+        case "$type" in
+            select)
+                reply="$(ask_select "$prompt" "$default" "$options")"
+                ;;
+            bool)
+                # Stored as the strings true/false so the engine's `| bool`
+                # filter reads them, and so the prefs file stays valid YAML.
+                if [[ "$default" == "true" ]]; then
+                    ask_yn "  ${prompt}?" "y" && reply=true || reply=false
+                else
+                    ask_yn "  ${prompt}?" "n" && reply=true || reply=false
+                fi
+                ;;
+            *)
+                reply="$(ask_text "$prompt" "$default")"
+                ;;
+        esac
 
         ANSWER_IDS+=("$id")
         ANSWER_VALUES+=("$reply")

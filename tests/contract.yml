@@ -149,6 +149,17 @@
           # `implies:` is the generic dependency edge replacing requires_vscode.
           - "'implied-cap' in selected_capabilities"
           - "'implied-cap' in computer_setup_active_capabilities"
+          # ORDERING, both directions. A layer var templates against an answer
+          # (answers applied BEFORE the merge)...
+          - contract_repo_path == '/tmp/contract-repos/thing'
+          # ...and an answer still beats a layer var of the same name (applied
+          # again AFTER the merge). override/vars.yml sets contract_editor_cmd.
+          - contract_editor_cmd == 'from-override-option'
+          # Machine tier: a question MAY set keys a layer's vars.yml may not.
+          # tests/fixtures/negative/machine-tier asserts the other half — that a
+          # layer var naming the same key is still rejected.
+          - repositories_base_dir == '/tmp/contract-repos'
+          - drift_correction_enabled | bool
           # An unprovided key deploys nothing and does not create the parent dir.
           # This runs AFTER several successful deploys, so it also asserts the
           # primitive resets its resolution state between invocations rather than

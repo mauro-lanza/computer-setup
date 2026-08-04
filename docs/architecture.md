@@ -101,6 +101,33 @@ Resolution order, all in `pre_tasks`:
 This runs **after** the layer var merge, so an answer outranks a layer var: the
 machine is more specific than the layer that proposed the question.
 
+### The machine tier
+
+A few keys are neither layer content nor engine constants: they are decisions
+the *machine* makes. `repositories_base_dir` is the clearest — `~/Projects` was
+a play var, reserved, and duplicated as a literal in the shell CLI, so there was
+no way to answer it at all.
+
+`computer_setup_machine_tier_keys` is the enumeration of keys a **question** may
+set although a layer's `vars.yml` may not:
+
+| Key | Decision |
+|---|---|
+| `repositories_base_dir` | where repositories are cloned |
+| `drift_correction_enabled` | whether the scheduled agents exist at all |
+| `drift_correction_schedule_hour` | when the drift check runs |
+| `drift_correction_upgrade_schedule_hour` | when the unattended upgrade runs |
+
+These are *where things go* and *when the agent runs* — not *what code runs*.
+Category 3 keys stay unreachable from every direction: `repo_url`,
+`repo_branch`, the upgrade auto-approval switches and the `ansible_*` controls
+are not in the tier and must not be added to it. Widening the tier is a security
+decision, which is why it is an enumeration rather than a prefix.
+
+Both halves are asserted: `tests/contract.yml` proves a question *can* set a
+tier key, and `tests/fixtures/negative/machine-tier/` proves a layer's `vars.yml`
+naming the same key is still rejected. A door, not a hole.
+
 ### Questions are an escalation path, and are guarded as one
 
 A `set:` payload lands in play scope exactly as a layer var does. Questions are
@@ -187,6 +214,9 @@ that goes stale. The categories are:
    `drift_correction_*` namespace (everything baked into the deployed runner and
    the scheduled agents), the upgrade auto-approval switches, and Ansible's own
    execution controls (`ansible_connection`, `ansible_python_interpreter`, …).
+
+A small enumerated subset of categories 1 and 3 is reachable by a *question* —
+see the machine tier above. Layers are never widened.
 
 Categories 2 and 3 are reserved **by prefix**, not by name, so a newly added
 engine var is protected automatically.

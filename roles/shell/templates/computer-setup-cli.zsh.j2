@@ -92,7 +92,9 @@ drift-log() {
 # before SSH auth exists. Run it yourself after `gh auth login`. Cloning is
 # non-destructive — existing checkouts are untouched.
 repos-generate() {
-    local base="${1:-${PROJECTS_BASE_DIR:-$HOME/Projects}}"
+    # Default matches the engine's repositories_base_dir (the `repositories-dir`
+    # answer), rendered in — not a second, independently-drifting literal.
+    local base="${1:-${PROJECTS_BASE_DIR:-{{ repositories_base_dir }}}}"
     if [[ ! -d "$base" ]]; then
         echo "No such directory: $base" >&2
         return 1

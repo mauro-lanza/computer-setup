@@ -287,7 +287,7 @@ assert_eq "Enter keeps the prior answer instead of the declared default" \
     cp "$MERGED_QUESTIONS_FILE" "$WORK/merged-q.tsv"
 )
 assert_eq "questions merge deduped by id" \
-    "editor unanswered" \
+    "editor unanswered repositories-dir drift-agents" \
     "$(cut -f1 "$WORK/merged-q.tsv" | tr '\n' ' ' | sed 's/ $//')"
 assert_eq "  the higher-priority layer's question wins" \
     "Default editor (override)" \

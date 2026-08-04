@@ -2,3 +2,7 @@
 contract_list:
   - base
 contract_scalar: base
+# Templated as include_vars READS this file, so it proves the answers were
+# applied BEFORE the layer var merge. Applied only after, this would silently
+# bake in the old default and answering the question would do nothing.
+contract_repo_path: "{{ repositories_base_dir }}/thing"

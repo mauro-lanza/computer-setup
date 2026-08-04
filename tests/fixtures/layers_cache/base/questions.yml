@@ -15,3 +15,13 @@ questions:
     desc: "Never answered — must fall back to its default"
     default: fallback-value
     set_var: contract_unanswered_var
+  - id: repositories-dir
+    type: path
+    desc: "Machine tier: a question MAY set this, a layer var may NOT"
+    default: /tmp/contract-repos
+    set_var: repositories_base_dir
+  - id: drift-agents
+    type: bool
+    desc: "Machine tier bool"
+    default: "true"
+    set_var: drift_correction_enabled
