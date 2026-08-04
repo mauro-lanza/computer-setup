@@ -1,0 +1,13 @@
+---
+presets:
+  - id: everything
+    desc: "Everything"
+    answers:
+      editor: picked
+      unanswered: from-preset
+    capabilities: [alpha, zzz-last]
+  - id: nothing
+    desc: "Nothing"
+    answers:
+      editor: base-default
+    capabilities: []

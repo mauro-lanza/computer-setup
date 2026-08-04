@@ -223,6 +223,18 @@ show_layers() {
 
 # Interactively define/modify the layer manifest, persisted to layers.yml.
 manage_layers() {
+    # A non-interactive run cannot answer "which layers?". An existing manifest
+    # is used as-is; a missing one is fatal rather than a silently empty setup.
+    if [[ -n "$ANSWERS_FILE" ]]; then
+        if [[ -f "$LAYERS_FILE" ]] && [[ "$(yq -r '.layers | length' "$LAYERS_FILE")" -gt 0 ]]; then
+            ok "Using existing layer manifest (${LAYERS_FILE})"
+            return
+        fi
+        error "--answers needs an existing layer manifest at ${LAYERS_FILE}."
+        error "Run bootstrap.sh once interactively to configure layers."
+        exit 1
+    fi
+
     require_tty
     mkdir -p "$CONFIG_DIR"
     echo
@@ -384,6 +396,205 @@ load_questions() {
     [[ "$count" -gt 0 ]] && ok "Questions: ${count} decision(s) across layers"
 }
 
+# ─── Presets ─────────────────────────────────────────────────────────────────
+# A preset is a named bundle of answers + capability selections. It is a PURE
+# PREFILL: it only supplies the defaults the prompts start from, and is never
+# recorded in the prefs file. A machine set up from a preset is indistinguishable
+# from one answered by hand, so a preset can be edited later without silently
+# reconfiguring machines that once used it.
+#
+# This exists because "every decision is re-answerable" and "bootstrap asks 50+
+# questions one at a time" are the same statement. A preset plus "review? [y/N]"
+# keeps the first true without making a fresh machine unbearable.
+PRESET_ID=""
+PRESET_CAPS=" "
+REVIEW_ANSWERS=true
+
+# TSV rows: id \t desc \t capabilities(csv) \t answers(k=v,csv)
+load_presets() {
+    MERGED_PRESETS_FILE="$(mktemp)"
+
+    [[ ! -f "$LAYERS_FILE" ]] && return
+
+    local seen=" " order name pf
+    order="$(yq -r '.layers | sort_by(.priority) | reverse | .[].name' "$LAYERS_FILE" 2>/dev/null || true)"
+    for name in $order; do
+        pf="$LAYER_CACHE/$name/presets.yml"
+        [[ -f "$pf" ]] || continue
+        if ! yq '.' "$pf" >/dev/null 2>&1; then
+            warn "Layer '$name' has an invalid presets.yml — skipping it."
+            continue
+        fi
+        while IFS=$'\t' read -r id desc caps ans; do
+            [[ -z "$id" ]] && continue
+            [[ "$seen" == *" $id "* ]] && continue
+            seen="${seen}${id} "
+            printf '%s\t%s\t%s\t%s\n' "$id" "$desc" "$caps" "$ans" >> "$MERGED_PRESETS_FILE"
+        done < <(yq -r '.presets[]? | [.id, (.desc // .id),
+                        ([.capabilities[]?] | join(",")),
+                        ((.answers // {}) | to_entries | map(.key + "=" + (.value | tostring)) | join(","))]
+                        | @tsv' "$pf")
+    done
+}
+
+# The preset's answer for one question id, empty when the preset does not set it.
+preset_answer() {
+    [[ -z "$PRESET_ID" ]] && return 0
+    awk -F'\t' -v p="$PRESET_ID" -v k="$1" '
+        $1 == p {
+            n = split($4, kv, ",")
+            for (i = 1; i <= n; i++) {
+                eq = index(kv[i], "=")
+                if (eq > 0 && substr(kv[i], 1, eq - 1) == k) {
+                    print substr(kv[i], eq + 1)
+                    exit
+                }
+            }
+        }' "$MERGED_PRESETS_FILE" 2>/dev/null || true
+}
+
+choose_preset() {
+    [[ ! -s "${MERGED_PRESETS_FILE:-}" ]] && return 0
+    require_tty
+
+    echo
+    info "Presets — a starting point you can then review:"
+    local -a ids=()
+    local id desc caps ans n=1
+    while IFS=$'\t' read -r id desc caps ans; do
+        ids+=("$id")
+        echo "    ${n}) ${desc}"
+        n=$((n + 1))
+    done < "$MERGED_PRESETS_FILE"
+    echo "    ${n}) Custom — start from $($HAS_PRIOR_PREFS && echo "your previous answers" || echo "the defaults")"
+    echo
+
+    local reply idx
+    while true; do
+        read -rp "  Preset [${n}]: " reply
+        reply="${reply:-$n}"
+        if [[ "$reply" =~ ^[0-9]+$ ]]; then
+            idx=$((reply - 1))
+            if [[ $idx -ge 0 && $idx -lt ${#ids[@]} ]]; then
+                PRESET_ID="${ids[$idx]}"
+                break
+            elif [[ $idx -eq ${#ids[@]} ]]; then
+                PRESET_ID=""
+                break
+            fi
+        fi
+        echo "    Not one of the offered options." >&2
+    done
+
+    if [[ -n "$PRESET_ID" ]]; then
+        PRESET_CAPS=" $(awk -F'\t' -v p="$PRESET_ID" '$1==p{gsub(/,/," ",$3); print $3}' \
+            "$MERGED_PRESETS_FILE") "
+        ok "Preset '${PRESET_ID}' selected"
+        # Reviewing is opt-IN: the whole point of picking a preset is not being
+        # asked 50 questions. Answering yes walks the same prompts, prefilled.
+        if ask_yn "  Review every individual answer?" "n"; then
+            REVIEW_ANSWERS=true
+        else
+            REVIEW_ANSWERS=false
+        fi
+    fi
+    echo
+}
+
+# ─── Non-interactive answers (zero-touch rebuild) ────────────────────────────
+# `bootstrap.sh --answers <file>` skips every prompt and takes the whole
+# preference set from a YAML file with the same shape bootstrap writes:
+#
+#   git_user_name: ...
+#   git_user_email: ...
+#   answers: {editor: zed, ...}
+#   selected_capabilities: [nvm, ...]
+#
+# That makes "rebuild this machine" one command, which is what actually makes
+# every-decision-is-a-prompt survivable. The file is the same shape write_prefs
+# emits, so ~/.mac-prefs.yml from an old machine works directly.
+ANSWERS_FILE=""
+
+load_answers_file() {
+    local f="$1"
+    if [[ ! -f "$f" ]]; then
+        error "No such answers file: $f"
+        exit 1
+    fi
+    if ! yq '.' "$f" >/dev/null 2>&1; then
+        error "Answers file is not valid YAML: $f"
+        exit 1
+    fi
+
+    GIT_NAME="$(yq -r '.git_user_name // ""' "$f")"
+    GIT_EMAIL="$(yq -r '.git_user_email // ""' "$f")"
+    if [[ -z "$GIT_NAME" || "$GIT_EMAIL" != *@* ]]; then
+        error "Answers file must set git_user_name and a valid git_user_email."
+        exit 1
+    fi
+
+    ANSWER_IDS=(); ANSWER_VALUES=()
+    local k v
+    while IFS=$'\t' read -r k v; do
+        [[ -z "$k" ]] && continue
+        ANSWER_IDS+=("$k")
+        ANSWER_VALUES+=("$v")
+    done < <(yq -r '(.answers // {}) | to_entries | .[] | [.key, (.value | tostring)] | @tsv' "$f")
+
+    SELECTED_CAPABILITIES=()
+    local cap
+    while IFS= read -r cap; do
+        [[ -n "$cap" ]] && SELECTED_CAPABILITIES+=("$cap")
+    done < <(yq -r '.selected_capabilities[]?' "$f")
+
+    ok "Answers loaded from ${f} (${#ANSWER_IDS[@]} answer(s), ${#SELECTED_CAPABILITIES[@]} capability selection(s))"
+}
+
+usage() {
+    cat <<USAGE
+Usage: bootstrap.sh [--answers <file>] [--help]
+
+  --answers <file>  Take every preference from <file> and skip all prompts.
+                    Same shape as ~/.mac-prefs.yml, so a previous machine's
+                    prefs file can be used directly.
+USAGE
+}
+
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --answers)
+                ANSWERS_FILE="${2:-}"
+                if [[ -z "$ANSWERS_FILE" ]]; then
+                    error "--answers requires a file path"
+                    exit 1
+                fi
+                shift 2
+                ;;
+            --answers=*)
+                ANSWERS_FILE="${1#*=}"
+                shift
+                ;;
+            -h|--help)
+                usage
+                exit 0
+                ;;
+            *)
+                error "Unknown argument: $1"
+                usage
+                exit 1
+                ;;
+        esac
+    done
+
+    # Fail on a bad path HERE, not in Phase 2 — otherwise a typo installs Xcode
+    # CLT, Homebrew, Ansible and clones every layer before reporting it.
+    if [[ -n "$ANSWERS_FILE" && ! -f "$ANSWERS_FILE" ]]; then
+        error "No such answers file: $ANSWERS_FILE"
+        exit 1
+    fi
+}
+
 # ─── Prior selections (re-run friendliness) ──────────────────────────────────
 PRIOR_SELECTED_IDS=" "
 PRIOR_NAME=""
@@ -479,7 +690,22 @@ gather_optional_tools() {
             continue
         fi
 
-        if is_prior_selected "$id"; then default="y"; else default="n"; fi
+        # With a preset chosen, ITS capability list is the default set — not the
+        # machine's prior selections, which the preset is explicitly replacing.
+        if [[ -n "$PRESET_ID" ]]; then
+            if [[ "$PRESET_CAPS" == *" $id "* ]]; then default="y"; else default="n"; fi
+        elif is_prior_selected "$id"; then
+            default="y"
+        else
+            default="n"
+        fi
+
+        if ! $REVIEW_ANSWERS; then
+            [[ "$default" == "y" ]] && SELECTED_CAPABILITIES+=("$id")
+            # Keep the in-run unlock working when review is skipped.
+            [[ "$default" == "y" && "$id" == "vscode" ]] && vscode_available=true
+            continue
+        fi
 
         if ask_yn "  Enable ${desc}?" "$default"; then
             SELECTED_CAPABILITIES+=("$id")
@@ -510,10 +736,22 @@ gather_answers() {
     info "Setup decisions — press Enter to accept the shown default:"
     echo
 
-    local id type prompt default options prior reply
+    local id type prompt default options prior preset reply
     while IFS=$'\t' read -r -u 3 id type prompt default options; do
+        # Precedence: the question's declared default, then this machine's prior
+        # answer, then the preset. The preset wins because choosing one this run
+        # is a deliberate "start from that" — otherwise picking a preset on a
+        # re-run would appear to do nothing.
         prior="$(prior_answer "$id")"
         [[ -n "$prior" ]] && default="$prior"
+        preset="$(preset_answer "$id")"
+        [[ -n "$preset" ]] && default="$preset"
+
+        if ! $REVIEW_ANSWERS; then
+            ANSWER_IDS+=("$id")
+            ANSWER_VALUES+=("$default")
+            continue
+        fi
 
         case "$type" in
             select)
@@ -666,7 +904,9 @@ run_playbook() {
         -e "repo_branch=${REPO_BRANCH}"
     )
 
-    if ask_yn "Preview changes first (dry-run)?"; then
+    if [[ -n "$ANSWERS_FILE" ]]; then
+        info "Non-interactive run — applying without a dry-run prompt."
+    elif ask_yn "Preview changes first (dry-run)?"; then
         ansible-pull \
             -U "$REPO_URL" \
             -C "$REPO_BRANCH" \
@@ -694,6 +934,8 @@ run_playbook() {
 # Main
 # ═════════════════════════════════════════════════════════════════════════════
 main() {
+    parse_args "$@"
+
     reattach_stdin
 
     echo
@@ -723,14 +965,20 @@ main() {
     # ── Phase 2 ──────────────────────────────────────────────────────────────
     load_capabilities
     load_questions
+    load_presets
     load_prior_prefs
-    if $HAS_PRIOR_PREFS; then
-        ok "Found existing prefs at ${PREFS_FILE} — using prior answers as defaults"
-        echo
+    if [[ -n "$ANSWERS_FILE" ]]; then
+        load_answers_file "$ANSWERS_FILE"
+    else
+        if $HAS_PRIOR_PREFS; then
+            ok "Found existing prefs at ${PREFS_FILE} — using prior answers as defaults"
+            echo
+        fi
+        choose_preset
+        gather_git_identity
+        gather_answers
+        gather_optional_tools
     fi
-    gather_git_identity
-    gather_answers
-    gather_optional_tools
     write_prefs
 
     # ── Phase 3 ──────────────────────────────────────────────────────────────

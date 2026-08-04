@@ -1,0 +1,32 @@
+---
+# Named starting points offered by bootstrap. Optional — a layer with no
+# presets.yml contributes none, and bootstrap simply skips the preset menu.
+#
+# A preset is a PURE PREFILL: it supplies the defaults the prompts start from
+# and is never recorded in ~/.mac-prefs.yml. A machine set up from a preset is
+# indistinguishable from one answered by hand, so presets can be edited later
+# without reconfiguring machines that used them.
+#
+# They exist because "every decision is re-answerable" and "bootstrap asks 50+
+# questions" are the same statement. Pick one, decline the review, done.
+#
+# Schema per item:
+#   id:            stable token
+#   desc:          label shown in the bootstrap menu
+#   answers:       question id -> answer   (ids from questions.yml)
+#   capabilities:  capability ids pre-selected (ids from capabilities.yml)
+
+presets:
+  - id: example-full
+    desc: "Example: everything this layer offers"
+    answers:
+      example-editor: example-tool
+      example-scratch-dir: /tmp/example
+    capabilities:
+      - example-tool
+
+  - id: example-minimal
+    desc: "Example: nothing optional"
+    answers:
+      example-editor: keep
+    capabilities: []

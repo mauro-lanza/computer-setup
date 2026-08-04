@@ -142,6 +142,30 @@ applies to `vars.yml`. A question cannot reach further than the layer's own vars
 can. `tests/fixtures/negative/question/` asserts this rejects, for the right
 reason.
 
+## Presets
+
+A fresh machine faces ~50 capability prompts plus every question. Presets make
+that survivable: bootstrap offers the layers' `presets.yml` entries, and
+declining "review every individual answer?" accepts the bundle wholesale.
+
+A preset is a **pure prefill**. It supplies the defaults the prompts start from
+and is never recorded in the prefs file, so a machine set up from a preset is
+indistinguishable from one answered by hand. That means presets can be edited
+later without silently reconfiguring machines that once used them — the reason
+not to store a live binding.
+
+Precedence for a question's starting value: declared default, then this
+machine's prior answer, then the preset. The preset wins because choosing one on
+a re-run is a deliberate "start from that instead".
+
+Presets live entirely in `bootstrap.sh`. The engine has no concept of them.
+
+`bootstrap.sh --answers <file>` skips every prompt and takes the whole
+preference set from a file with the same shape `write_prefs` emits — so a
+previous machine's `~/.mac-prefs.yml` works directly, and "rebuild this machine"
+is one command. It requires an existing layer manifest, since nothing can guess
+which layers a machine wants.
+
 ## Runtime flow
 
 1. `bootstrap.sh` installs prerequisites and authenticates GitHub over SSH.

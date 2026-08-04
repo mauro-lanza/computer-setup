@@ -293,6 +293,101 @@ assert_eq "  the higher-priority layer's question wins" \
     "Default editor (override)" \
     "$(awk -F'\t' '$1=="editor"{print $3}' "$WORK/merged-q.tsv")"
 
+# ── 13. Presets ──────────────────────────────────────────────────────────────
+# A preset is a pure prefill. The risks are that it loads nothing (a yq
+# expression that silently yields no rows looks identical to "no presets
+# declared"), or that declining the review still blocks on a prompt.
+echo "==> bootstrap presets"
+(
+    LAYER_CACHE="$REPO_ROOT/tests/fixtures/layers_cache"
+    LAYERS_FILE="$REPO_ROOT/tests/fixtures/layers.yml"
+    load_presets >/dev/null 2>&1
+    cp "$MERGED_PRESETS_FILE" "$WORK/presets.tsv"
+)
+assert_eq "presets load from layers" "everything nothing" \
+    "$(cut -f1 "$WORK/presets.tsv" | tr '\n' ' ' | sed 's/ $//')"
+assert_eq "  capabilities survive as a csv column" "alpha,zzz-last" \
+    "$(awk -F'\t' '$1=="everything"{print $3}' "$WORK/presets.tsv")"
+assert_eq "  preset_answer extracts one answer" "picked" \
+    "$(MERGED_PRESETS_FILE="$WORK/presets.tsv" PRESET_ID=everything preset_answer editor)"
+assert_eq "  preset_answer is empty for an unset question" "" \
+    "$(MERGED_PRESETS_FILE="$WORK/presets.tsv" PRESET_ID=nothing preset_answer unanswered)"
+
+# Declining the review must consume NO stdin at all. Feeding it /dev/null means
+# any stray `read` turns into an empty answer or a hang, both of which fail here.
+result="$(
+    MERGED_QUESTIONS_FILE="$WORK/questions.tsv"
+    MERGED_PRESETS_FILE="$WORK/presets.tsv"
+    PREFS_FILE="$WORK/no-such-prefs.yml"
+    PRESET_ID=everything
+    REVIEW_ANSWERS=false
+    ANSWER_IDS=(); ANSWER_VALUES=()
+    gather_answers < /dev/null >/dev/null 2>&1
+    printf '%s=%s' "${ANSWER_IDS[0]}" "${ANSWER_VALUES[0]}"
+)"
+assert_eq "declining review takes preset answers without prompting" \
+    "editor=picked" "$result"
+
+# The preset, not the machine's prior selections, defines the default set.
+result="$(
+    MERGED_CAPABILITIES_FILE="$WORK/caps.tsv"
+    MERGED_PRESETS_FILE="$WORK/presets.tsv"
+    PRIOR_SELECTED_IDS=" ext-pack "
+    HAS_PRIOR_PREFS=true
+    PRESET_ID=everything
+    PRESET_CAPS=" alpha zzz-last "
+    REVIEW_ANSWERS=false
+    SELECTED_CAPABILITIES=()
+    gather_optional_tools < /dev/null >/dev/null 2>&1
+    printf '%s' "${SELECTED_CAPABILITIES[*]+${SELECTED_CAPABILITIES[*]}}"
+)"
+assert_eq "preset capabilities replace prior selections" "alpha zzz-last" "$result"
+
+# ── 14. --answers: the zero-touch rebuild path ───────────────────────────────
+echo "==> bootstrap answers file"
+cat > "$WORK/answers.yml" <<'ANSWERS'
+---
+git_user_name: File User
+git_user_email: file@example.com
+answers:
+  editor: zed
+  drift-agents: false
+selected_capabilities:
+  - alpha
+  - ripgrep
+ANSWERS
+result="$(
+    load_answers_file "$WORK/answers.yml" >/dev/null 2>&1
+    printf '%s|%s|%s|%s' "$GIT_NAME" "$GIT_EMAIL" \
+        "${ANSWER_IDS[*]}" "${SELECTED_CAPABILITIES[*]}"
+)"
+assert_eq "an answers file supplies identity, answers and selections" \
+    "File User|file@example.com|editor drift-agents|alpha ripgrep" "$result"
+
+# A YAML bool must survive as the string the engine's `| bool` filter reads,
+# not as an empty value.
+result="$(
+    load_answers_file "$WORK/answers.yml" >/dev/null 2>&1
+    printf '%s' "${ANSWER_VALUES[1]}"
+)"
+assert_eq "  a YAML bool answer is preserved as a string" "false" "$result"
+
+# The file bootstrap WRITES must be usable as the file it READS — that
+# round-trip is the whole point of "rebuild this machine in one command".
+(
+    PREFS_FILE="$WORK/prefs-roundtrip.yml"
+    GIT_NAME="Round Trip"; GIT_EMAIL="rt@example.com"
+    SELECTED_CAPABILITIES=(alpha zzz-last)
+    ANSWER_IDS=(editor); ANSWER_VALUES=(zed)
+    write_prefs >/dev/null 2>&1
+)
+result="$(
+    load_answers_file "$WORK/prefs-roundtrip.yml" >/dev/null 2>&1
+    printf '%s|%s|%s' "$GIT_NAME" "${ANSWER_VALUES[0]}" "${SELECTED_CAPABILITIES[*]}"
+)"
+assert_eq "a written prefs file is a valid --answers file" \
+    "Round Trip|zed|alpha zzz-last" "$result"
+
 echo
 if [[ "$FAILURES" -gt 0 ]]; then
     echo "bootstrap prompt tests: ${FAILURES} failure(s)" >&2
