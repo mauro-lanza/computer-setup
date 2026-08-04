@@ -11,22 +11,31 @@
     label: "{{ item.domain }} {{ item.key }}"
   notify: "{{ item.notify | default([], true) }}"
 
-- name: Check if Rectangle is installed
+# App-conditional defaults. The app paths are layer data: the engine names no
+# application, so window managers other than Rectangle need no engine change.
+- name: Check which conditional-defaults apps are installed
   ansible.builtin.stat:
-    path: /Applications/Rectangle.app
-  register: macos_rectangle_app
-
-- name: Apply Rectangle defaults
-  community.general.osx_defaults:
-    domain: "{{ item.domain }}"
-    key: "{{ item.key }}"
-    type: "{{ item.type }}"
-    value: "{{ item.value }}"
-    state: present
-  loop: "{{ macos_rectangle_defaults }}"
+    path: "{{ item.app }}"
+  loop: "{{ macos_conditional_defaults | default([]) }}"
   loop_control:
-    label: "{{ item.domain }} {{ item.key }}"
-  when: macos_rectangle_app.stat.exists
+    label: "{{ item.app | basename }}"
+  register: macos_conditional_app_stat
+
+- name: Apply defaults for installed apps
+  community.general.osx_defaults:
+    domain: "{{ item.1.domain }}"
+    key: "{{ item.1.key }}"
+    type: "{{ item.1.type }}"
+    value: "{{ item.1.value }}"
+    state: present
+  loop: >-
+    {{ macos_conditional_app_stat.results | default([])
+       | selectattr('stat.exists')
+       | map(attribute='item')
+       | subelements('defaults', skip_missing=True) }}
+  loop_control:
+    label: "{{ item.0.app | basename }}: {{ item.1.domain }} {{ item.1.key }}"
+  notify: "{{ item.1.notify | default([], true) }}"
 
 # macos-capture: a read-only helper to diff this machine's live defaults against
 # the values declared above and emit paste-ready YAML (closes the IaC loop).

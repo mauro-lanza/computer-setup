@@ -225,6 +225,33 @@ consumers of that interface. Before adding one, apply the litmus test: if
 configuring a tool is just placing a file, it is **data** — a capability
 `config:` entry — not a new role.
 
+## The engine names no tool
+
+The engine's invariant is that it hardcodes no tool, app, or editor. That was
+aspirational in several places; these are now data:
+
+| Was hardcoded | Now |
+|---|---|
+| VS Code binary, role gate, `type: vscode`, `settings.json` key | `extension_managers` (layer data), `type: extension` + `manager:` |
+| `requires_vscode` | `requires: <capability-id>`, resolved against `adopt_if_present` |
+| `/Applications/Rectangle.app` | `macos_conditional_defaults[].app` |
+| `zshrc`, `p10k.zsh` lookup keys | `shell_config_files` |
+| nvm / tfenv capability-id literals | `runtimes_*_capability` vars |
+| Terraform version pinned in engine defaults | layer var, empty by default |
+
+### Where this deliberately stops
+
+The version managers keep bespoke task bodies. The obvious generalisation is a
+data table carrying each manager's shell commands — rejected, because layer vars
+would then be arbitrary shell executed as the user on every drift run, which is
+precisely the remote-code-execution path the reserved-key guard exists to close.
+Adding pyenv or mise is a small reviewable engine change; making it layer data
+would trade a real security boundary for a cosmetic one.
+
+The same reasoning is why `set:` payloads on questions are guarded: data that
+becomes *variables* is checked against a reserved list; data that would become
+*commands* is not accepted at all.
+
 ## Reserved keys
 
 A layer's `vars.yml` may not define certain keys. The authoritative list is

@@ -17,15 +17,17 @@ MANAGED=(
 {% for d in macos_defaults %}
   "{{ d.domain }}|{{ d.key }}|{{ d.type }}|{{ d.value }}"
 {% endfor %}
-{% for d in macos_rectangle_defaults %}
+{% for group in macos_conditional_defaults | default([], true) %}
+{% for d in group.defaults | default([], true) %}
   "{{ d.domain }}|{{ d.key }}|{{ d.type }}|{{ d.value }}"
+{% endfor %}
 {% endfor %}
 )
 # Counted here in Jinja rather than with bash's array-length expansion. That
 # expansion opens with a dollar-brace-hash sequence, and brace-hash is Jinja's
 # comment-open delimiter — inside a .j2 file it makes the template unrenderable,
 # even within a shell comment. Deliberately spelled out in prose for that reason.
-MANAGED_COUNT={{ (macos_defaults | default([], true) | length) + (macos_rectangle_defaults | default([], true) | length) }}
+MANAGED_COUNT={{ (macos_defaults | default([], true) | length) + (macos_conditional_defaults | default([], true) | map(attribute='defaults') | map('length') | sum) }}
 
 usage() {
     cat <<'EOF'

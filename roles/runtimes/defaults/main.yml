@@ -1,3 +1,26 @@
 ---
+# Version managers the engine can drive. Each has a bespoke task pair, because
+# each is driven differently (nvm must be sourced into a shell; tfenv is a
+# binary) — and DELIBERATELY so.
+#
+# The obvious generalisation is a data table carrying each manager's shell
+# commands. That is rejected: layer vars would then be arbitrary shell executed
+# as the user on every drift run, which is exactly the remote-code-execution
+# path the reserved-key guard exists to close. Adding pyenv/rbenv/mise is a
+# small, reviewable engine change; making it layer data is not.
+#
+# What IS data: which capability gates each manager, and which version to pin.
+
+# Capability that activates each manager. Named here rather than as a literal in
+# task code, so a layer may register a manager under a different capability id.
+runtimes_nvm_capability: nvm
+runtimes_tfenv_capability: tfenv
+
+# Node version installed and set as the nvm default.
 runtimes_nvm_default_node: "lts/*"
-runtimes_tfenv_terraform_version: "1.12.2"
+
+# Terraform version pinned via tfenv. EMPTY BY DEFAULT: a specific version is
+# personal/employer data, and the engine ships none. A layer that wants a pin
+# sets it; unset means tfenv is left alone rather than being reverted to an
+# engine-chosen version on every drift run.
+runtimes_tfenv_terraform_version: ""

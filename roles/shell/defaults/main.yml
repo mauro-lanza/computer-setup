@@ -28,3 +28,16 @@ shell_priority_width: 3
 # here from a previous run, so user-created files in ~/.zsh are never inferred as
 # managed based on their filename alone.
 shell_snippet_manifest_path: "{{ shell_zsh_config_dir }}/.computer-setup-snippets"
+
+# Whole-file shell configs resolved across layers. Keys are layer data, so a
+# layer using starship instead of Powerlevel10k just changes this list — the
+# engine previously named `zshrc` and `p10k.zsh` in task code.
+#
+# Item schema: { key: <layer file key>, dest: <path>, backup?: bool }
+shell_config_files:
+  - key: zshrc
+    dest: "{{ home_dir }}/.zshrc"
+    # A file the user may have authored themselves.
+    backup: true
+  - key: p10k.zsh
+    dest: "{{ home_dir }}/.p10k.zsh"
