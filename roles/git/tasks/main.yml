@@ -19,12 +19,9 @@
       {% endfor %}
     dest: "{{ home_dir }}/.gitignore_global"
     mode: "0644"
-    # Same hazard as ~/.gitconfig below, and it was the only one of the pair
-    # without the guard. The default for git_global_gitignore_entries is [] —
-    # the state when running standalone, or with layers that do not set the key
-    # — so this task will happily truncate a restored ~/.gitignore_global down
-    # to a single comment line. gitconfig.j2 then points core.excludesFile at
-    # the file that was just emptied.
+    # The entries default to [], so without the `when` below this truncates a
+    # restored ~/.gitignore_global to one comment line — and gitconfig.j2 then
+    # points core.excludesFile at the file just emptied.
     backup: true
   when: git_global_gitignore_entries | default([], true) | length > 0
 
@@ -43,8 +40,6 @@
     src: gitconfig.j2
     dest: "{{ home_dir }}/.gitconfig"
     mode: "0644"
-    # This template renders ONLY git_config_sections from the layers, so a
-    # pre-existing ~/.gitconfig (credential.helper, user.signingkey, gpg.format,
-    # includeIf blocks for work repos) is replaced wholesale. On a migrated
-    # machine that happens before the user could move any of it into a layer.
+    # Renders only git_config_sections, so a pre-existing ~/.gitconfig
+    # (signing keys, credential helper, includeIf blocks) is replaced wholesale.
     backup: true

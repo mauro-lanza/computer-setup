@@ -1,8 +1,0 @@
----
-- name: "Resolve layer template: {{ computer_setup_lookup_key }}"
-  ansible.builtin.set_fact:
-    "{{ computer_setup_lookup_result_var }}": "{{ lookup('ansible.builtin.first_found', _params, errors='ignore') }}"
-  vars:
-    _params:
-      files: ["{{ computer_setup_lookup_key }}"]
-      paths: "{{ (computer_setup_template_search_dirs | default([])) + [computer_setup_lookup_fallback_dir] }}"

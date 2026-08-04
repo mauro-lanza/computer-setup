@@ -2,29 +2,29 @@
 # Merge a single content layer's vars.yml into the accumulated merged set.
 # Loop var: `_layer` — a manifest entry: { name, priority }.
 
-- name: "[{{ _layer.name }}] Read plugin manifest"
+- name: "[{{ _layer.name }}] Read layer manifest"
   ansible.builtin.include_vars:
-    file: "{{ computer_setup_plugin_cache }}/{{ _layer.name }}/plugin.yml"
-    name: _layer_plugin
+    file: "{{ computer_setup_layer_cache }}/{{ _layer.name }}/layer.yml"
+    name: _layer_manifest
 
 - name: "[{{ _layer.name }}] Assert supported schema_version"
   ansible.builtin.assert:
     that:
-      - (_layer_plugin.schema_version | default(1) | int) <= (computer_setup_schema_version | int)
+      - (_layer_manifest.schema_version | default(1) | int) <= (computer_setup_schema_version | int)
     fail_msg: >-
       Layer '{{ _layer.name }}' requires schema_version
-      {{ _layer_plugin.schema_version | default(1) }}, but this orchestrator
+      {{ _layer_manifest.schema_version | default(1) }}, but this orchestrator
       supports up to {{ computer_setup_schema_version }}. Update computer-setup.
     quiet: true
 
 - name: "[{{ _layer.name }}] Stat vars.yml"
   ansible.builtin.stat:
-    path: "{{ computer_setup_plugin_cache }}/{{ _layer.name }}/vars.yml"
+    path: "{{ computer_setup_layer_cache }}/{{ _layer.name }}/vars.yml"
   register: _layer_vars_stat
 
 - name: "[{{ _layer.name }}] Load vars.yml"
   ansible.builtin.include_vars:
-    file: "{{ computer_setup_plugin_cache }}/{{ _layer.name }}/vars.yml"
+    file: "{{ computer_setup_layer_cache }}/{{ _layer.name }}/vars.yml"
     name: _incoming_layer_vars
   when: _layer_vars_stat.stat.exists
 
@@ -66,15 +66,10 @@
       {{ computer_setup_merged_vars
          | combine(_layer_vars_clean, recursive=true, list_merge='append_rp') }}
   vars:
-    # Drop keys whose value is null before merging. A layer author writing
-    #     homebrew_baseline_formulae:
-    # (the key, no entries) means "nothing here", but YAML parses it as None —
-    # which is DEFINED, so the consuming role's `| default([])` does not fire and
-    # the value flows on to crash something far away with an unattributed
-    # "'NoneType' object is not iterable". Dropping the key instead lets the
-    # role's own default apply, which is exactly what the author meant. Cheaper
-    # and friendlier than asserting, and it retires the whole class rather than
-    # one key at a time.
+    # Drop null-valued keys before merging. A bare `homebrew_baseline_formulae:`
+    # means "nothing here" but parses to None, which is DEFINED — so the
+    # consuming role's `| default([])` never fires and the None crashes
+    # somewhere unrelated. Dropping the key lets the role's default apply.
     _layer_vars_clean: >-
       {{ (_incoming_layer_vars | default({}) | dict2items
           | rejectattr('value', 'none') | list | items2dict)

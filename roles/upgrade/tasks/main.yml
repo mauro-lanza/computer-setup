@@ -1,78 +1,61 @@
 ---
-# Opt-in upgrade path. Gated behind the `upgrade`/`never` tags in local.yml, so
+# Opt-in upgrade path, gated behind the `upgrade`/`never` tags in local.yml so
 # the daily drift check and normal `drift-apply` never run it. Trigger with
-# `drift-update`, which confirms in your terminal, then runs this
-# non-interactively with `-e upgrade_assume_yes=true`.
+# `drift-update`, which confirms in your terminal then runs this with
+# `-e upgrade_assume_yes=true`.
 #
-# Flow: refresh Homebrew → show exactly which managed packages are outdated →
-# apply upgrades only when `upgrade_assume_yes` is true. Covers every install
-# mechanism: Homebrew formulae + casks (including Powerlevel10k and the zsh
-# plugins), Ansible Galaxy collections, and nvm-managed Node.js.
+# Without that flag this role only PREVIEWS, so a scheduled run can never
+# upgrade. Confirmation lives in the shell function (a guaranteed TTY) rather
+# than an in-play `pause`, which hangs forever under `ansible-pull` when stdin
+# is not interactive.
 #
-# Deliberately NOT upgraded: tfenv's Terraform is pinned
-# (runtimes_tfenv_terraform_version) — an unplanned bump can break state; change
-# that version explicitly when you want it.
-#
-# Confirmation lives in the `drift-update` shell function (a guaranteed TTY), NOT
-# an in-play `pause`: a pause inside `ansible-pull` blocks forever when stdin is
-# an interactive TTY and the user misses the prompt, and silently skips when it
-# isn't. Running this role without `upgrade_assume_yes=true` only previews — it
-# never applies — so a scheduled/non-interactive run can never upgrade.
+# tfenv's Terraform is deliberately not upgraded — it is pinned by
+# runtimes_tfenv_terraform_version, since an unplanned bump can break state.
 
 - name: Refresh Homebrew package index
   ansible.builtin.command: brew update
   changed_when: false
 
-# `brew outdated` with NO package arguments reports every outdated package on the
-# machine, managed or not — so with empty lists the preview would show unmanaged
-# packages as "pending" and the apply step (which passes the same empty list to
-# the homebrew module) would then upgrade nothing. Skip instead of lying.
+# With no package arguments `brew outdated` reports every outdated package on the
+# machine, managed or not. Skip rather than preview packages we do not manage.
 - name: Determine which managed formulae are outdated
   ansible.builtin.command:
-    argv: "{{ ['brew', 'outdated', '--formula', '--verbose'] + homebrew_baseline_formulae + homebrew_optional_formulae }}"
+    argv: "{{ ['brew', 'outdated', '--formula', '--verbose'] + upgrade_managed_formulae }}"
   register: upgrade_outdated_formulae
   changed_when: false
   failed_when: false
-  when: (homebrew_baseline_formulae + homebrew_optional_formulae) | length > 0
+  when: upgrade_managed_formulae | length > 0
 
 - name: Determine which managed casks are outdated
   ansible.builtin.command:
-    argv: >-
-      {{ ['brew', 'outdated', '--cask', '--verbose']
-         + ((homebrew_baseline_casks + homebrew_optional_casks)
-            | reject('in', upgrade_casks_exclude) | list) }}
+    argv: "{{ ['brew', 'outdated', '--cask', '--verbose'] + upgrade_managed_casks }}"
   register: upgrade_outdated_casks
   changed_when: false
   failed_when: false
   when:
     - upgrade_include_casks | bool
-    - ((homebrew_baseline_casks + homebrew_optional_casks)
-       | reject('in', upgrade_casks_exclude) | list) | length > 0
+    - upgrade_managed_casks | length > 0
 
 - name: Show pending upgrades
   vars:
-    # `brew outdated` exits 1 to mean "something IS outdated" — like diff(1) —
-    # so rc is useless as an error signal. A genuine failure (an unknown or
-    # renamed formula, a tap that isn't installed) also exits non-zero but
-    # writes an "Error:" line to stderr and prints NOTHING to stdout. That
-    # matters because `brew outdated` is all-or-nothing: one unresolvable name
-    # makes it check nothing at all, and the preview would otherwise render the
-    # empty stdout as "(up to date)" for the entire managed set, then hand that
-    # same set to `state: latest` anyway.
+    # `brew outdated` exits 1 to mean "something IS outdated", like diff(1), so
+    # rc is useless as an error signal. A real failure (unknown formula, missing
+    # tap) also exits non-zero but writes "Error:" to stderr and nothing to
+    # stdout — and `brew outdated` is all-or-nothing, so one bad name means
+    # nothing was checked. Without this, empty stdout renders as "(up to date)".
     _formulae_error: "{{ 'Error:' in (upgrade_outdated_formulae.stderr | default('')) }}"
     _casks_error: "{{ 'Error:' in (upgrade_outdated_casks.stderr | default('')) }}"
   ansible.builtin.debug:
     msg: |-
       ── Pending upgrades (preview) ───────────────────────────────
       Homebrew formulae:
-      {% if (homebrew_baseline_formulae + homebrew_optional_formulae) | length == 0 %}
+      {% if upgrade_managed_formulae | length == 0 %}
         (none managed)
       {% elif upgrade_outdated_formulae.skipped | default(false) %}
         (not checked — `brew outdated` cannot run under --check)
       {% elif _formulae_error | bool %}
         (CHECK FAILED — brew could not resolve the managed set, so NOTHING was
-         verified. `brew outdated` is all-or-nothing: usually one unknown or
-         renamed formula, or a tap that is not installed. brew said:)
+         verified. Usually an unknown/renamed formula or an uninstalled tap:)
       {{ upgrade_outdated_formulae.stderr | default('') | trim | indent(4, true) }}
       {% else %}
       {{ upgrade_outdated_formulae.stdout | default('') | trim or '  (up to date)' }}
@@ -81,7 +64,7 @@
       Homebrew casks:
       {% if not (upgrade_include_casks | bool) %}
         (skipped — upgrade_include_casks=false; run `drift-update` to include casks)
-      {% elif (homebrew_baseline_casks + homebrew_optional_casks) | length == 0 %}
+      {% elif upgrade_managed_casks | length == 0 %}
         (none managed)
       {% elif upgrade_outdated_casks.skipped | default(false) %}
         (not checked — `brew outdated` cannot run under --check)
@@ -106,39 +89,32 @@
   block:
     - name: Upgrade managed Homebrew formulae to latest
       community.general.homebrew:
-        name: "{{ homebrew_baseline_formulae + homebrew_optional_formulae }}"
+        name: "{{ upgrade_managed_formulae }}"
         state: latest
-      when: (homebrew_baseline_formulae + homebrew_optional_formulae) | length > 0
+      when: upgrade_managed_formulae | length > 0
 
-    # One cask at a time, and a failure does not abort the run. Passing the whole
-    # list to a single task meant the first broken cask killed everything after
-    # it — when Spotify failed mid-list, the Galaxy and Node upgrades that follow
-    # never ran at all, and the run reported only the cask error. Failures are
-    # collected and reported together at the end of the role.
+    # One cask at a time with ignore_errors: passing the whole list to a single
+    # task meant the first broken cask aborted the Galaxy and Node upgrades that
+    # follow. Failures are collected and reported together below.
     - name: Upgrade managed Homebrew casks to latest
       community.general.homebrew_cask:
         name: "{{ item }}"
         state: latest
         greedy: "{{ upgrade_casks_greedy | bool }}"
-        # Casks that replace root-owned files make Homebrew call sudo, which has
-        # no terminal this deep inside Ansible. Given a password the module
-        # writes a 0700 temp askpass script and exports SUDO_ASKPASS; Homebrew
-        # then uses `sudo -A` and never needs a TTY. Supplied through the
-        # environment by `drift-update` (never `-e`, which the process list
-        # would expose); omitted when unset, so scheduled runs are unaffected.
-        # The parameter is no_log in the module's argument spec, so Ansible
-        # masks it in all output.
+        # Casks replacing root-owned files make Homebrew call sudo, which has no
+        # terminal this deep inside Ansible. Given a password the module writes a
+        # 0700 askpass script so Homebrew can use `sudo -A`. Passed through the
+        # environment by `drift-update` (never `-e`, which the process list would
+        # expose); omitted when unset, so scheduled runs are unaffected.
         sudo_password: "{{ lookup('env', 'CS_SUDO_PASSWORD') | default(omit, true) }}"
-      loop: >-
-        {{ (homebrew_baseline_casks + homebrew_optional_casks)
-           | reject('in', upgrade_casks_exclude) | list }}
+      loop: "{{ upgrade_managed_casks }}"
       loop_control:
         label: "{{ item }}"
       register: upgrade_cask_results
       ignore_errors: true
       when:
         - upgrade_include_casks | bool
-        - (homebrew_baseline_casks + homebrew_optional_casks) | length > 0
+        - upgrade_managed_casks | length > 0
 
     - name: Update Ansible Galaxy collections
       ansible.builtin.command:
@@ -157,6 +133,8 @@
         path: "{{ homebrew_prefix }}/opt/nvm/nvm.sh"
       register: upgrade_nvm_script
 
+    # Version spec is quoted: the default is `lts/*` and zsh's NOMATCH makes an
+    # unmatched glob a fatal error before nvm is ever invoked.
     - name: Upgrade default Node.js to newest via nvm ({{ upgrade_nvm_node }})
       ansible.builtin.shell: |
         export NVM_DIR="$HOME/.nvm"

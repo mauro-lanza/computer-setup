@@ -6,7 +6,7 @@
 
 # ─── Drift correction helpers ─────────────────────────────────────────────────
 # Every command here delegates to ~/.local/bin/computer-setup-run, which owns the
-# ansible-pull invocation (repo URL, branch, prefs, plugin cache, layer manifest)
+# ansible-pull invocation (repo URL, branch, prefs, layer cache, layer manifest)
 # so it is defined in exactly one place.
 #
 # `drift-check`  → run the same check the 10:00 agent runs (no changes applied)
@@ -16,7 +16,7 @@
 drift-check() {
     "{{ computer_setup_runner_path }}" check "$@"
     local rc=$?
-    [[ $rc -eq 0 ]] && echo "drift-check finished — see $HOME/Library/Logs/ansible-drift-correction.log"
+    [[ $rc -eq 0 ]] && echo "drift-check finished — see {{ computer_setup_log_file }}"
     return $rc
 }
 
@@ -77,14 +77,14 @@ drift-update() {
 }
 
 drift-log() {
-    local log="$HOME/Library/Logs/ansible-drift-correction.log"
+    local log="{{ computer_setup_log_file }}"
     [[ -f "$log" ]] && tail -n "${1:-100}" "$log" || echo "No drift log yet at $log"
 }
 
-# ─── Repository catalog helper ──────────────────────────────────────────────────
-# `repos-generate` → scaffold a catalog from the repos already on this machine
+# ─── Repository list helper ──────────────────────────────────────────────────
+# `repos-generate` → scaffold a list from the repos already on this machine
 #
-# To clone catalogued repos that are missing, run:
+# To clone listed repositories that are missing, run:
 #     drift-apply --tags repositories
 #
 # The `repositories` role is gated behind the `never` tag, so the scheduled

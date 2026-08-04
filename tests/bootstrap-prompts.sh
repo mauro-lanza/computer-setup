@@ -96,7 +96,7 @@ result="$(run_prompts "$WORK/all-yes")"
 rc="${result%%|*}"; sel="${result#*|}"
 count=$(printf '%s' "$sel" | wc -w | tr -d ' ')
 assert_eq "answering yes selects every capability ($TOTAL)" "$TOTAL" "$count"
-assert_eq "  selections are the capability ids, in catalog order" \
+assert_eq "  selections are the capability ids, in capability order" \
     "alpha vscode ext-pack zzz-last" "$sel"
 
 # ── 2. The function must return success ──────────────────────────────────────
@@ -187,7 +187,7 @@ assert_eq "empty selection still writes a valid selected_capabilities list" \
 # in the engine's capability registry.
 echo "==> bootstrap capability merge"
 (
-    PLUGIN_CACHE="$REPO_ROOT/tests/fixtures/plugins"
+    LAYER_CACHE="$REPO_ROOT/tests/fixtures/layers_cache"
     LAYERS_FILE="$REPO_ROOT/tests/fixtures/layers.yml"
     load_capabilities >/dev/null 2>&1
     cp "$MERGED_CAPABILITIES_FILE" "$WORK/merged.tsv"

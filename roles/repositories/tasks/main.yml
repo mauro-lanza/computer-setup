@@ -1,40 +1,33 @@
 ---
-- name: Check for a repository catalog
+- name: Check for a per-machine repository override
   ansible.builtin.stat:
-    path: "{{ repositories_catalog_file }}"
-  register: repositories_catalog
+    path: "{{ repositories_override_file }}"
+  register: repositories_override_stat
 
-# Load into a namespaced var so the user-facing catalog key stays the natural
-# `repositories:` while not clobbering the merged layer value until we choose to.
-- name: Load repository catalog
+# Loaded into a namespaced var so the user-facing key stays the natural
+# `repositories:` without clobbering the merged layer value before we choose to.
+- name: Load the per-machine repository override
   ansible.builtin.include_vars:
-    file: "{{ repositories_catalog_file }}"
-    name: repositories_catalog_data
-  when: repositories_catalog.stat.exists
+    file: "{{ repositories_override_file }}"
+    name: repositories_override
+  when: repositories_override_stat.stat.exists
 
-# `default(x, true)`, not `default(x)`: a catalog file containing the bare key
-# `repositories:` (with no entries) parses to None, which is DEFINED — so plain
-# `default()` would not fire and `repositories | length` below aborts the role
-# with "object of type 'NoneType' has no len()". That file is not hypothetical:
-# it is exactly what the shipped `repos-generate` helper emits when the projects
-# directory has no checkouts yet, which is the state of a fresh machine, and
-# repositories.example.yml tells you to redirect it straight into place.
-- name: Resolve the repository list from the catalog
+# `default(x, true)` throughout: a bare `repositories:` key parses to None, which
+# is DEFINED, so plain `default()` would not fire and `| length` below aborts the
+# role. `repos-generate` emits exactly that on a machine with no checkouts yet.
+- name: Resolve the effective repository list
   ansible.builtin.set_fact:
-    repositories: "{{ repositories_catalog_data.repositories | default(repositories, true) }}"
-  when: repositories_catalog.stat.exists
+    repositories: "{{ _override | default(repositories, true) | default([], true) }}"
+  vars:
+    _override: >-
+      {{ (repositories_override | default({}, true)).repositories | default(None, true)
+         if repositories_override_stat.stat.exists else None }}
 
-# Normalize unconditionally, so the null-safety above also covers the path where
-# there is NO catalog file and a layer's vars.yml supplied the bare key instead.
-- name: Normalize the repository list
-  ansible.builtin.set_fact:
-    repositories: "{{ repositories | default([], true) }}"
-
-- name: Report empty catalog
+- name: Report an empty repository list
   ansible.builtin.debug:
     msg: >-
-      No repositories to resurrect. Add entries via a content layer's vars.yml
-      (`repositories:`), to {{ repositories_catalog_file }} (see
+      No repositories to clone. Add entries via a content layer's vars.yml
+      (`repositories:`), to {{ repositories_override_file }} (see
       repositories.example.yml), or run `repos-generate` to scaffold one.
   when: repositories | length == 0
 
@@ -45,7 +38,7 @@
     mode: "0755"
   when: repositories | length > 0
 
-- name: Resurrect catalogued repositories
+- name: Clone missing repositories
   ansible.builtin.include_tasks: clone_repo.yml
   loop: "{{ repositories }}"
   loop_control:

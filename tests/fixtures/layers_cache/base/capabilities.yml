@@ -1,0 +1,25 @@
+---
+capabilities:
+  - id: nvm
+    desc: "Node Version Manager"
+    type: formula
+    packages: nvm
+  - id: opencode
+    desc: "OpenCode CLI"
+    type: formula
+    packages: anomalyco/tap/opencode
+  - id: zed
+    desc: "Zed editor"
+    type: cask
+    packages: zed
+    config:
+      - { src: zed/settings.json, dest: "/tmp/cs-contract/zed-settings.json" }
+  # Not selected, but adopted because its probe path exists. Contributes to the
+  # active-derived interface (reminders) but not the selected-derived one
+  # (packages) — that asymmetry is the point of adopt_if_present.
+  - id: adopted
+    desc: "Adopted-if-present demo"
+    type: formula
+    packages: adopted-must-not-install
+    adopt_if_present: "{{ playbook_dir }}/fixtures/layers_cache/base/files/contract.txt"
+    reminders: ["Adopted capability reminder"]

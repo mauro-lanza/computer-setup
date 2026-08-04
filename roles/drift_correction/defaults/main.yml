@@ -4,18 +4,19 @@
 drift_correction_repo_url: "{{ repo_url }}"
 drift_correction_repo_branch: "{{ repo_branch }}"
 drift_correction_prefs_file: "{{ computer_setup_prefs_file }}"
-# Content layers: the wrapper refreshes every layer in the plugin cache and
+# Content layers: the wrapper refreshes every layer in the layer cache and
 # re-merges before checking, so drift covers orchestrator + all layers.
-drift_correction_plugin_cache: "{{ computer_setup_plugin_cache }}"
+drift_correction_layer_cache: "{{ computer_setup_layer_cache }}"
 drift_correction_layers_manifest: "{{ computer_setup_layers_manifest }}"
 drift_correction_schedule_hour: 10
 drift_correction_schedule_minute: 0
 # Morning upgrade, ahead of the 10:00 drift check.
 drift_correction_upgrade_schedule_hour: 9
 drift_correction_upgrade_schedule_minute: 0
-drift_correction_label: com.ansible.drift-correction
-drift_correction_upgrade_label: com.ansible.drift-upgrade
+drift_correction_label: com.computer-setup.check
+drift_correction_upgrade_label: com.computer-setup.upgrade
 drift_correction_log_dir: "{{ home_dir }}/Library/Logs"
+drift_correction_log_file: "{{ computer_setup_log_file }}"
 
 # Scheduled agents. Both run the same runner script with a different mode.
 # Staggered so the upgrade finishes before the check reports on its results —
@@ -30,11 +31,9 @@ drift_correction_agents:
     hour: "{{ drift_correction_schedule_hour }}"
     minute: "{{ drift_correction_schedule_minute }}"
 
-
-# Wrapper script — the LaunchAgents call this instead of ansible-pull directly.
-# Lives under ~/.local/bin so it's on PATH for manual invocation if desired.
-# Also the single place the ansible-pull argument set is constructed (the
-# `drift-apply` shell function shells out to it in `apply` mode).
+# The runner is the single place the ansible-pull argument set is built; the
+# LaunchAgents and the drift-* shell functions all call it. Under ~/.local/bin
+# so it is on PATH.
 drift_correction_wrapper_dir: "{{ home_dir }}/.local/bin"
 drift_correction_runner_path: "{{ computer_setup_runner_path }}"
 

@@ -7,7 +7,7 @@ usage() {
     cat <<'EOF'
 Usage: computer-setup-layers sync --manifest PATH --cache DIR [--schema-version N]
 
-Synchronize content layers from a manifest into the plugin cache. GitHub HTTPS
+Synchronize content layers from a manifest into the layer cache. GitHub HTTPS
 URLs are normalized to SSH before cloning or updating remotes.
 EOF
 }
@@ -29,13 +29,13 @@ ssh_repo_url() {
 
 validate_layer() {
     local name="$1" dest="$2" schema_version_max="$3"
-    [[ -f "$dest/plugin.yml" ]] || die "Layer '$name' is missing plugin.yml"
+    [[ -f "$dest/layer.yml" ]] || die "Layer '$name' is missing layer.yml"
 
-    local plugin_name sv
-    plugin_name="$(yq -r '.name // ""' "$dest/plugin.yml")"
-    [[ "$plugin_name" == "$name" ]] || die "Layer '$name' plugin.yml name is '$plugin_name'"
+    local layer_name sv
+    layer_name="$(yq -r '.name // ""' "$dest/layer.yml")"
+    [[ "$layer_name" == "$name" ]] || die "Layer '$name' layer.yml name is '$layer_name'"
 
-    sv="$(yq -r '.schema_version // 1' "$dest/plugin.yml")"
+    sv="$(yq -r '.schema_version // 1' "$dest/layer.yml")"
     # Must be a plain integer. Bash arithmetic aborts on anything else — with
     # `schema_version: 2.0` the `((` throws a syntax error to stderr, the test
     # evaluates false, and the layer is ACCEPTED here while the playbook's own
@@ -101,7 +101,7 @@ sync_layers() {
         repo="$(ssh_repo_url "$(yq -r ".layers[$i].repo" "$manifest")")"
         dest="$cache/$name"
 
-        # The plugin cache is a CACHE, not a working copy — nothing is ever
+        # The layer cache is a CACHE, not a working copy — nothing is ever
         # authored here, so the only correct end state is "byte-identical to
         # origin". Fetch and hard-reset unconditionally rather than `pull`:
         #

@@ -1,5 +1,5 @@
 ---
-# Clone a single catalogued repository if it is missing, then run its
+# Clone a single listed repository if it is missing, then run its
 # post_clone hooks. Non-destructive by design: an existing checkout is never
 # fetched, reset, or modified — we only ever create what is absent. This makes
 # re-runs safe on machines where you have local, uncommitted work.
@@ -10,7 +10,7 @@
 #   branch:     optional — checkout ref (defaults to the remote HEAD)
 #   active:     optional bool (default true) — set false to skip without deleting
 #   post_clone: optional list of shell commands, run once in the repo on clone
-- name: "Resurrect repository: {{ repo_item.folder }}"
+- name: "Clone repository: {{ repo_item.folder }}"
   when: repo_item.active | default(true) | bool
   block:
     - name: "Check whether the checkout already exists: {{ repo_item.folder }}"

@@ -1,19 +1,10 @@
 ---
-# Bounded to a single major version deliberately.
+# Pinned to one major version: the 09:00 LaunchAgent runs `--upgrade`
+# unattended, and every module this repo uses lives in community.general. Raise
+# the ceiling deliberately, after running scripts/check.sh against the new major.
 #
-# The 09:00 LaunchAgent runs `ansible-galaxy collection install --upgrade`
-# unattended every morning, and every package/settings module this repo uses
-# (homebrew, homebrew_cask, osx_defaults) lives in community.general. With an
-# open upper bound, a breaking major release lands on the machine overnight with
-# no gate and no operator present — the failure would first surface as a
-# mystery drift-check error the next day.
-#
-# Raise the ceiling deliberately when you have run `scripts/check.sh` against
-# the new major.
-#
-# NOTE: `~=` is NOT supported here. ansible-galaxy parses this with LooseVersion
-# and rejects PEP 440 compatible-release syntax outright ("Non integer values in
-# LooseVersion ('~=13.2')"). The comma-separated form is the supported spelling.
+# `~=` is not supported — ansible-galaxy parses this with LooseVersion and
+# rejects PEP 440 syntax. The comma-separated form is the supported spelling.
 collections:
   - name: community.general
     version: ">=13.2.0,<14.0.0"

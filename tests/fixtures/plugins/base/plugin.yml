@@ -1,4 +1,0 @@
-name: base
-schema_version: 1
-priority: 10
-provides: [vars, files, templates]

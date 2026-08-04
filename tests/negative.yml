@@ -3,7 +3,7 @@
 # initializes cleanly or fails on a guard. Point it at a fixture set with -e:
 #
 #   ansible-playbook tests/negative.yml \
-#     -e computer_setup_plugin_cache=tests/fixtures/negative/reserved/plugins \
+#     -e computer_setup_layer_cache=tests/fixtures/negative/reserved/layers_cache \
 #     -e computer_setup_layers_manifest=tests/fixtures/negative/reserved/layers.yml
 #
 # scripts/check.sh asserts these FAIL. Reserved-key enforcement and

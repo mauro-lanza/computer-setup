@@ -1,0 +1,7 @@
+---
+# The managed package sets, derived once. `homebrew_*` come from the layer merge
+# at runtime, so these resolve lazily at each point of use.
+upgrade_managed_formulae: "{{ homebrew_baseline_formulae + homebrew_optional_formulae }}"
+upgrade_managed_casks: >-
+  {{ (homebrew_baseline_casks + homebrew_optional_casks)
+     | reject('in', upgrade_casks_exclude) | list }}

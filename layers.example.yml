@@ -2,27 +2,23 @@
 # Example content-layer manifest.
 #
 # Copy to ~/.config/computer-setup/layers.yml (bootstrap.sh writes this for you
-# interactively). Layers are cloned into the plugin cache
-# (~/.local/share/computer-setup/plugins/<name>/) and merged in ascending
+# interactively). Layers are cloned into the layer cache
+# (~/.local/share/computer-setup/layers/<name>/) and merged in ascending
 # priority order — higher priority wins on scalar conflicts; lists append.
 #
 # Fields:
-#   name:     unique layer name; also the plugin-cache directory name
+#   name:     unique layer name; also the layer-cache directory name
 #   repo:     git URL. GitHub HTTPS URLs are converted to SSH by bootstrap.
 #   priority: merge order (higher wins scalars)
-#   private:  documents whether the layer is private; cloning uses SSH.
 layers:
   - name: public
     repo: git@github.com:mauro-lanza/computer-setup-layer-public.git
     priority: 10
-    private: false
 
   - name: personal
     repo: git@github.com:mauro-lanza/computer-setup-layer-personal.git
     priority: 20
-    private: true
 
   - name: work
     repo: git@github.com:mauro-lanza/computer-setup-layer-work.git
     priority: 30
-    private: true

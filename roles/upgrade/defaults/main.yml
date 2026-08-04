@@ -1,40 +1,22 @@
 ---
-# Whether upgrades are confirmed and may be applied. Left false by default so a
-# bare `drift-apply --tags upgrade` only PREVIEWS. The `drift-update` shell
-# function confirms in the terminal, then sets this via `-e upgrade_assume_yes=true`.
-# Confirmation lives in the shell (guaranteed TTY) rather than an in-play `pause`,
-# which hangs under `ansible-pull` when stdin isn't interactive.
+# False by default, so a bare `--tags upgrade` only previews. `drift-update`
+# confirms in the terminal (a guaranteed TTY) then sets this via -e.
 upgrade_assume_yes: false
 
-# Whether to force-upgrade casks that manage their own updates.
-#
-# Left FALSE deliberately. `greedy: true` makes Homebrew replace app bundles
-# that the app itself also updates — and the two race. Observed failure: Spotify
-# had already self-updated /Applications/Spotify.app to a newer build while the
-# Caskroom still recorded the old version, so `brew upgrade` tried to replace an
-# app that had changed underneath it, `hdiutil attach` failed "Resource busy",
-# and the automatic rollback could not find the original. Result: an empty
-# /Applications/Spotify.app and a cask Homebrew no longer tracked.
-#
-# Self-updating casks keep themselves current without help; forcing them buys
-# nothing and risks that. Setting this true upgrades them anyway — do it only
-# with the apps quit.
+# Force-upgrade casks that manage their own updates. Left false: `greedy` makes
+# Homebrew replace an app bundle the app may be updating itself, and the two
+# race — a failed swap can leave an empty .app and an untracked cask. Set true
+# only with the apps quit.
 upgrade_casks_greedy: false
 
-# Casks to never upgrade automatically, by cask token. Use for apps whose own
-# updater should own the job — typically ones that need root to replace their
-# files, so an upgrade from a TTY-less Ansible task can only fail. They are still
-# INSTALLED and kept present by the homebrew role; only the upgrade is skipped.
-# Update those from the app's own "Check for updates", or explicitly:
-#     brew upgrade --cask <name>
+# Casks never upgraded automatically, by token — for apps whose own updater
+# should own the job. Still installed and kept present by the homebrew role.
 upgrade_casks_exclude: []
 
-# Whether cask upgrades are attempted at all. Casks replace app bundles in
-# /Applications, which can trigger a sudo prompt — fatal for an unattended
-# LaunchAgent, which has no TTY to answer it (see docs/operational-notes.md).
-# The scheduled morning upgrade sets this false so it only touches Homebrew
-# formulae, Galaxy collections and Node (all inside {{ homebrew_prefix }}, no
-# sudo). Interactive `drift-update` leaves it true and upgrades everything.
+# Whether cask upgrades are attempted at all. Casks can trigger a sudo prompt,
+# which is fatal for a TTY-less LaunchAgent, so the scheduled morning upgrade
+# sets this false and touches only formulae, Galaxy and Node. Interactive
+# `drift-update` leaves it true.
 upgrade_include_casks: true
 
 # Node line to re-resolve to the newest available version on upgrade.

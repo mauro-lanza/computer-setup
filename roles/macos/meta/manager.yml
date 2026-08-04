@@ -1,7 +1,0 @@
----
-manager:
-  name: macos
-  tier: generic
-  summary: "Apply macOS system defaults + Rectangle defaults; deploy macos-capture."
-  capabilities: []
-  consumes: [macos_defaults, macos_rectangle_defaults]

@@ -1,4 +1,0 @@
-name: override
-schema_version: 1
-priority: 20
-provides: [vars, files, templates]

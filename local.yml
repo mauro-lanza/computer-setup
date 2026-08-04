@@ -1,44 +1,38 @@
 ---
-# Master playbook for ansible-pull
 - name: Configure macOS workstation
   hosts: localhost
   connection: local
   become: false
 
   vars:
-    # SSH (not HTTPS): drift-check and drift-apply pull this repo
-    # non-interactively. HTTPS can prompt for keychain credentials; SSH uses the
-    # key configured by bootstrap's GitHub auth flow.
+    # SSH, not HTTPS: drift runs pull this repo non-interactively and HTTPS can
+    # prompt for keychain credentials.
     repo_url: "git@github.com:mauro-lanza/computer-setup.git"
     repo_branch: main
-    # This playbook targets Apple Silicon macOS exclusively.
     homebrew_prefix: /opt/homebrew
     home_dir: "{{ ansible_facts['env']['HOME'] }}"
-    # VS Code binary inside the app bundle — always at this path regardless
-    # of install method (Homebrew cask, manual download, etc.).
     vscode_code_binary: /Applications/Visual Studio Code.app/Contents/Resources/app/bin/code
 
-    # Root under which layer-supplied `repositories` are cloned. Defined at play
-    # scope (not just the repositories role default) because the layer merge in
-    # pre_tasks templates repository entries that reference it.
+    # Play-scoped, not just a role default: the layer merge in pre_tasks
+    # templates repository entries that reference it.
     repositories_base_dir: "{{ home_dir }}/Projects"
 
-    # ─── Content layers (plugins) ─────────────────────────────────────────────
-    # Stable plugin cache (outside this checkout so the drift re-clone can't wipe
-    # it). Each layer lives at <cache>/<name>/ with plugin.yml + vars.yml +
-    # capabilities.yml + files/. Overridable with -e for testing.
-    computer_setup_plugin_cache: "{{ home_dir }}/.local/share/computer-setup/plugins"
-    # Persisted layer manifest written by bootstrap.sh (Phase 1). Lists the
-    # active layers and their merge priority. Absent = orchestrator runs
-    # standalone on its safe empty defaults (no layers).
+    # ─── Content layers ───────────────────────────────────────────────────────
+    # Cache lives outside this checkout so the drift re-clone cannot wipe it.
+    # Each layer is <cache>/<name>/ with layer.yml + vars.yml + capabilities.yml
+    # + files/. Overridable with -e for testing.
+    computer_setup_layer_cache: "{{ home_dir }}/.local/share/computer-setup/layers"
+    # Written by bootstrap.sh. Absent = run standalone on empty defaults.
     computer_setup_layers_manifest: "{{ home_dir }}/.config/computer-setup/layers.yml"
     computer_setup_prefs_file: "{{ home_dir }}/.mac-prefs.yml"
-    # The single entry point for every ansible-pull (deployed by the
-    # drift_correction role, consumed by the shell role's CLI functions).
-    # Play-scoped because two roles reference it and role defaults leaking
-    # across roles is an implementation detail, not a contract.
+    # Single entry point for every ansible-pull: deployed by drift_correction,
+    # invoked by the shell role's CLI functions. Play-scoped because two roles
+    # reference it.
     computer_setup_runner_path: "{{ home_dir }}/.local/bin/computer-setup-run"
-    # Highest schema_version this orchestrator understands (checked per layer).
+    # Rolling log the runner appends to and `drift-log` tails. Play-scoped for
+    # the same reason: drift_correction writes it, shell's CLI reads it.
+    computer_setup_log_file: "{{ home_dir }}/Library/Logs/computer-setup.log"
+    # Highest layer schema_version this orchestrator understands.
     computer_setup_schema_version: 1
 
   pre_tasks:
@@ -51,29 +45,19 @@
     - { role: homebrew, tags: [homebrew] }
     - { role: git, tags: [git] }
     - { role: shell, tags: [shell] }
-    # vscode owns all VS Code concerns together (extensions + settings) and is
-    # gated on the vscode capability being active (selected OR the code binary
-    # already present, via adopt_if_present). Selection covers a same-run install
-    # (homebrew runs first); the role still stats the binary before executing it.
+    # Gated on the capability rather than the binary so a same-run install
+    # (homebrew runs first) is covered; the role still stats the binary.
     - { role: vscode, tags: [vscode], when: "'vscode' in (computer_setup_active_capabilities | default([]))" }
-    # Deploys the `config:` bundles of every ACTIVE capability, whatever they
-    # are. Tagged only with its own name: `zed`/`opencode`/`dbt` used to be
-    # listed here as if they selected individual tools, but tags apply to tasks
-    # and this role is a single loop over all bundles — `--tags dbt` deployed
-    # zed's and opencode's configs too. It also hardcoded three layer-content
-    # tool names into the engine, which is precisely what this role exists to
-    # avoid. To deploy one tool's config, deselect the others or run the whole
-    # role; the loop is idempotent.
+    # Deploys the `config:` bundles of every active capability. Tagged only with
+    # its own name — it is one loop over all bundles, so a per-tool tag would
+    # deploy every other tool's config too.
     - { role: layer_configs, tags: [layer_configs] }
     - { role: macos, tags: [macos] }
     - { role: runtimes, tags: [runtimes] }
-    # Opt-in repository catalog — clones your projects from ~/.repositories.yml.
-    # Gated by `never` so the daily drift check never clones repos and bootstrap
-    # doesn't try to clone private repos before SSH auth exists. Run on demand
-    # with `drift-apply --tags repositories`.
+    # `never`: the daily drift check must not clone repos, and bootstrap must not
+    # try before SSH auth exists. Run with `drift-apply --tags repositories`.
     - { role: repositories, tags: [repositories, never] }
-    # Opt-in upgrade path — gated by `never` so only `--tags upgrade` runs it
-    # (via the `drift-update` helper). The daily drift check never touches it.
+    # `never`: only `--tags upgrade` runs it, via the `drift-update` helper.
     - { role: upgrade, tags: [upgrade, never] }
     - { role: drift_correction, tags: [drift_correction] }
 
@@ -83,13 +67,10 @@
       register: gh_auth
       changed_when: false
       failed_when: false
-      # Read-only, so run it under --check too. `command` is normally SKIPPED in
-      # check mode, which leaves `gh_auth.rc` undefined; the reminder below then
-      # silently rendered without the "run gh auth login" line instead of
-      # erroring. Every dry run — including bootstrap's own "Preview changes
-      # first?" on a fresh, unauthenticated Mac — therefore hid the one
-      # instruction that machine needed. Same fix as the vscode role's
-      # extension listing (roles/vscode/tasks/main.yml).
+      # Read-only, so run it under --check too. `command` is skipped in check
+      # mode, leaving gh_auth.rc undefined — which silently dropped the "run gh
+      # auth login" line from every dry run, including bootstrap's own preview
+      # on a fresh unauthenticated Mac.
       check_mode: false
       tags: [always]
 

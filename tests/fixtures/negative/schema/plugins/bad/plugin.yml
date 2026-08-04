@@ -1,6 +1,0 @@
----
-name: bad
-schema_version: 99
-priority: 10
-provides: []
-description: "Layer requiring a newer schema than this orchestrator supports"

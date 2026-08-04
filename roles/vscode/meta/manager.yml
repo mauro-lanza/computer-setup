@@ -1,9 +1,0 @@
----
-manager:
-  name: vscode
-  tier: specific
-  summary: >-
-    Install VS Code extensions and deploy user settings. Specific because it
-    executes the `code` binary (idempotent extension installs).
-  capabilities: [vscode]
-  consumes: [vscode_baseline_extensions, vscode_optional_extensions, "layer files/vscode/settings.json"]

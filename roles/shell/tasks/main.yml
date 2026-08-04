@@ -10,23 +10,11 @@
     state: directory
     mode: "0755"
 
-# Engine-owned CLI (drift-*/repos-* commands that operate computer-setup itself).
-# Always deployed, regardless of layers.
 - name: Deploy computer-setup shell CLI
   ansible.builtin.template:
     src: computer-setup-cli.zsh.j2
     dest: "{{ shell_zsh_config_dir }}/{{ shell_cli_snippet_name }}"
     mode: "0644"
-  notify: Shell config changed
-
-# The engine CLI is not tracked by the layer-snippet manifest, so a rename would
-# strand the old file in ~/.zsh where the zshrc glob keeps sourcing it.
-- name: Remove superseded computer-setup shell CLI snippets
-  ansible.builtin.file:
-    path: "{{ shell_zsh_config_dir }}/{{ item }}"
-    state: absent
-  loop: "{{ shell_cli_snippet_legacy_names | default([], true) }}"
-  when: item != shell_cli_snippet_name
   notify: Shell config changed
 
 # ─── Layer-provided shell snippets ────────────────────────────────────────────
@@ -40,7 +28,7 @@
 # keeps the orchestrator content-agnostic — it never hardcodes layer filenames.
 - name: Discover layer shell snippets
   ansible.builtin.find:
-    paths: "{{ computer_setup_plugin_cache }}/{{ item.name }}/files/shell"
+    paths: "{{ computer_setup_layer_cache }}/{{ item.name }}/files/shell"
     patterns: "*.zsh"
     file_type: file
   loop: "{{ computer_setup_active_layers | default([]) }}"
@@ -164,30 +152,3 @@
     computer_setup_deploy_dest: "{{ home_dir }}/.p10k.zsh"
     computer_setup_lookup_fallback_dir: "{{ playbook_dir }}/roles/shell/files"
     computer_setup_deploy_notify: Shell config changed
-
-- name: Check for an unmanaged zsh framework
-  ansible.builtin.stat:
-    path: "{{ home_dir }}/.oh-my-zsh"
-  register: shell_oh_my_zsh_stat
-
-# Opt-in, not automatic. This used to run unconditionally, which meant the first
-# apply on a machine whose home directory was restored from backup silently
-# deleted any custom plugins, themes and `custom/` content under ~/.oh-my-zsh —
-# exactly when the user had not yet had a chance to move them into a layer.
-# Nothing here establishes that the directory is "legacy" on THIS machine, so
-# the decision belongs to the operator: set shell_remove_oh_my_zsh=true.
-- name: Remove legacy zsh framework directory
-  ansible.builtin.file:
-    path: "{{ home_dir }}/.oh-my-zsh"
-    state: absent
-  when: shell_remove_oh_my_zsh | bool
-
-- name: Warn that an unmanaged zsh framework is present
-  ansible.builtin.debug:
-    msg: >-
-      ~/.oh-my-zsh exists but is not managed by computer-setup. The layer-supplied
-      ~/.zshrc does not source it, so it is inert. Remove it yourself, or re-run
-      with -e shell_remove_oh_my_zsh=true to have this role delete it.
-  when:
-    - not (shell_remove_oh_my_zsh | bool)
-    - shell_oh_my_zsh_stat.stat.exists

@@ -8,8 +8,8 @@ set -euo pipefail
 # kick off the Ansible playbook.
 #
 #   Phase 0  Prerequisites + GitHub auth (no repo access required)
-#   Phase 1  Layer selection & fetch (define manifest, clone to plugin cache)
-#   Phase 2  Build preferences (merge catalogs → prompts → ~/.mac-prefs.yml)
+#   Phase 1  Layer selection & fetch (define manifest, clone to layer cache)
+#   Phase 2  Build preferences (merge capabilities → prompts → ~/.mac-prefs.yml)
 #   Phase 3  Run Ansible (ansible-pull the orchestrator with merged input)
 #
 # Usage: curl -fsSL <raw-url>/bootstrap.sh | bash
@@ -20,7 +20,7 @@ set -euo pipefail
 PREFS_FILE="$HOME/.mac-prefs.yml"
 CONFIG_DIR="$HOME/.config/computer-setup"
 LAYERS_FILE="$CONFIG_DIR/layers.yml"
-PLUGIN_CACHE="$HOME/.local/share/computer-setup/plugins"
+LAYER_CACHE="$HOME/.local/share/computer-setup/layers"
 
 # Orchestrator repo. Bootstrap authenticates GitHub before cloning layers or
 # running ansible-pull, so GitHub repos are accessed over SSH consistently.
@@ -29,21 +29,15 @@ ORCH_NAME="computer-setup"
 REPO_URL="git@github.com:${ORCH_OWNER}/${ORCH_NAME}.git"
 REPO_BRANCH="${BOOTSTRAP_BRANCH:-main}"
 
-# Highest plugin schema_version this orchestrator understands.
+# Highest layer schema_version this orchestrator understands.
 SCHEMA_VERSION_MAX=1
 
 export HOMEBREW_NO_ANALYTICS=1
 
-# ─── Reattach stdin to the terminal ──────────────────────────────────────────
-# Under `curl … | bash` stdin IS the script source, so every `read` consumes the
-# not-yet-parsed remainder of this file: prompts silently take their default
-# branch and the script truncates mid-run, with no error. Since the documented
-# entry point is a pipe, re-point stdin at the controlling terminal before any
-# prompt runs. INTERACTIVE records whether we actually have one.
-#
-# Deliberately a function called from main(), not top-level code: tests source
-# this file for its functions, and a top-level `exec < /dev/tty` would hijack
-# the test harness's stdin and make the prompt loop untestable.
+# Under `curl … | bash` stdin IS the script source, so every `read` would
+# consume the unparsed remainder of this file. Re-point stdin at the terminal
+# before any prompt. A function, not top-level code, so sourcing this file for
+# tests does not hijack the harness's stdin.
 INTERACTIVE=1
 reattach_stdin() {
     if [[ ! -t 0 ]]; then
@@ -55,9 +49,8 @@ reattach_stdin() {
     fi
 }
 
-# Refuse to guess. A non-interactive run cannot answer "which layers?" or "what
-# is your git email?", and silently defaulting those is how you end up with an
-# empty layer manifest and no capabilities (both are destructive to re-run).
+# Refuse to guess: a non-interactive run cannot answer "which layers?" or "what
+# is your git email?", and defaulting them yields an empty manifest.
 require_tty() {
     if [[ "$INTERACTIVE" -eq 0 ]]; then
         error "No terminal available for prompts."
@@ -137,7 +130,7 @@ install_homebrew() {
     ok "Homebrew installed"
 }
 
-# yq/git/gh are needed before we can read catalogs or clone layers.
+# yq/git/gh are needed before we can read capabilities or clone layers.
 ensure_prereqs() {
     local pkg
     for pkg in yq git gh; do
@@ -233,7 +226,7 @@ manage_layers() {
     require_tty
     mkdir -p "$CONFIG_DIR"
     echo
-    info "Content layers — pluggable repos that supply catalog options, vars, and files."
+    info "Content layers — pluggable repos that supply capabilities, vars, and files."
     echo "  Current manifest:"
     show_layers
     echo
@@ -250,7 +243,7 @@ manage_layers() {
     echo "# Content-layer manifest for computer-setup. Managed by bootstrap.sh." >> "$tmp"
     echo "layers:" >> "$tmp"
 
-    local added=0 name repo prio priv
+    local added=0 name repo prio
     while true; do
         if [[ $added -eq 0 ]]; then
             ask_yn "Add a content layer?" "y" || break
@@ -271,18 +264,10 @@ manage_layers() {
         read -rp "  Priority (higher wins on scalar conflicts) [$(( (added + 1) * 10 ))]: " prio
         prio="${prio:-$(( (added + 1) * 10 ))}"
 
-        if [[ "$repo" == git@* ]]; then priv=true; else priv=false; fi
-        if ask_yn "  Private layer?" "$([[ $priv == true ]] && echo y || echo n)"; then
-            priv=true
-        else
-            priv=false
-        fi
-
         {
             echo "  - name: $(yaml_quote "$name")"
             echo "    repo: $(yaml_quote "$repo")"
             echo "    priority: ${prio}"
-            echo "    private: ${priv}"
         } >> "$tmp"
         added=$((added + 1))
     done
@@ -301,7 +286,7 @@ manage_layers() {
     show_layers
 }
 
-# Clone/update each layer into the stable plugin cache.
+# Clone/update each layer into the stable layer cache.
 clone_layers() {
     [[ ! -f "$LAYERS_FILE" ]] && return
     if [[ ! -x "$LAYER_SYNC_SCRIPT" ]]; then
@@ -314,16 +299,16 @@ clone_layers() {
 
     "$LAYER_SYNC_SCRIPT" sync \
         --manifest "$LAYERS_FILE" \
-        --cache "$PLUGIN_CACHE" \
+        --cache "$LAYER_CACHE" \
         --schema-version "$SCHEMA_VERSION_MAX"
-    ok "All layers fetched to ${PLUGIN_CACHE}"
+    ok "All layers fetched to ${LAYER_CACHE}"
 }
 
 # ═════════════════════════════════════════════════════════════════════════════
 # PHASE 2 — Build preferences
 # ═════════════════════════════════════════════════════════════════════════════
 
-# Merged catalog across all layers as TSV rows:
+# Merged capabilities across all layers as TSV rows:
 #   id desc type packages requires_vscode
 # Layers are processed in DESCENDING priority so the highest-priority definition
 # of any given id wins; each id appears once (union, dedup by id). The `id` is
@@ -332,14 +317,14 @@ load_capabilities() {
     MERGED_CAPABILITIES_FILE="$(mktemp)"
 
     if [[ ! -f "$LAYERS_FILE" ]]; then
-        warn "No layer manifest — catalog is empty (no optional tools offered)."
+        warn "No layer manifest — no capabilities offered."
         return
     fi
 
     local seen=" " order name cat
     order="$(yq -r '.layers | sort_by(.priority) | reverse | .[].name' "$LAYERS_FILE" 2>/dev/null || true)"
     for name in $order; do
-        cat="$PLUGIN_CACHE/$name/capabilities.yml"
+        cat="$LAYER_CACHE/$name/capabilities.yml"
         [[ -f "$cat" ]] || continue
         if ! yq '.' "$cat" >/dev/null 2>&1; then
             warn "Layer '$name' has an invalid capabilities.yml — skipping it."
@@ -356,9 +341,9 @@ load_capabilities() {
     local count
     count="$(wc -l < "$MERGED_CAPABILITIES_FILE" | tr -d ' ')"
     if [[ "$count" -eq 0 ]]; then
-        warn "Merged catalog is empty — no optional tools to offer."
+        warn "No capabilities declared by any layer — no optional tools to offer."
     else
-        ok "Merged catalog: ${count} optional item(s) across layers"
+        ok "Capabilities: ${count} optional item(s) across layers"
     fi
 }
 
@@ -435,14 +420,9 @@ gather_optional_tools() {
         vscode_available=true
     fi
 
-    # The capability list is read on FD 3, NOT stdin. `ask_yn` inside the body
-    # reads from stdin, and a `done < file` redirect applies to the whole
-    # compound command — body included. With the list on stdin every prompt
-    # silently consumed the NEXT capability line as its answer: half the
-    # capabilities were skipped, none were ever selected, and `read -p` printed
-    # no prompt at all (bash only renders it when stdin is a terminal). The
-    # result was an empty `selected_capabilities` on every fresh machine, with
-    # no error. Keep the list and the answers on separate descriptors.
+    # The list is read on FD 3, not stdin: `ask_yn` in the body reads stdin, and
+    # a `done < file` redirect covers the body too — so every prompt would
+    # consume the next capability line as its answer.
     local id desc type pkgs requires_vscode default
     while IFS=$'\t' read -r -u 3 id desc type pkgs requires_vscode; do
 
@@ -461,10 +441,8 @@ gather_optional_tools() {
         fi
     done 3< "$MERGED_CAPABILITIES_FILE"
 
-    # A `while` loop returns the status of the last command run in its body, so
-    # a trailing failed test would propagate out of this function and trip
-    # `set -e` in main() — aborting bootstrap AFTER the last prompt but BEFORE
-    # write_prefs, leaving no preferences file at all. Return success explicitly.
+    # A `while` returns its body's last status, which under `set -e` would abort
+    # main() after the last prompt but before write_prefs.
     return 0
 }
 
@@ -492,7 +470,7 @@ write_prefs() {
         echo "git_user_email: $(yaml_quote "$GIT_EMAIL")"
         echo
         echo "# Selection tokens. Packages, config, and gating are derived from the"
-        echo "# merged capability registry (the layers' catalogs) at apply time."
+        echo "# merged capability registry (the layers' capabilities) at apply time."
         yaml_list selected_capabilities "${SELECTED_CAPABILITIES[@]+"${SELECTED_CAPABILITIES[@]}"}"
     } > "$PREFS_FILE"
 
@@ -517,7 +495,7 @@ run_playbook() {
 
     local extra_args=(
         -e "@${PREFS_FILE}"
-        -e "computer_setup_plugin_cache=${PLUGIN_CACHE}"
+        -e "computer_setup_layer_cache=${LAYER_CACHE}"
         -e "computer_setup_layers_manifest=${LAYERS_FILE}"
         -e "computer_setup_prefs_file=${PREFS_FILE}"
         -e "repo_branch=${REPO_BRANCH}"

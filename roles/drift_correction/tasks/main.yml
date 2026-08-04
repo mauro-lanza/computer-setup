@@ -41,15 +41,3 @@
     loop_var: agent
     label: "{{ agent.label }} ({{ agent.mode }} @ {{ agent.hour }}:{{ '%02d' | format(agent.minute | int) }})"
   notify: Reload scheduled agents
-
-# Superseded by computer-setup-run: the standalone drift-check wrapper and its
-# separately-named log files are gone. Removing them keeps ~/.local/bin honest
-# (a stale drift-check on PATH would silently shadow the new runner's behaviour).
-- name: Remove superseded drift-check wrapper and logs
-  ansible.builtin.file:
-    path: "{{ item }}"
-    state: absent
-  loop:
-    - "{{ drift_correction_wrapper_dir }}/drift-check"
-    - "{{ drift_correction_log_dir }}/ansible-drift-correction.stdout.log"
-    - "{{ drift_correction_log_dir }}/ansible-drift-correction.stderr.log"

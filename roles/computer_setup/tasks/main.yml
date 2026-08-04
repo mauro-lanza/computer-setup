@@ -33,30 +33,19 @@
     computer_setup_active_layers: []
     computer_setup_capability_registry: {}
     # Whole namespaces a layer's vars.yml may never touch. Reserved by PREFIX,
-    # not by enumeration, because an enumerated list rots: the previous version
-    # named eleven drift_correction_* keys and missed six that the role also
-    # defines — including drift_correction_prefs_file, which the runner loads as
-    # `-e "@file"` (extra-vars precedence, the highest there is, enough to set
-    # every other reserved key), drift_correction_layers_manifest, which decides
-    # which layer repos get cloned and merged on every scheduled run, and
-    # drift_correction_log_max_lines / _connectivity_timeout, which render into
-    # bare unquoted shell assignments in the runner. Adding a new
-    # drift_correction_* default is now automatically protected.
+    # not enumeration, so a newly added engine var is protected automatically.
     #
-    # NOTE: `upgrade_` is deliberately NOT a reserved prefix — upgrade_casks_exclude
-    # is legitimate layer content. Only the two auto-approval switches are
-    # reserved, by name, below.
+    # `upgrade_` is deliberately not reserved — upgrade_casks_exclude is
+    # legitimate layer content. Only the two auto-approval switches are, below.
     computer_setup_reserved_layer_prefixes:
       - computer_setup_
       - drift_correction_
-    # Keys a layer's vars.yml may never define. Three groups:
+    # Individual keys a layer may never define:
     #   1. Machine-local prefs — belong in computer_setup_prefs_file.
-    #   2. Engine-owned play/role vars — a layer overriding these would break
-    #      the orchestrator itself.
-    #   3. Vars that decide what code runs, or runs unattended, on this machine.
-    #      Layer vars land in play scope via set_fact, which outranks role
-    #      defaults AND play vars — so anything here is effectively arbitrary
-    #      remote-code control if a layer repo is ever compromised.
+    #   2. Engine-owned play vars — overriding these breaks the orchestrator.
+    #   3. Anything deciding what code runs unattended. Layer vars land in play
+    #      scope via set_fact, outranking role defaults AND play vars, so these
+    #      would be arbitrary remote-code control if a layer repo were compromised.
     computer_setup_reserved_layer_keys:
       - selected_capabilities
       - git_user_name
@@ -67,9 +56,9 @@
       - homebrew_prefix
       - vscode_code_binary
       - repositories_base_dir
-      - repositories_catalog_file
-      # Would let a layer turn the unattended morning upgrade into a full
-      # cask upgrade, or auto-approve upgrades the operator never confirmed.
+      - repositories_override_file
+      # Would let a layer turn the unattended morning upgrade into a full cask
+      # upgrade, or auto-approve upgrades the operator never confirmed.
       - upgrade_assume_yes
       - upgrade_include_casks
       # Ansible's own execution controls.
@@ -117,7 +106,7 @@
     computer_setup_file_search_dirs: >-
       {{ (computer_setup_active_layers | reverse | list)
          | map(attribute='name')
-         | map('regex_replace', '^(.*)$', computer_setup_plugin_cache + '/\1/files')
+         | map('regex_replace', '^(.*)$', computer_setup_layer_cache + '/\1/files')
          | list }}
 
 - name: Build the cross-layer template search path
@@ -125,7 +114,7 @@
     computer_setup_template_search_dirs: >-
       {{ (computer_setup_active_layers | reverse | list)
          | map(attribute='name')
-         | map('regex_replace', '^(.*)$', computer_setup_plugin_cache + '/\1/templates')
+         | map('regex_replace', '^(.*)$', computer_setup_layer_cache + '/\1/templates')
          | list }}
 
 - name: Merge each layer's capabilities.yml into the capability registry
@@ -136,10 +125,9 @@
     label: "{{ _layer.name }}"
 
 - name: Probe for adoptable capabilities already present
-  # A capability may declare `adopt_if_present: <path>` in its capability entry.
-  # When that path exists, the capability is treated as active even if it was
-  # not explicitly selected — so an already-configured machine is adopted and
-  # kept managed. Fully data-driven: the engine hardcodes no tool paths.
+  # A capability declaring `adopt_if_present: <path>` becomes active when that
+  # path exists, even if never selected — so an already-configured machine is
+  # adopted and kept managed. The engine hardcodes no tool paths.
   ansible.builtin.stat:
     path: "{{ item.value.adopt_if_present }}"
   loop: >-
@@ -151,9 +139,6 @@
 
 - name: Resolve active capabilities (selected + adoptable-present)
   ansible.builtin.set_fact:
-    # The explicit selections (deterministic record).
-    computer_setup_capabilities: "{{ _selected }}"
-    # Effective set everything gates on: selections plus adopted-present tools.
     computer_setup_active_capabilities: "{{ (_selected + _present) | unique | list }}"
   vars:
     _selected: "{{ selected_capabilities | default([], true) }}"
@@ -163,9 +148,8 @@
 
 - name: Derive the role interface from capabilities
   ansible.builtin.set_fact:
-    # Optional packages come from the SELECTED capabilities (install what you
-    # picked); config deploys come from the ACTIVE set (also manage what's
-    # already present). The engine hardcodes no package names or paths.
+    # Packages come from SELECTED capabilities (install what you picked); config
+    # and reminders from ACTIVE ones (also manage what is already present).
     homebrew_optional_formulae: >-
       {{ _selected_entries | selectattr('type', 'eq', 'formula')
          | map(attribute='packages') | map('split') | flatten | list }}

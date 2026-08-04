@@ -15,14 +15,6 @@ shell_zsh_config_dir: "{{ home_dir }}/.zsh"
 # layer snippets by string, not by number.
 shell_cli_snippet_name: "050-computer-setup-cli.zsh"
 
-# Legacy CLI snippet names this role has used before. Removed on every run so a
-# rename cannot leave an orphan behind: the stale-cleanup below only tracks
-# LAYER snippets (via the manifest), and the engine CLI is not one — a renamed
-# CLI would otherwise sit in ~/.zsh forever and be sourced a second time,
-# redefining every drift-* function from a stale template.
-shell_cli_snippet_legacy_names:
-  - "50-computer-setup-cli.zsh"
-
 # Zero-padding width for the layer-priority prefix on deployed snippets.
 # Snippets are sourced by a lexical glob (`~/.zsh/*.zsh` in the layer zshrc), so
 # the prefix must sort lexically in the same order as it sorts numerically.
@@ -36,9 +28,3 @@ shell_priority_width: 3
 # here from a previous run, so user-created files in ~/.zsh are never inferred as
 # managed based on their filename alone.
 shell_snippet_manifest_path: "{{ shell_zsh_config_dir }}/.computer-setup-snippets"
-
-# Whether to delete ~/.oh-my-zsh. Left false because a restored home directory
-# may hold custom plugins/themes the user has not yet migrated into a layer, and
-# an unconditional recursive delete on first apply is unrecoverable. The role
-# warns when the directory is present but unmanaged.
-shell_remove_oh_my_zsh: false

@@ -1,8 +1,6 @@
 ---
-# Partition casks once: the adopt allow-list (safe to --adopt when already in
-# /Applications but unmanaged) vs. everything else (fresh install). Computing
-# these up front keeps the install tasks readable and avoids repeating the
-# select/reject expression in both `name:` and `when:`.
+# Partition once: the adopt allow-list (safe to --adopt when already present in
+# /Applications but unmanaged) vs. everything else.
 - name: Compute cask install sets
   ansible.builtin.set_fact:
     homebrew_casks_adopt: >-
@@ -16,15 +14,10 @@
   community.general.homebrew:
     name: "{{ homebrew_baseline_formulae + homebrew_optional_formulae }}"
     state: present
-    # Never refresh the index under --check. The module's _update_homebrew()
-    # short-circuits in check mode: it sets changed=True, raises, and run()
-    # swallows the exception — so _install_packages() is NEVER REACHED and the
-    # task reports a bare "Homebrew would be updated." with zero packages
-    # evaluated. That makes the dry-run useless precisely where it matters most:
-    # bootstrap.sh offers "Preview changes first (dry-run)?" on a fresh machine,
-    # and the preview could not name a single formula it was about to install.
-    # `state: present` never upgrades anything, so refreshing the index has no
-    # effect on the outcome of a check run anyway.
+    # Never refresh under --check: the module short-circuits there and never
+    # reaches the install step, so the dry-run reports "Homebrew would be
+    # updated" and names zero packages. `state: present` never upgrades, so the
+    # refresh cannot affect a check run's outcome anyway.
     update_homebrew: "{{ homebrew_update | bool and not ansible_check_mode }}"
 
 - name: Install explicitly adoptable casks

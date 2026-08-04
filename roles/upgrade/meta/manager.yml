@@ -1,7 +1,0 @@
----
-manager:
-  name: upgrade
-  tier: engine
-  summary: "Upgrade managed tools to latest — brew, Galaxy collections, Node (opt-in)."
-  capabilities: []
-  consumes: [upgrade_assume_yes, upgrade_casks_greedy, upgrade_nvm_node]

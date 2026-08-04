@@ -1,32 +1,25 @@
 ---
-# Merge one content layer's capabilities.yml into the accumulated capability
-# registry (a dict keyed by capability id). Loop var: `_layer`. Layers are
-# processed in ascending priority, so a higher-priority layer's declaration of
-# the same id overwrites (wins over) a lower one — like the scalar-merge for vars.
+# Merge one layer's capabilities.yml into the registry, a dict keyed by
+# capability id. Loop var: `_layer`. Layers run in ascending priority, so a
+# higher-priority layer's entry for the same id wins outright.
 #
-# The registry is the single source of truth, read by both bootstrap (to build
-# the selection menu) and the engine (to derive packages/config from the user's
-# selected_capabilities). The engine therefore never hardcodes package names.
+# The registry is read by both bootstrap (to build the selection menu) and the
+# engine (to derive packages and config), so no package name is ever hardcoded.
 
 - name: "[{{ _layer.name }}] Stat capabilities.yml"
   ansible.builtin.stat:
-    path: "{{ computer_setup_plugin_cache }}/{{ _layer.name }}/capabilities.yml"
+    path: "{{ computer_setup_layer_cache }}/{{ _layer.name }}/capabilities.yml"
   register: _layer_capabilities_stat
 
 - name: "[{{ _layer.name }}] Load capabilities.yml"
   ansible.builtin.include_vars:
-    file: "{{ computer_setup_plugin_cache }}/{{ _layer.name }}/capabilities.yml"
+    file: "{{ computer_setup_layer_cache }}/{{ _layer.name }}/capabilities.yml"
     name: _incoming_capabilities
   when: _layer_capabilities_stat.stat.exists
 
-# A file containing only the key `capabilities:` (a placeholder a layer author
-# writes before adding entries) parses to None, not to a missing key — so
-# `default([])` does NOT fire, and `None | map(attribute='id')` aborts the play.
-# That happens in pre_tasks, which every entry point runs: the bootstrap apply,
-# drift-check, drift-apply, drift-update and both LaunchAgents would all die
-# before a single role executed, on an unattributed Jinja error. Fail here
-# instead, naming the layer and the file, the way the schema_version and
-# reserved-key guards in merge_layer_vars.yml do.
+# A bare `capabilities:` key parses to None, not a missing key, so `default([])`
+# does not fire and the play aborts on an unattributed Jinja error — inside
+# pre_tasks, which every entry point runs. Fail here naming the layer instead.
 - name: "[{{ _layer.name }}] Assert capabilities.yml declares a list"
   ansible.builtin.assert:
     that:

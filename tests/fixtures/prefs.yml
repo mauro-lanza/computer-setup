@@ -3,7 +3,7 @@ git_user_name: Test User
 git_user_email: test@example.com
 
 # Single selection token. Optional packages and capability flags are DERIVED
-# from these ids against the merged capability registry (the plugins' catalogs).
+# from these ids against the merged capability registry (the layers. capabilities).
 selected_capabilities:
   - nvm       # defined in BOTH layers — override must win
   - opencode  # base: formula anomalyco/tap/opencode
@@ -11,4 +11,4 @@ selected_capabilities:
   - vscode    # override: cask visual-studio-code
   - dbt       # override: feature (no package)
   - vscode-peacock  # override: type vscode -> extension
-  - ghost     # not in any active layer's catalog — must be silently ignored
+  - ghost     # not in any active layer's capabilities — must be silently ignored

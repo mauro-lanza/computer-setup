@@ -1,5 +1,5 @@
 ---
-# Example repository catalog for the `repositories` role.
+# Example repository list for the `repositories` role.
 #
 # Copy to ~/.repositories.yml (NOT committed — it's per-machine, like
 # ~/.mac-prefs.yml, and may contain private remote URLs), edit to taste, then
@@ -30,4 +30,4 @@ repositories:
 
   - folder: "{{ repositories_base_dir }}/archive/old-project"
     remote: "git@github.com:example-org/old-project.git"
-    active: false   # kept in the catalog for reference, but skipped on clone
+    active: false   # kept for reference, but skipped on clone

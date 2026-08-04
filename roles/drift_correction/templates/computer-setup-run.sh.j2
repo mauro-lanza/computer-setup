@@ -3,7 +3,7 @@
 #
 # The single entry point for every `ansible-pull` this machine runs.
 #
-# Previously the pull invocation (prefs file + plugin cache + layers manifest
+# Previously the pull invocation (prefs file + layer cache + layers manifest
 # `-e` flags) was rebuilt independently in three places: bootstrap.sh, the
 # `drift-apply` shell function, and the drift-check wrapper. Adding one variable
 # meant editing all three. That argument set now lives here, once.
@@ -30,9 +30,9 @@ shift 2>/dev/null || true
 REPO_URL="{{ drift_correction_repo_url }}"
 REPO_BRANCH="{{ drift_correction_repo_branch }}"
 PREFS_FILE="{{ drift_correction_prefs_file }}"
-PLUGIN_CACHE="{{ drift_correction_plugin_cache }}"
+LAYER_CACHE="{{ drift_correction_layer_cache }}"
 LAYERS_FILE="{{ drift_correction_layers_manifest }}"
-LOG_FILE="{{ drift_correction_log_dir }}/ansible-drift-correction.log"
+LOG_FILE="{{ computer_setup_log_file }}"
 ANSIBLE_PULL="{{ homebrew_prefix }}/bin/ansible-pull"
 LAYER_SYNC="{{ drift_correction_wrapper_dir }}/computer-setup-layers"
 MAX_LINES={{ drift_correction_log_max_lines }}
@@ -41,7 +41,7 @@ CONNECTIVITY_TIMEOUT={{ drift_correction_connectivity_timeout }}
 # ─── The pull argument set — single source of truth ──────────────────────────
 ARGS=(-U "$REPO_URL" -C "$REPO_BRANCH")
 [[ -f "$PREFS_FILE" ]] && ARGS+=(-e "@${PREFS_FILE}" -e "computer_setup_prefs_file=${PREFS_FILE}")
-[[ -n "$PLUGIN_CACHE" ]] && ARGS+=(-e "computer_setup_plugin_cache=${PLUGIN_CACHE}")
+[[ -n "$LAYER_CACHE" ]] && ARGS+=(-e "computer_setup_layer_cache=${LAYER_CACHE}")
 [[ -f "$LAYERS_FILE" ]] && ARGS+=(-e "computer_setup_layers_manifest=${LAYERS_FILE}")
 
 notify() {
@@ -89,8 +89,8 @@ fi
 
 # Refresh every content layer so the merge reflects the latest layer content
 # (drift covers orchestrator + all layers).
-if [[ -n "$LAYERS_FILE" && -f "$LAYERS_FILE" && -n "$PLUGIN_CACHE" ]]; then
-    "$LAYER_SYNC" sync --manifest "$LAYERS_FILE" --cache "$PLUGIN_CACHE" \
+if [[ -n "$LAYERS_FILE" && -f "$LAYERS_FILE" && -n "$LAYER_CACHE" ]]; then
+    "$LAYER_SYNC" sync --manifest "$LAYERS_FILE" --cache "$LAYER_CACHE" \
         --schema-version {{ computer_setup_schema_version }} >> "$LOG_FILE" 2>&1 \
         || log "WARN: layer sync failed; continuing with cached content"
 fi

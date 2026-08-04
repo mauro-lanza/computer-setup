@@ -1,12 +1,9 @@
 ---
-# Resolve a single file/template from the active content layers (highest
-# priority wins, role-bundled fallback last) and deploy it to a destination.
-# No-op when no layer provides the key — the engine ships no content of its own.
+# Resolve one file/template across the active layers (highest priority wins,
+# role-bundled fallback last) and deploy it. No-op when no layer provides the
+# key — the engine ships no content of its own.
 #
-# This is the engine primitive behind every "a layer supplies this config file"
-# role (editor settings, prompt, dbt profiles, ~/.zshrc, …). It composes the
-# resolve step (see resolve_layer_file/template) with the deploy step so a
-# consuming role is a single include with a handful of vars.
+# The primitive behind every "a layer supplies this config file" role.
 #
 # Inputs:
 #   computer_setup_lookup_key           key resolved across layer search dirs
@@ -23,11 +20,8 @@
   ansible.builtin.set_fact:
     _cs_deploy_src: "{{ lookup('ansible.builtin.first_found', _params, errors='ignore') }}"
   vars:
-    # Built as ONE expression rather than via an intermediate `_search_dirs`
-    # var. The intermediate is a list at runtime, but only because Ansible
-    # resolves a whole-string `{{ }}` to its native type — static analysers see
-    # a string being concatenated to a list and flag it. Same result, no
-    # dependence on native-type resolution, and the lint stays honest.
+    # One expression, not an intermediate var: the intermediate is only a list
+    # via native-type resolution, which static analysers flag as string + list.
     _params:
       files: ["{{ computer_setup_lookup_key }}"]
       paths: >-

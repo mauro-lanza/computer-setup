@@ -11,9 +11,8 @@
       - --list-extensions
   register: vscode_installed_extensions
   changed_when: false
-  # Read-only: run even under --check so the install loop below can skip
-  # already-present extensions. Without this the list is empty in check mode
-  # and the daily drift agent iterates every extension (~10s wasted).
+  # Read-only, and needed under --check too: otherwise the list is empty and the
+  # drift agent iterates every extension.
   check_mode: false
   when: vscode_stat.stat.exists
 
@@ -25,12 +24,9 @@
          | list }}
   when: vscode_stat.stat.exists
 
-# `command` does not support check mode, so the install task below is SKIPPED
-# under --check rather than reported as changed. That means the daily drift
-# agent could never see a missing extension — VS Code was the one managed
-# surface with no drift signal at all. This task is check-mode visible, so a
-# missing extension now shows up as drift. It only runs in check mode; on a real
-# apply the install task itself reports the change.
+# `command` is skipped under --check, so the install task below can never report
+# drift. This check-mode-only task supplies that signal; on a real apply the
+# install task reports the change itself.
 - name: Report missing VS Code extensions as drift
   ansible.builtin.debug:
     msg: >-

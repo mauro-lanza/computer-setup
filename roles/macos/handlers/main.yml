@@ -5,8 +5,7 @@
     - Dock
     - Finder
   register: macos_killall_result
-  # killall returns 1 when process not found — that's fine.
-  # Anything else (e.g. permission denied) should fail loudly.
+  # rc 1 means "not running", which is fine; anything else is a real failure.
   failed_when:
     - macos_killall_result.rc != 0
     - macos_killall_result.rc != 1

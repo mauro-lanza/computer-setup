@@ -4,9 +4,8 @@ git_user_email: ""
 # Editor: defaults to vim; overridden to "code --wait" if VS Code is installed.
 git_editor: ""
 
-# All git content below is the variable interface — supplied by content layers'
-# vars.yml. Safe empty defaults so the orchestrator writes a minimal, opinion-free
-# ~/.gitconfig on its own.
+# Everything below is layer-supplied. Empty defaults keep the orchestrator's own
+# ~/.gitconfig minimal and opinion-free.
 
 # Default branch for `git init` (rendered only when set).
 git_default_branch: ""

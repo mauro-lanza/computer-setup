@@ -1,6 +1,0 @@
----
-name: bad
-schema_version: 1
-priority: 10
-provides: [vars]
-description: "Layer that illegally claims a reserved key"

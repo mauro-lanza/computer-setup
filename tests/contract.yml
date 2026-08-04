@@ -6,7 +6,7 @@
   vars:
     home_dir: "{{ ansible_facts['env']['HOME'] }}"
     vscode_code_binary: /Applications/Visual Studio Code.app/Contents/Resources/app/bin/code
-    computer_setup_plugin_cache: "{{ playbook_dir }}/fixtures/plugins"
+    computer_setup_layer_cache: "{{ playbook_dir }}/fixtures/layers_cache"
     computer_setup_layers_manifest: "{{ playbook_dir }}/fixtures/layers.yml"
     computer_setup_prefs_file: "{{ playbook_dir }}/fixtures/prefs.yml"
     computer_setup_schema_version: 1
@@ -16,24 +16,6 @@
         name: computer_setup
       tags: [always]
   tasks:
-    - name: Resolve fixture file
-      ansible.builtin.include_role:
-        name: computer_setup
-        tasks_from: resolve_layer_file
-      vars:
-        computer_setup_lookup_key: contract.txt
-        computer_setup_lookup_result_var: contract_file_src
-        computer_setup_lookup_fallback_dir: "{{ playbook_dir }}/missing-files"
-
-    - name: Resolve fixture template
-      ansible.builtin.include_role:
-        name: computer_setup
-        tasks_from: resolve_layer_template
-      vars:
-        computer_setup_lookup_key: contract.j2
-        computer_setup_lookup_result_var: contract_template_src
-        computer_setup_lookup_fallback_dir: "{{ playbook_dir }}/missing-templates"
-
     - name: Create a scratch dir for deploy assertions
       ansible.builtin.tempfile:
         state: directory
@@ -58,11 +40,9 @@
         computer_setup_lookup_fallback_dir: "{{ playbook_dir }}/missing-templates"
         computer_setup_deploy_kind: template
 
-    # No layer provides this key and there is no role-bundled fallback. The
-    # primitive documents itself as a no-op here, but first_found(errors=ignore)
-    # returns None and `default('') | length` raised on it, so the entire
-    # "engine runs standalone / a layer omits an optional file" path hard-failed.
-    # Both fixtures always provided every key, which is why it went unnoticed.
+    # No layer provides this key and there is no role-bundled fallback. Must
+    # no-op: first_found(errors=ignore) returns None, and `default('') | length`
+    # raises on it unless the primitive guards for that.
     - name: Deploy a key that no layer provides (must no-op, not fail)
       ansible.builtin.include_role:
         name: computer_setup
@@ -93,14 +73,13 @@
           - computer_setup_active_layers | map(attribute='name') | list == ['base', 'override']
           - contract_list == ['base', 'override']
           - contract_scalar == 'override'
-          # Optional packages are derived from selected_capabilities x the merged
-          # capability registry (order follows the selection order). The 'ghost'
-          # selection is absent from every capability set and must be ignored silently.
-          - computer_setup_capabilities == ['nvm', 'opencode', 'zed', 'vscode', 'dbt', 'vscode-peacock', 'ghost']
           # Union-by-id: `nvm` exists in both layers; the higher-priority one
           # replaces it wholesale, so the package is override's, not base's.
           - computer_setup_capability_registry['nvm'].packages == 'nvm-from-override'
           - "'override wins' in computer_setup_capability_registry['nvm'].desc"
+          # Packages derive from SELECTED capabilities only. 'ghost' is selected
+          # but unregistered (silently ignored); 'adopted' is registered and
+          # active but never selected, so its package must NOT appear here.
           - homebrew_optional_formulae == ['nvm-from-override', 'anomalyco/tap/opencode']
           - homebrew_optional_casks == ['zed', 'visual-studio-code']
           # type: vscode routes to extensions, not formulae/casks.
@@ -112,9 +91,8 @@
           - "'vscode' in computer_setup_active_capabilities"
           - "'dbt' in computer_setup_active_capabilities"
           - "'adopted' in computer_setup_active_capabilities"
-          - "'adopted' not in computer_setup_capabilities"
           # A selected-but-unregistered capability is still "active" (a selection),
-          # it just contributes no packages/config (asserted above).
+          # it just contributes no packages/config.
           - "'ghost' in computer_setup_active_capabilities"
           # Config deploys are the config bundles of ACTIVE capabilities, in
           # capability order (zed at pos 3, dbt at pos 5; vscode has no config —
@@ -124,10 +102,10 @@
           - computer_setup_config_deploys[0].dest == '/tmp/cs-contract/zed-settings.json'
           - computer_setup_config_deploys[1].src == 'profiles.yml.j2'
           - computer_setup_config_deploys[1].kind == 'template'
-          # Reminders are contributed by active capabilities (vscode is selected).
+          # Reminders come from ACTIVE capabilities: 'vscode' is selected, and
+          # 'adopted' contributes despite never being selected.
           - "'Sign into VS Code settings sync' in computer_setup_reminders"
-          - contract_file_src.endswith('/override/files/contract.txt')
-          - contract_template_src.endswith('/override/templates/contract.j2')
+          - "'Adopted capability reminder' in computer_setup_reminders"
           # deploy_layer_file: highest-priority layer wins, parent dir is created
           - (contract_deployed_file.content | b64decode | trim) == 'override file'
           - (contract_deployed_template.content | b64decode | trim) == 'override template'

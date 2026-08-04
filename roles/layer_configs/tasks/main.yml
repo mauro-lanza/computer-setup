@@ -1,10 +1,5 @@
 ---
-# Generic config manager: deploy each config entry contributed by an active
-# capability (computer_setup_config_deploys, derived by the computer_setup role
-# from the selected capabilities' `config:` bundles) via the deploy_layer_file
-# primitive. Highest-priority layer wins the source file; no-op when unprovided.
-#
-# The list is data: capabilities declare their config in a plugin capability, so
+# Deploy the `config:` bundle of every active capability. The list is data, so
 # adding a config-only tool needs no engine change.
 - name: Deploy capability config files
   ansible.builtin.include_role:
