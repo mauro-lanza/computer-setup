@@ -1,6 +1,6 @@
 # Proposal: machine answers, presets, and de-privileging the editor
 
-Status: draft / not implemented
+Status: IMPLEMENTED — kept as the rationale record
 Scope: `computer-setup` engine + all layer repos
 
 ## Problem
@@ -230,34 +230,48 @@ the stated "the engine hardcodes nothing" invariant.
 
 ---
 
-## Known issues found alongside, tracked separately
+## Known issues found alongside — all fixed
 
-These are not preference bias but were found during the audit and are arguably
-higher severity:
+These were not preference bias but were found during the audit and were
+arguably higher severity.
 
-1. `~/.gitconfig` is replaced wholesale every run (`roles/git/tasks/main.yml:38-45`),
-   destroying pre-existing `includeIf`, signing config and credential helpers.
-   No merge mode, no opt-out.
-2. Single global git identity, with `git_user_*` reserved — so the work layer
-   **cannot** supply a work email. This contradicts the work/personal layer
-   premise the whole repo is built on. `includeIf` support is the standard fix.
-3. `p10k.zsh:47` requires a powerline/Nerd font that no layer installs.
-4. `30-functions.zsh:5-27` deploys Docker helpers unconditionally though
-   `docker-cli` and `colima` are both optional — missing a
+1. **`~/.gitconfig` replaced wholesale**, destroying pre-existing `includeIf`,
+   signing config and credential helpers. Fixed: the role owns
+   `~/.config/git/computer-setup.gitconfig` and appends one `include.path`.
+   Appended, so managed values are still read last and win. A previously
+   role-owned file is detected by its own marker, backed up, and stubbed.
+2. **Single global git identity**, with `git_user_*` reserved, so the work layer
+   could not supply a work email. Fixed: `git_conditional_identities` renders
+   `includeIf` blocks. Matched by remote URL (`hasconfig:`) rather than
+   directory, because work and personal checkouts share one flat `~/Projects`.
+3. **`p10k.zsh:47` needed a font no layer installed.** Fixed:
+   `font-meslo-lg-nerd-font` is a baseline cask. Selecting it as the terminal
+   profile font is still manual.
+4. **Docker helpers deployed unconditionally** despite `docker-cli`/`colima`
+   being optional. Fixed: split into `40-docker.zsh` with a
    `cs:requires-capability` directive.
-5. `scripts/computer-setup-layers:19-28` silently rewrites HTTPS remotes to SSH,
-   blocking the port-22 case `bootstrap.sh:205-207` itself warns about.
-6. `runtimes/defaults/main.yml:3` pins terraform `1.12.2` in the engine and
-   drift *reverts* a hand-set version daily.
+5. **HTTPS layer remotes silently rewritten to SSH**, breaking the
+   port-22-blocked case bootstrap itself warns about. Fixed: URLs are used as
+   written; only a scheme-less `github.com:owner/repo` is completed.
+6. **Terraform pinned in engine defaults**, reverting a hand-set version daily.
+   Fixed: engine default is empty, the pin moved to the public layer.
 
----
+## Deliberately not done
 
-## Sequencing
+- **Runtime managers as a data table.** Layer vars would become arbitrary shell
+  executed as the user on every drift run — the exact remote-code-execution path
+  the reserved-key guard exists to close. Adding pyenv or mise stays a small,
+  reviewable engine change.
+- **Non-zsh shells.** The engine's own management CLI is zsh; supporting fish
+  means rewriting it. Known limitation.
+- **Aesthetics.** Colours, dock size, tap-to-click, keybindings and the venv
+  auto-activate hook stay unconditional layer data, by choice.
 
-1. **Fix 2** — layers only, no engine risk, immediate dedup.
-2. **Fix 1, editor as the pilot** — proves the mechanism end to end on the
-   motivating case.
-3. **Fix 1, machine tier** — touches the security model; lands with negative
-   tests.
-4. **Fix 1, presets** — needed before the question count grows further.
-5. **Fix 3** — incremental, one magic string at a time.
+## Sequencing — as executed
+
+1. Template resolution and value dedup (layers only, no engine risk).
+2. Questions mechanism, editor as the pilot.
+3. Machine tier, with its negative tests.
+4. Presets and `--answers`.
+5. De-magicking the engine.
+6. The known issues above.
