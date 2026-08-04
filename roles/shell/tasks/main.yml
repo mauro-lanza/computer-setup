@@ -100,6 +100,7 @@
       {{ (((shell_snippet_manifest_data.content | default('') | b64decode).splitlines()
            if shell_snippet_manifest.stat.exists else [])
           + (shell_snippet_candidate_paths | default([])))
+         | reject('equalto', '')
          | unique
          | difference(shell_snippet_map | default([]) | map(attribute='dest') | list) }}
 
@@ -112,11 +113,19 @@
     label: "{{ item | basename }}"
   notify: Shell config changed
 
+# A run that deploys zero snippets (no layer ships files/shell/*.zsh, or every
+# snippet is gated off by `# cs:requires-capability:`) must write an EMPTY file,
+# not "\n": "\n".splitlines() is [''], and that empty string then survives into
+# the stale-removal loop above as `file: path="" state=absent`. It happens to
+# no-op rather than fail, which is exactly the kind of accident that stops being
+# an accident later. The reject() above is the belt; this is the braces.
 - name: Write current shell snippet manifest
   ansible.builtin.copy:
     dest: "{{ shell_snippet_manifest_path }}"
     mode: "0644"
-    content: "{{ (shell_snippet_map | default([]) | map(attribute='dest') | list | sort | join('\n')) ~ '\n' }}"
+    content: "{{ (_dests | sort | join('\n') ~ '\n') if _dests | length > 0 else '' }}"
+  vars:
+    _dests: "{{ shell_snippet_map | default([]) | map(attribute='dest') | list }}"
 
 # ─── ~/.zshrc (layer content) ─────────────────────────────────────────────────
 # Resolved across layer files/ dirs (highest priority wins). The orchestrator
@@ -129,7 +138,7 @@
   vars:
     computer_setup_lookup_key: zshrc
     computer_setup_deploy_dest: "{{ home_dir }}/.zshrc"
-    computer_setup_lookup_fallback_dir: "{{ role_path }}/files"
+    computer_setup_lookup_fallback_dir: "{{ playbook_dir }}/roles/shell/files"
     computer_setup_deploy_backup: true
     computer_setup_deploy_notify: Shell config changed
 
@@ -142,7 +151,7 @@
   vars:
     computer_setup_lookup_key: p10k.zsh
     computer_setup_deploy_dest: "{{ home_dir }}/.p10k.zsh"
-    computer_setup_lookup_fallback_dir: "{{ role_path }}/files"
+    computer_setup_lookup_fallback_dir: "{{ playbook_dir }}/roles/shell/files"
     computer_setup_deploy_notify: Shell config changed
 
 - name: Check for an unmanaged zsh framework

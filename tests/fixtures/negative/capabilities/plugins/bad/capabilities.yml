@@ -1,0 +1,6 @@
+---
+# A mapping instead of a list. Must be rejected with a message naming the layer,
+# not an unattributed Jinja error from deep inside the merge.
+capabilities:
+  nvm:
+    type: formula

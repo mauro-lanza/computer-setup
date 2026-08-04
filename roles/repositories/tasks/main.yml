@@ -12,10 +12,23 @@
     name: repositories_catalog_data
   when: repositories_catalog.stat.exists
 
+# `default(x, true)`, not `default(x)`: a catalog file containing the bare key
+# `repositories:` (with no entries) parses to None, which is DEFINED — so plain
+# `default()` would not fire and `repositories | length` below aborts the role
+# with "object of type 'NoneType' has no len()". That file is not hypothetical:
+# it is exactly what the shipped `repos-generate` helper emits when the projects
+# directory has no checkouts yet, which is the state of a fresh machine, and
+# repositories.example.yml tells you to redirect it straight into place.
 - name: Resolve the repository list from the catalog
   ansible.builtin.set_fact:
-    repositories: "{{ repositories_catalog_data.repositories | default(repositories) }}"
+    repositories: "{{ repositories_catalog_data.repositories | default(repositories, true) }}"
   when: repositories_catalog.stat.exists
+
+# Normalize unconditionally, so the null-safety above also covers the path where
+# there is NO catalog file and a layer's vars.yml supplied the bare key instead.
+- name: Normalize the repository list
+  ansible.builtin.set_fact:
+    repositories: "{{ repositories | default([], true) }}"
 
 - name: Report empty catalog
   ansible.builtin.debug:

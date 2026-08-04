@@ -32,14 +32,18 @@
   ansible.builtin.assert:
     that:
       - (_incoming_layer_vars.keys() | intersect(computer_setup_reserved_layer_keys | default([])) | length) == 0
-      - (_incoming_layer_vars.keys() | select('match', '^computer_setup_') | list | length) == 0
+      - (_incoming_layer_vars.keys() | select('match', _reserved_prefix_re) | list | length) == 0
     fail_msg: >-
       Layer '{{ _layer.name }}' defines reserved key(s):
       {{ ((_incoming_layer_vars.keys() | intersect(computer_setup_reserved_layer_keys | default([])))
-          + (_incoming_layer_vars.keys() | select('match', '^computer_setup_') | list)) | unique | join(', ') }}.
+          + (_incoming_layer_vars.keys() | select('match', _reserved_prefix_re) | list)) | unique | join(', ') }}.
       These are machine-local prefs (use {{ computer_setup_prefs_file }}) or
-      engine-owned vars (the computer_setup_* namespace) — not layer content.
+      engine-owned vars (the
+      {{ computer_setup_reserved_layer_prefixes | default([]) | join('*, ') }}*
+      namespaces) — not layer content.
     quiet: true
+  vars:
+    _reserved_prefix_re: "^({{ computer_setup_reserved_layer_prefixes | default(['computer_setup_']) | join('|') }})"
   when: _layer_vars_stat.stat.exists
 
 - name: "[{{ _layer.name }}] Report scalar overrides (highest priority wins)"
@@ -60,5 +64,19 @@
   ansible.builtin.set_fact:
     computer_setup_merged_vars: >-
       {{ computer_setup_merged_vars
-         | combine(_incoming_layer_vars | default({}), recursive=true, list_merge='append_rp') }}
+         | combine(_layer_vars_clean, recursive=true, list_merge='append_rp') }}
+  vars:
+    # Drop keys whose value is null before merging. A layer author writing
+    #     homebrew_baseline_formulae:
+    # (the key, no entries) means "nothing here", but YAML parses it as None —
+    # which is DEFINED, so the consuming role's `| default([])` does not fire and
+    # the value flows on to crash something far away with an unattributed
+    # "'NoneType' object is not iterable". Dropping the key instead lets the
+    # role's own default apply, which is exactly what the author meant. Cheaper
+    # and friendlier than asserting, and it retires the whole class rather than
+    # one key at a time.
+    _layer_vars_clean: >-
+      {{ (_incoming_layer_vars | default({}) | dict2items
+          | rejectattr('value', 'none') | list | items2dict)
+         if (_incoming_layer_vars | default({})) else {} }}
   when: _layer_vars_stat.stat.exists

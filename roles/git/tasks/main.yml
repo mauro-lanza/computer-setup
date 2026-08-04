@@ -19,6 +19,24 @@
       {% endfor %}
     dest: "{{ home_dir }}/.gitignore_global"
     mode: "0644"
+    # Same hazard as ~/.gitconfig below, and it was the only one of the pair
+    # without the guard. The default for git_global_gitignore_entries is [] —
+    # the state when running standalone, or with layers that do not set the key
+    # — so this task will happily truncate a restored ~/.gitignore_global down
+    # to a single comment line. gitconfig.j2 then points core.excludesFile at
+    # the file that was just emptied.
+    backup: true
+  when: git_global_gitignore_entries | default([], true) | length > 0
+
+# Refuse to point git at an exclude file this role did not populate. Writing a
+# one-line stub and wiring core.excludesFile to it is worse than leaving both
+# alone: it silently disables whatever global ignores the user had.
+- name: Warn that no global gitignore entries are declared
+  ansible.builtin.debug:
+    msg: >-
+      No `git_global_gitignore_entries` declared by any active layer —
+      leaving {{ home_dir }}/.gitignore_global untouched.
+  when: git_global_gitignore_entries | default([], true) | length == 0
 
 - name: Deploy managed ~/.gitconfig
   ansible.builtin.template:

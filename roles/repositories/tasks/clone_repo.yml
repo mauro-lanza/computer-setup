@@ -44,7 +44,7 @@
       ansible.builtin.shell: "{{ post_clone_cmd }}"
       args:
         chdir: "{{ repo_item.folder }}"
-      loop: "{{ repo_item.post_clone | default([]) }}"
+      loop: "{{ repo_item.post_clone | default([], true) }}"
       loop_control:
         loop_var: post_clone_cmd
       when:

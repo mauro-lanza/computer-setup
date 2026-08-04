@@ -92,7 +92,8 @@ role's `meta/manager.yml`).
 ### Reserved keys
 
 A layer's `vars.yml` may not define certain keys. The authoritative list is
-`computer_setup_reserved_layer_keys` in
+`computer_setup_reserved_layer_keys` (plus the reserved *prefixes* in
+`computer_setup_reserved_layer_prefixes`) in
 [`roles/computer_setup/tasks/main.yml`](../roles/computer_setup/tasks/main.yml)
 — it is enforced by an assert in `merge_layer_vars.yml`, and deliberately not
 re-listed here, because an enumeration in prose is a copy that goes stale (this
@@ -102,12 +103,19 @@ one did). The categories are:
    (`selected_capabilities`, git identity).
 2. **Engine-owned play/role vars** — a layer overriding these would break the
    orchestrator (`home_dir`, `repo_url`, `homebrew_prefix`, the repository
-   catalog paths, …), plus the entire `computer_setup_*` namespace, which is
-   additionally guarded by prefix rather than by name.
-3. **Vars that decide what code runs, or runs unattended** — everything baked
-   into the deployed runner script and the scheduled agents
-   (`drift_correction_*`), the upgrade auto-approval switches, and Ansible's own
-   execution controls (`ansible_connection`, `ansible_python_interpreter`, …).
+   catalog paths, …), plus the entire `computer_setup_*` namespace.
+3. **Vars that decide what code runs, or runs unattended** — the entire
+   `drift_correction_*` namespace (everything baked into the deployed runner
+   script and the scheduled agents), the upgrade auto-approval switches, and
+   Ansible's own execution controls (`ansible_connection`,
+   `ansible_python_interpreter`, …).
+
+Categories 2 and 3 are reserved **by prefix**, not by name, precisely because
+name lists rot: an earlier version enumerated eleven `drift_correction_*` keys
+and missed six the role also defines — including `drift_correction_prefs_file`,
+which the runner loads as `-e "@file"` (extra-vars precedence, high enough to
+set every other reserved key), and two that render into bare unquoted shell
+assignments in the runner.
 
 Category 3 is the security boundary. Layer vars land in play scope via
 `set_fact`, which outranks both role defaults and play vars — so without it, a
@@ -119,6 +127,25 @@ silently degrade.
 The layer sync helper validates manifest entries before use: layer names must be
 unique and shell/path-safe, required fields must be present, priorities must be
 numeric, and `plugin.yml.name` must match the manifest name.
+
+### A layer var cannot reference another layer var
+
+Values in `vars.yml` may template against **play vars** (`home_dir`,
+`repositories_base_dir`, `homebrew_prefix`, …) and other roles' `defaults/`, but
+**not against keys defined in the same or another layer's `vars.yml`**:
+
+```yaml
+# WON'T WORK
+projects_root: "{{ home_dir }}/Work"
+repositories:
+  - folder: "{{ projects_root }}/analytics"   # 'projects_root' is undefined
+```
+
+The merge reads the whole incoming mapping in one expression, and reading a
+container recursively templates every value inside it — which happens in
+`pre_tasks`, before any layer key has been published as a fact. This is why
+`repositories_base_dir` is a play var in `local.yml` rather than layer content.
+Use a play var, or repeat the literal.
 
 ## Managed State
 

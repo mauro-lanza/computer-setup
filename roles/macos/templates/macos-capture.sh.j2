@@ -25,7 +25,7 @@ MANAGED=(
 # expansion opens with a dollar-brace-hash sequence, and brace-hash is Jinja's
 # comment-open delimiter — inside a .j2 file it makes the template unrenderable,
 # even within a shell comment. Deliberately spelled out in prose for that reason.
-MANAGED_COUNT={{ (macos_defaults | default([]) | length) + (macos_rectangle_defaults | default([]) | length) }}
+MANAGED_COUNT={{ (macos_defaults | default([], true) | length) + (macos_rectangle_defaults | default([], true) | length) }}
 
 usage() {
     cat <<'EOF'

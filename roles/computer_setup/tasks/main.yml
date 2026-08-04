@@ -32,11 +32,27 @@
     computer_setup_merged_vars: {}
     computer_setup_active_layers: []
     computer_setup_capability_registry: {}
+    # Whole namespaces a layer's vars.yml may never touch. Reserved by PREFIX,
+    # not by enumeration, because an enumerated list rots: the previous version
+    # named eleven drift_correction_* keys and missed six that the role also
+    # defines — including drift_correction_prefs_file, which the runner loads as
+    # `-e "@file"` (extra-vars precedence, the highest there is, enough to set
+    # every other reserved key), drift_correction_layers_manifest, which decides
+    # which layer repos get cloned and merged on every scheduled run, and
+    # drift_correction_log_max_lines / _connectivity_timeout, which render into
+    # bare unquoted shell assignments in the runner. Adding a new
+    # drift_correction_* default is now automatically protected.
+    #
+    # NOTE: `upgrade_` is deliberately NOT a reserved prefix — upgrade_casks_exclude
+    # is legitimate layer content. Only the two auto-approval switches are
+    # reserved, by name, below.
+    computer_setup_reserved_layer_prefixes:
+      - computer_setup_
+      - drift_correction_
     # Keys a layer's vars.yml may never define. Three groups:
     #   1. Machine-local prefs — belong in computer_setup_prefs_file.
     #   2. Engine-owned play/role vars — a layer overriding these would break
-    #      the orchestrator itself. The computer_setup_* namespace is additionally
-    #      guarded by prefix in merge_layer_vars.yml.
+    #      the orchestrator itself.
     #   3. Vars that decide what code runs, or runs unattended, on this machine.
     #      Layer vars land in play scope via set_fact, which outranks role
     #      defaults AND play vars — so anything here is effectively arbitrary
@@ -52,20 +68,6 @@
       - vscode_code_binary
       - repositories_base_dir
       - repositories_catalog_file
-      # These are baked into the deployed runner script, which every scheduled
-      # ansible-pull executes. repo_url being reserved is pointless while the
-      # value the runner actually uses is not.
-      - drift_correction_repo_url
-      - drift_correction_repo_branch
-      - drift_correction_runner_path
-      - drift_correction_wrapper_dir
-      - drift_correction_agents
-      - drift_correction_label
-      - drift_correction_upgrade_label
-      - drift_correction_schedule_hour
-      - drift_correction_schedule_minute
-      - drift_correction_upgrade_schedule_hour
-      - drift_correction_upgrade_schedule_minute
       # Would let a layer turn the unattended morning upgrade into a full
       # cask upgrade, or auto-approve upgrades the operator never confirmed.
       - upgrade_assume_yes
@@ -93,7 +95,7 @@
     - name: Resolve active layers (ascending priority — highest wins last)
       ansible.builtin.set_fact:
         computer_setup_active_layers: >-
-          {{ (_layers_manifest.layers | default([]))
+          {{ (_layers_manifest.layers | default([], true))
              | sort(attribute='priority') }}
 
     - name: Merge each layer's vars.yml
@@ -154,7 +156,7 @@
     # Effective set everything gates on: selections plus adopted-present tools.
     computer_setup_active_capabilities: "{{ (_selected + _present) | unique | list }}"
   vars:
-    _selected: "{{ selected_capabilities | default([]) }}"
+    _selected: "{{ selected_capabilities | default([], true) }}"
     _present: >-
       {{ _adopt_probe.results | default([])
          | selectattr('stat.exists') | map(attribute='item.key') | list }}
@@ -182,7 +184,7 @@
       {{ _active_entries | selectattr('reminders', 'defined')
          | map(attribute='reminders') | flatten | list }}
   vars:
-    _selected: "{{ selected_capabilities | default([]) }}"
+    _selected: "{{ selected_capabilities | default([], true) }}"
     _active: "{{ computer_setup_active_capabilities }}"
     _selected_entries: >-
       {{ _selected | select('in', computer_setup_capability_registry)

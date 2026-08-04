@@ -19,10 +19,34 @@
     name: _incoming_capabilities
   when: _layer_capabilities_stat.stat.exists
 
+# A file containing only the key `capabilities:` (a placeholder a layer author
+# writes before adding entries) parses to None, not to a missing key — so
+# `default([])` does NOT fire, and `None | map(attribute='id')` aborts the play.
+# That happens in pre_tasks, which every entry point runs: the bootstrap apply,
+# drift-check, drift-apply, drift-update and both LaunchAgents would all die
+# before a single role executed, on an unattributed Jinja error. Fail here
+# instead, naming the layer and the file, the way the schema_version and
+# reserved-key guards in merge_layer_vars.yml do.
+- name: "[{{ _layer.name }}] Assert capabilities.yml declares a list"
+  ansible.builtin.assert:
+    that:
+      - _incoming_capabilities.capabilities is not string
+      - _incoming_capabilities.capabilities is not mapping
+      - (_incoming_capabilities.capabilities | default([], true)) is sequence
+    fail_msg: >-
+      Layer '{{ _layer.name }}' has a malformed capabilities.yml: the top-level
+      `capabilities` key must be a list of capability entries (or the file must
+      omit the key entirely). Got:
+      {{ _incoming_capabilities.capabilities | default(None, true) | type_debug }}.
+    quiet: true
+  when: _layer_capabilities_stat.stat.exists
+
 - name: "[{{ _layer.name }}] Merge capability entries into the registry"
   ansible.builtin.set_fact:
     computer_setup_capability_registry: >-
       {{ computer_setup_capability_registry
-         | combine(dict((_incoming_capabilities.capabilities | default([]) | map(attribute='id'))
-                        | zip(_incoming_capabilities.capabilities | default([])))) }}
+         | combine(dict((_caps | map(attribute='id')) | zip(_caps))) }}
+  vars:
+    # `default([], true)` (not `default([])`) so an explicit null is replaced too.
+    _caps: "{{ _incoming_capabilities.capabilities | default([], true) }}"
   when: _layer_capabilities_stat.stat.exists

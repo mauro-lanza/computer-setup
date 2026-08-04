@@ -170,6 +170,28 @@ rm -f ~/.local/bin/duckdb
 - Cleanup of unwanted software is therefore always a **manual, deliberate**
   step, never a side effect of a run.
 
+### One asymmetry worth knowing: config deploys are not garbage-collected
+
+Shell snippets **are** cleaned up. The `shell` role records what it deployed in
+`~/.zsh/.computer-setup-snippets` and removes anything that falls out of that
+set, so disabling a capability withdraws its snippet.
+
+Capability `config:` bundles are **not**. Deselecting a capability, or changing
+a bundle's `dest`, leaves the previously deployed file in place forever.
+
+This is deliberate, not an oversight. `~/.zsh/` is wholly engine-owned, so
+removing an unrecognised file there is safe. Config bundles write to arbitrary
+paths the user also owns and edits — `~/.dbt/profiles.yml`,
+`~/.config/zed/settings.json`, `~/.config/opencode/opencode.json`. A
+manifest-driven "remove what we no longer manage" pass over those paths would
+turn a renamed `dest`, a mistyped capability id, or a layer that briefly failed
+to load into silent deletion of real user config. Leaving an orphan behind is
+the cheaper failure.
+
+The practical consequence: after renaming a bundle's `dest`, delete the old file
+yourself. `ls -lt ~/.local/bin` and the destinations in your layers'
+`capabilities.yml` are the places to look.
+
 ## VS Code role and paths with spaces
 
 The `code` binary lives at

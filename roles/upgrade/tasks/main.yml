@@ -50,6 +50,17 @@
        | reject('in', upgrade_casks_exclude) | list) | length > 0
 
 - name: Show pending upgrades
+  vars:
+    # `brew outdated` exits 1 to mean "something IS outdated" — like diff(1) —
+    # so rc is useless as an error signal. A genuine failure (an unknown or
+    # renamed formula, a tap that isn't installed) also exits non-zero but
+    # writes an "Error:" line to stderr and prints NOTHING to stdout. That
+    # matters because `brew outdated` is all-or-nothing: one unresolvable name
+    # makes it check nothing at all, and the preview would otherwise render the
+    # empty stdout as "(up to date)" for the entire managed set, then hand that
+    # same set to `state: latest` anyway.
+    _formulae_error: "{{ 'Error:' in (upgrade_outdated_formulae.stderr | default('')) }}"
+    _casks_error: "{{ 'Error:' in (upgrade_outdated_casks.stderr | default('')) }}"
   ansible.builtin.debug:
     msg: |-
       ── Pending upgrades (preview) ───────────────────────────────
@@ -58,6 +69,11 @@
         (none managed)
       {% elif upgrade_outdated_formulae.skipped | default(false) %}
         (not checked — `brew outdated` cannot run under --check)
+      {% elif _formulae_error | bool %}
+        (CHECK FAILED — brew could not resolve the managed set, so NOTHING was
+         verified. `brew outdated` is all-or-nothing: usually one unknown or
+         renamed formula, or a tap that is not installed. brew said:)
+      {{ upgrade_outdated_formulae.stderr | default('') | trim | indent(4, true) }}
       {% else %}
       {{ upgrade_outdated_formulae.stdout | default('') | trim or '  (up to date)' }}
       {% endif %}
@@ -69,6 +85,9 @@
         (none managed)
       {% elif upgrade_outdated_casks.skipped | default(false) %}
         (not checked — `brew outdated` cannot run under --check)
+      {% elif _casks_error | bool %}
+        (CHECK FAILED — see the note above; nothing was verified. brew said:)
+      {{ upgrade_outdated_casks.stderr | default('') | trim | indent(4, true) }}
       {% else %}
       {{ upgrade_outdated_casks.stdout | default('') | trim or '  (up to date)' }}
       {% endif %}

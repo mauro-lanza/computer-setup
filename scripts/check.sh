@@ -113,6 +113,14 @@ expect_layer_failure() {
 }
 expect_layer_failure reserved "defines reserved key"
 expect_layer_failure schema "requires schema_version 99"
+# Reserved by PREFIX, not by name. The name list previously missed six
+# drift_correction_* keys that the role defines — including the one below, which
+# the runner loads at extra-vars precedence on every unattended run.
+expect_layer_failure prefix "defines reserved key"
+# A malformed capabilities.yml must fail ATTRIBUTED to the layer. A null or
+# mis-shaped `capabilities:` key used to abort pre_tasks — i.e. bootstrap,
+# drift-check, drift-apply and both LaunchAgents — on a bare Jinja error.
+expect_layer_failure capabilities "malformed capabilities.yml"
 
 # ansible-lint was documented in CONTRIBUTING as a pre-PR step but lived outside
 # this script, so it drifted to 23 standing failures and stopped being read.

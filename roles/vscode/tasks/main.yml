@@ -60,5 +60,5 @@
   vars:
     computer_setup_lookup_key: vscode/settings.json
     computer_setup_deploy_dest: "{{ vscode_user_config_dir }}/settings.json"
-    computer_setup_lookup_fallback_dir: "{{ role_path }}/files"
+    computer_setup_lookup_fallback_dir: "{{ playbook_dir }}/roles/vscode/files"
   when: vscode_stat.stat.exists

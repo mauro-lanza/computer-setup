@@ -16,7 +16,12 @@
 {% endif %}
 [core]
 	editor = {{ git_editor_resolved }}
+{# Only claim core.excludesFile when this role actually manages that file. #}
+{# Otherwise git is pointed at a path the role deliberately left alone,    #}
+{# overriding whatever the user already had configured.                   #}
+{% if git_global_gitignore_entries | default([], true) | length > 0 %}
 	excludesFile = {{ home_dir }}/.gitignore_global
+{% endif %}
 {% for section, entries in git_config_sections.items() %}
 [{{ section }}]
 {% for key, value in entries.items() %}

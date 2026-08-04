@@ -56,7 +56,15 @@
     # already present, via adopt_if_present). Selection covers a same-run install
     # (homebrew runs first); the role still stats the binary before executing it.
     - { role: vscode, tags: [vscode], when: "'vscode' in (computer_setup_active_capabilities | default([]))" }
-    - { role: layer_configs, tags: [layer_configs, zed, opencode, dbt] }
+    # Deploys the `config:` bundles of every ACTIVE capability, whatever they
+    # are. Tagged only with its own name: `zed`/`opencode`/`dbt` used to be
+    # listed here as if they selected individual tools, but tags apply to tasks
+    # and this role is a single loop over all bundles — `--tags dbt` deployed
+    # zed's and opencode's configs too. It also hardcoded three layer-content
+    # tool names into the engine, which is precisely what this role exists to
+    # avoid. To deploy one tool's config, deselect the others or run the whole
+    # role; the loop is idempotent.
+    - { role: layer_configs, tags: [layer_configs] }
     - { role: macos, tags: [macos] }
     - { role: runtimes, tags: [runtimes] }
     # Opt-in repository catalog — clones your projects from ~/.repositories.yml.

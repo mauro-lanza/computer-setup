@@ -9,7 +9,7 @@
   loop: "{{ macos_defaults }}"
   loop_control:
     label: "{{ item.domain }} {{ item.key }}"
-  notify: "{{ item.notify | default([]) }}"
+  notify: "{{ item.notify | default([], true) }}"
 
 - name: Check if Rectangle is installed
   ansible.builtin.stat:
