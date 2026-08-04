@@ -347,6 +347,43 @@ load_capabilities() {
     fi
 }
 
+# Merged questions across all layers as TSV rows:
+#   id type prompt default options
+# `options` is a comma-separated list of option values (empty for non-select).
+# Same merge rule as capabilities: descending priority, union by id, first wins.
+#
+# A question is a single-select or free-text decision the MACHINE makes. The
+# capability menu can only express independent yes/no, so anything "pick one"
+# (which editor) had no representation at all before this.
+load_questions() {
+    MERGED_QUESTIONS_FILE="$(mktemp)"
+
+    [[ ! -f "$LAYERS_FILE" ]] && return
+
+    local seen=" " order name qf
+    order="$(yq -r '.layers | sort_by(.priority) | reverse | .[].name' "$LAYERS_FILE" 2>/dev/null || true)"
+    for name in $order; do
+        qf="$LAYER_CACHE/$name/questions.yml"
+        [[ -f "$qf" ]] || continue
+        if ! yq '.' "$qf" >/dev/null 2>&1; then
+            warn "Layer '$name' has an invalid questions.yml — skipping it."
+            continue
+        fi
+        while IFS=$'\t' read -r id type prompt default options; do
+            [[ -z "$id" ]] && continue
+            [[ "$seen" == *" $id "* ]] && continue
+            seen="${seen}${id} "
+            printf '%s\t%s\t%s\t%s\t%s\n' "$id" "$type" "$prompt" "$default" "$options" \
+                >> "$MERGED_QUESTIONS_FILE"
+        done < <(yq -r '.questions[]? | [.id, .type, (.desc // .prompt // .id), (.default // ""),
+                        ([.options[]?.value] | join(","))] | @tsv' "$qf")
+    done
+
+    local count
+    count="$(wc -l < "$MERGED_QUESTIONS_FILE" | tr -d ' ')"
+    [[ "$count" -gt 0 ]] && ok "Questions: ${count} decision(s) across layers"
+}
+
 # ─── Prior selections (re-run friendliness) ──────────────────────────────────
 PRIOR_SELECTED_IDS=" "
 PRIOR_NAME=""
@@ -369,6 +406,18 @@ load_prior_prefs() {
     while IFS= read -r cap; do
         [[ -n "$cap" ]] && PRIOR_SELECTED_IDS="${PRIOR_SELECTED_IDS}${cap} "
     done < <(yq -r '.selected_capabilities[]?' "$PREFS_FILE" 2>/dev/null || true)
+}
+
+# Prior answer for one question id, empty when unanswered. Read on demand rather
+# than slurped into an array: bash 3.2 has no associative arrays.
+#
+# The id goes through the environment (`strenv`), not string interpolation: this
+# is mikefarah/yq, which has no jq-style `--arg`, and interpolating an id
+# straight into the expression would break on any quoting in it.
+prior_answer() {
+    [[ -f "$PREFS_FILE" ]] || return 0
+    CS_ANSWER_KEY="$1" yq -r '.answers[strenv(CS_ANSWER_KEY)] // ""' \
+        "$PREFS_FILE" 2>/dev/null || true
 }
 
 # ─── Git identity ────────────────────────────────────────────────────────────
@@ -446,6 +495,98 @@ gather_optional_tools() {
     return 0
 }
 
+# ─── Questions (single-select / free-text decisions) ─────────────────────────
+# Answers are written to the prefs file as `answers:`. The engine turns them into
+# play-scope vars via each question's `set_var:` / each option's `set:` payload.
+ANSWER_IDS=()
+ANSWER_VALUES=()
+
+gather_answers() {
+    ANSWER_IDS=()
+    ANSWER_VALUES=()
+    [[ ! -s "${MERGED_QUESTIONS_FILE:-}" ]] && return 0
+
+    echo
+    info "Setup decisions — press Enter to accept the shown default:"
+    echo
+
+    local id type prompt default options prior reply
+    while IFS=$'\t' read -r -u 3 id type prompt default options; do
+        prior="$(prior_answer "$id")"
+        [[ -n "$prior" ]] && default="$prior"
+
+        if [[ "$type" == "select" ]]; then
+            reply="$(ask_select "$prompt" "$default" "$options")"
+        else
+            reply="$(ask_text "$prompt" "$default")"
+        fi
+
+        ANSWER_IDS+=("$id")
+        ANSWER_VALUES+=("$reply")
+    done 3< "$MERGED_QUESTIONS_FILE"
+
+    # A `while` returns its body's last status, which under `set -e` would abort
+    # main() after the last prompt but before write_prefs.
+    return 0
+}
+
+# Numbered single-select. Prints the chosen value on stdout, so every prompt it
+# writes must go to stderr or it would be captured as part of the answer.
+ask_select() {
+    local prompt="$1" default="$2" options="$3"
+    require_tty
+    local -a opts=()
+    local IFS=','
+    for o in $options; do opts+=("$o"); done
+    unset IFS
+
+    if [[ ${#opts[@]} -eq 0 ]]; then
+        printf '%s' "$default"
+        return 0
+    fi
+
+    local i n=1 marker
+    echo "  ${prompt}:" >&2
+    for i in "${opts[@]}"; do
+        marker=" "
+        [[ "$i" == "$default" ]] && marker="*"
+        echo "    ${marker} ${n}) ${i}" >&2
+        n=$((n + 1))
+    done
+
+    local reply idx
+    while true; do
+        read -rp "    Choice [${default}]: " reply
+        if [[ -z "$reply" ]]; then
+            printf '%s' "$default"
+            return 0
+        fi
+        # Accept either the number or the value itself.
+        if [[ "$reply" =~ ^[0-9]+$ ]]; then
+            idx=$((reply - 1))
+            if [[ $idx -ge 0 && $idx -lt ${#opts[@]} ]]; then
+                printf '%s' "${opts[$idx]}"
+                return 0
+            fi
+        else
+            for i in "${opts[@]}"; do
+                if [[ "$i" == "$reply" ]]; then
+                    printf '%s' "$i"
+                    return 0
+                fi
+            done
+        fi
+        echo "    Not one of the offered options." >&2
+    done
+}
+
+ask_text() {
+    local prompt="$1" default="$2" reply
+    require_tty
+    read -rp "  ${prompt} [${default}]: " reply
+    printf '%s' "${reply:-$default}"
+}
+
 # ─── Write preferences file ──────────────────────────────────────────────────
 yaml_list() {
     local key="$1"; shift
@@ -468,6 +609,18 @@ write_prefs() {
         echo
         echo "git_user_name: $(yaml_quote "$GIT_NAME")"
         echo "git_user_email: $(yaml_quote "$GIT_EMAIL")"
+        echo
+        echo "# Answers to the layers' questions. The engine turns each into play-scope"
+        echo "# vars via the question's set_var / the chosen option's set payload."
+        echo "answers:"
+        if [[ ${#ANSWER_IDS[@]} -eq 0 ]]; then
+            echo "  {}"
+        else
+            local _i
+            for _i in $(seq 0 $((${#ANSWER_IDS[@]} - 1))); do
+                echo "  ${ANSWER_IDS[$_i]}: $(yaml_quote "${ANSWER_VALUES[$_i]}")"
+            done
+        fi
         echo
         echo "# Selection tokens. Packages, config, and gating are derived from the"
         echo "# merged capability registry (the layers' capabilities) at apply time."
@@ -557,12 +710,14 @@ main() {
 
     # ── Phase 2 ──────────────────────────────────────────────────────────────
     load_capabilities
+    load_questions
     load_prior_prefs
     if $HAS_PRIOR_PREFS; then
         ok "Found existing prefs at ${PREFS_FILE} — using prior answers as defaults"
         echo
     fi
     gather_git_identity
+    gather_answers
     gather_optional_tools
     write_prefs
 

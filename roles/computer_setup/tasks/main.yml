@@ -32,6 +32,7 @@
     computer_setup_merged_vars: {}
     computer_setup_active_layers: []
     computer_setup_capability_registry: {}
+    computer_setup_question_registry: {}
     # Whole namespaces a layer's vars.yml may never touch. Reserved by PREFIX,
     # not enumeration, so a newly added engine var is protected automatically.
     #
@@ -48,6 +49,7 @@
     #      would be arbitrary remote-code control if a layer repo were compromised.
     computer_setup_reserved_layer_keys:
       - selected_capabilities
+      - answers
       - git_user_name
       - git_user_email
       - home_dir
@@ -123,6 +125,94 @@
   loop_control:
     loop_var: _layer
     label: "{{ _layer.name }}"
+
+# ─── Questions and answers ────────────────────────────────────────────────────
+# Questions are layer-declared; answers are machine-local (prefs file). This runs
+# AFTER the layer var merge so an answer outranks a layer var — the machine is
+# more specific than the layer that proposed the question.
+- name: Merge each layer's questions.yml into the question registry
+  ansible.builtin.include_tasks: merge_layer_questions.yml
+  loop: "{{ computer_setup_active_layers }}"
+  loop_control:
+    loop_var: _layer
+    label: "{{ _layer.name }}"
+
+- name: Resolve the answer to every registered question
+  # An unanswered question falls back to its declared default, so a prefs file
+  # written before the question existed still yields a complete answer set. An
+  # answer to a question no layer declares any more is dropped rather than
+  # carried as a phantom var.
+  ansible.builtin.set_fact:
+    computer_setup_answers: "{{ _defaults | combine(_given_known) }}"
+  vars:
+    _reg: "{{ computer_setup_question_registry }}"
+    _defaults: >-
+      {{ dict(_reg.keys() | zip(_reg.values() | map(attribute='default', default=''))) }}
+    _given_known: >-
+      {{ (answers | default({}, true)) | dict2items
+         | selectattr('key', 'in', _reg.keys() | list) | list | items2dict }}
+
+- name: Assert every select answer is one of its declared options
+  ansible.builtin.assert:
+    that:
+      - computer_setup_answers[item.key] in (item.value.options | map(attribute='value') | list)
+    fail_msg: >-
+      Answer '{{ computer_setup_answers[item.key] }}' for question
+      '{{ item.key }}' is not one of its options
+      ({{ item.value.options | map(attribute='value') | join(', ') }}).
+      Fix `answers.{{ item.key }}` in {{ computer_setup_prefs_file }}, or re-run
+      bootstrap.sh.
+    quiet: true
+  loop: >-
+    {{ computer_setup_question_registry | dict2items
+       | selectattr('value.type', 'eq', 'select') | list }}
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Accumulate the answers' variable payloads
+  # Two forms, both optional:
+  #   question-level `set_var: <name>`  -> <name> = the raw answer
+  #   option-level   `set: {k: v}`      -> literal vars, when that option is chosen
+  ansible.builtin.set_fact:
+    computer_setup_answer_vars: >-
+      {{ (computer_setup_answer_vars | default({}))
+         | combine(_from_question) | combine(_from_option) }}
+  loop: "{{ computer_setup_question_registry | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  vars:
+    _a: "{{ computer_setup_answers[item.key] }}"
+    _from_question: >-
+      {{ {item.value.set_var: _a} if item.value.set_var is defined else {} }}
+    _chosen: >-
+      {{ (item.value.options | default([]) | selectattr('value', 'eq', _a) | list) }}
+    _from_option: >-
+      {{ (_chosen | first).set | default({}) if _chosen | length > 0 else {} }}
+
+- name: Expose the answers' variable payloads as play scope
+  # These land exactly as a layer var does, and cleared the same reserved-key
+  # guard at merge time. They run after the layer var merge, so an answer
+  # outranks a layer's proposal.
+  ansible.builtin.set_fact:
+    "{{ item.key }}": "{{ item.value }}"
+  loop: "{{ computer_setup_answer_vars | default({}) | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Fold capability implications from the answers into the selection
+  # A `select` option may declare `implies: [id, ...]`, the generic dependency
+  # edge: choosing an editor selects the capability that installs it.
+  ansible.builtin.set_fact:
+    selected_capabilities: "{{ (_selected + _implied) | unique | list }}"
+  vars:
+    _selected: "{{ selected_capabilities | default([], true) }}"
+    _implied: >-
+      {{ computer_setup_question_registry | dict2items
+         | map(attribute='value') | selectattr('options', 'defined')
+         | map(attribute='options') | flatten
+         | selectattr('value', 'in', computer_setup_answers.values() | list)
+         | selectattr('implies', 'defined') | map(attribute='implies')
+         | flatten | unique | list }}
 
 - name: Probe for adoptable capabilities already present
   # A capability declaring `adopt_if_present: <path>` becomes active when that

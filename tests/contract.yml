@@ -132,6 +132,23 @@
           - >-
             (contract_promoted.content | b64decode | trim)
             == 'rendered from base: override'
+          # ── Questions and answers ──────────────────────────────────────
+          # The higher-priority layer's entry for a shared id wins outright.
+          - computer_setup_question_registry['editor'].desc == 'Default editor (override)'
+          # A stored answer is used...
+          - computer_setup_answers['editor'] == 'picked'
+          # ...an unanswered question falls back to its declared default...
+          - computer_setup_answers['unanswered'] == 'fallback-value'
+          # ...and an answer to a question no layer declares is DROPPED, rather
+          # than carried into play scope as a phantom var.
+          - "'phantom' not in computer_setup_answers"
+          # The chosen option's `set:` payload reached play scope.
+          - contract_editor_cmd == 'from-override-option'
+          # A question-level `set_var:` assigns the raw answer.
+          - contract_unanswered_var == 'fallback-value'
+          # `implies:` is the generic dependency edge replacing requires_vscode.
+          - "'implied-cap' in selected_capabilities"
+          - "'implied-cap' in computer_setup_active_capabilities"
           # An unprovided key deploys nothing and does not create the parent dir.
           # This runs AFTER several successful deploys, so it also asserts the
           # primitive resets its resolution state between invocations rather than

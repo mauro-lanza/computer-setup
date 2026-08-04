@@ -104,6 +104,11 @@ expect_layer_failure prefix "defines reserved key"
 # pre_tasks, which every entry point runs.
 expect_layer_failure capabilities "malformed capabilities.yml"
 
+# A question's `set:` payload lands in play scope exactly as a layer var does,
+# so it is an escalation path AROUND the reserved-key guard unless it clears the
+# same one. Assert a layer cannot reach repo_url through a question.
+expect_layer_failure question "question setting reserved key"
+
 # A gate, not an advisory: .ansible-lint waives the two rules that contradict
 # this architecture, so any finding is real. Missing ansible-lint is a FAILURE —
 # a fresh machine is where the tool is absent and where "passed" must mean it.

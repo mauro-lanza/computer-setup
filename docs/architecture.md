@@ -63,6 +63,58 @@ Always-on **baseline** content (`homebrew_baseline_*`, `macos_defaults`,
 `git_config_sections`, …) is plain flat layer vars, separate from opt-in
 capabilities.
 
+## The question model
+
+A capability answers "do I want this tool?" — independently, yes or no. Some
+decisions are not that shape: which editor is *the* editor, where repositories
+live. Those have one answer, and before questions existed they had no
+representation at all, so they were hardcoded in engine code instead (VS Code
+was written into `core.editor` if its binary existed, with `vim` as the only
+alternative and no way to say otherwise).
+
+A layer declares questions in `questions.yml`; they merge union-by-id in
+descending priority exactly like capabilities. The **answer** is machine-local
+and lives under `answers:` in `~/.mac-prefs.yml`.
+
+| Field | Meaning |
+|---|---|
+| `id` | Stable token; keys the stored answer. Never rename. |
+| `type` | `select` \| `bool` \| `text` \| `path` |
+| `default` | Used when unanswered — a fresh machine, or a question added after this machine's prefs were written |
+| `set_var` | Optional: assign the raw answer to this variable |
+| `options[].set` | Optional: literal vars applied when that option is chosen |
+| `options[].implies` | Optional: capability ids added to the selection |
+
+`implies` is the generic dependency edge: choosing an editor selects the
+capability that installs it. It replaces the bespoke `requires_vscode` flag.
+
+Resolution order, all in `pre_tasks`:
+
+1. answers = declared defaults, overridden by stored answers
+2. an answer to a question no layer declares any more is **dropped**, not
+   carried into play scope as a phantom var
+3. every `select` answer is validated against its options, and a stale one
+   fails loudly rather than silently falling back
+4. `set_var` / `set` payloads become play-scope facts
+5. `implies` folds into `selected_capabilities`
+
+This runs **after** the layer var merge, so an answer outranks a layer var: the
+machine is more specific than the layer that proposed the question.
+
+### Questions are an escalation path, and are guarded as one
+
+A `set:` payload lands in play scope exactly as a layer var does. Questions are
+**layer** content — only the answer is machine-local. So without a guard, a
+layer that cannot write `repo_url` in its `vars.yml` could simply declare a
+question whose only option sets it, and redirect the unattended morning
+`ansible-pull` at its own playbook.
+
+`merge_layer_questions.yml` therefore applies the **same** reserved-key and
+reserved-prefix guard to every `set:` payload that `merge_layer_vars.yml`
+applies to `vars.yml`. A question cannot reach further than the layer's own vars
+can. `tests/fixtures/negative/question/` asserts this rejects, for the right
+reason.
+
 ## Runtime flow
 
 1. `bootstrap.sh` installs prerequisites and authenticates GitHub over SSH.
@@ -83,6 +135,7 @@ capabilities.
 | `tasks/main.yml` | Platform check, prefs loading, layer var merge, capability registry + adoption probe, and the derived interface (packages, config deploys, reminders). |
 | `tasks/merge_layer_vars.yml` | Merge one layer's `vars.yml` into play scope: enforces `schema_version`, rejects reserved keys, appends lists, overrides scalars. |
 | `tasks/merge_layer_capabilities.yml` | Merge one layer's `capabilities.yml` into the capability registry. |
+| `tasks/merge_layer_questions.yml` | Merge one layer's `questions.yml` into the question registry, rejecting any `set:` payload that names a reserved key. |
 | `tasks/deploy_layer_file.yml` | Resolve **and** deploy one layer file/template: creates the parent dir, copies or templates, no-ops when no layer provides the key. The primitive behind every "a layer supplies this file" case — capability `config:` bundles, the prompt, VS Code settings, `~/.zshrc`. |
 
 ### File vs template resolution
@@ -126,7 +179,7 @@ It is deliberately not re-listed here, because an enumeration in prose is a copy
 that goes stale. The categories are:
 
 1. **Machine-local prefs** — belong in `~/.mac-prefs.yml`
-   (`selected_capabilities`, git identity).
+   (`selected_capabilities`, `answers`, git identity).
 2. **Engine-owned play vars** — overriding these breaks the orchestrator
    (`home_dir`, `repo_url`, `homebrew_prefix`, …), plus the entire
    `computer_setup_*` namespace.

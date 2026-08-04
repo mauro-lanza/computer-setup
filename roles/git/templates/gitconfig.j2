@@ -14,13 +14,20 @@
 [init]
 	defaultBranch = {{ git_default_branch }}
 {% endif %}
+{# An unset editor means "respect $EDITOR/$VISUAL" — writing core.editor       #}
+{# unconditionally would silently override it. Only claim core.excludesFile   #}
+{# when this role actually manages that file, otherwise git is pointed at a   #}
+{# path the role deliberately left alone. With neither, [core] is omitted     #}
+{# entirely rather than emitted as an empty section.                          #}
+{% set _has_excludes = (git_global_gitignore_entries | default([], true) | length > 0) %}
+{% if (git_editor_resolved | length > 0) or _has_excludes %}
 [core]
+{% if git_editor_resolved | length > 0 %}
 	editor = {{ git_editor_resolved }}
-{# Only claim core.excludesFile when this role actually manages that file. #}
-{# Otherwise git is pointed at a path the role deliberately left alone,    #}
-{# overriding whatever the user already had configured.                   #}
-{% if git_global_gitignore_entries | default([], true) | length > 0 %}
+{% endif %}
+{% if _has_excludes %}
 	excludesFile = {{ home_dir }}/.gitignore_global
+{% endif %}
 {% endif %}
 {% for section, entries in git_config_sections.items() %}
 [{{ section }}]

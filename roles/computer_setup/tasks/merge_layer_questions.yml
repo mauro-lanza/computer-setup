@@ -1,0 +1,94 @@
+---
+# Merge one layer's questions.yml into the question registry, a dict keyed by
+# question id. Loop var: `_layer`. Layers run in ascending priority, so a
+# higher-priority layer's entry for the same id wins outright — same rule as
+# capabilities.
+#
+# A question is a decision the MACHINE makes, not the layer: which editor, where
+# repositories live. The layer declares the question and its options; the answer
+# lives in the prefs file. Capabilities can only express "yes/no, independently",
+# so anything single-select had no representation before this.
+
+- name: "[{{ _layer.name }}] Stat questions.yml"
+  ansible.builtin.stat:
+    path: "{{ computer_setup_layer_cache }}/{{ _layer.name }}/questions.yml"
+  register: _layer_questions_stat
+
+- name: "[{{ _layer.name }}] Load questions.yml"
+  ansible.builtin.include_vars:
+    file: "{{ computer_setup_layer_cache }}/{{ _layer.name }}/questions.yml"
+    name: _incoming_questions
+  when: _layer_questions_stat.stat.exists
+
+# A bare `questions:` key parses to None, not a missing key, so `default([])`
+# does not fire and the play aborts on an unattributed Jinja error — inside
+# pre_tasks, which every entry point runs. Fail here naming the layer instead.
+- name: "[{{ _layer.name }}] Assert questions.yml declares a list"
+  ansible.builtin.assert:
+    that:
+      - _incoming_questions.questions is not string
+      - _incoming_questions.questions is not mapping
+      - (_incoming_questions.questions | default([], true)) is sequence
+    fail_msg: >-
+      Layer '{{ _layer.name }}' has a malformed questions.yml: the top-level
+      `questions` key must be a list of question entries (or the file must omit
+      the key entirely). Got:
+      {{ _incoming_questions.questions | default(None, true) | type_debug }}.
+    quiet: true
+  when: _layer_questions_stat.stat.exists
+
+- name: "[{{ _layer.name }}] Assert every question declares id and type"
+  ansible.builtin.assert:
+    that:
+      - (_qs | rejectattr('id', 'defined') | list | length) == 0
+      - (_qs | rejectattr('type', 'defined') | list | length) == 0
+      - (_qs | rejectattr('type', 'in', _kinds) | list | length) == 0
+      - (_selects | rejectattr('options', 'defined') | list | length) == 0
+    fail_msg: >-
+      Layer '{{ _layer.name }}' has a malformed questions.yml: every entry needs
+      an `id` and a `type` (one of {{ _kinds | join(', ') }}), and every `select`
+      needs an `options` list.
+    quiet: true
+  vars:
+    _qs: "{{ _incoming_questions.questions | default([], true) }}"
+    _kinds: [bool, text, path, select]
+    _selects: "{{ _qs | selectattr('type', 'defined') | selectattr('type', 'eq', 'select') | list }}"
+  when: _layer_questions_stat.stat.exists
+
+# A question's `set:` payload lands in play scope exactly as a layer var does, so
+# it must clear the SAME reserved-key guard. Without this a layer that cannot
+# write `repo_url` in vars.yml could simply declare a question whose only option
+# sets it, and redirect the unattended morning ansible-pull. Questions are layer
+# content; only the ANSWER is machine-local.
+- name: "[{{ _layer.name }}] Assert question payloads set no reserved keys"
+  ansible.builtin.assert:
+    that:
+      - (_keys | intersect(computer_setup_reserved_layer_keys | default([])) | length) == 0
+      - (_keys | select('match', _reserved_prefix_re) | list | length) == 0
+    fail_msg: >-
+      Layer '{{ _layer.name }}' declares a question setting reserved key(s):
+      {{ ((_keys | intersect(computer_setup_reserved_layer_keys | default([])))
+          + (_keys | select('match', _reserved_prefix_re) | list)) | unique | join(', ') }}.
+      A question's `set:` payload is layer content and cannot reach further than
+      the layer's own vars.yml can.
+    quiet: true
+  vars:
+    _qs: "{{ _incoming_questions.questions | default([], true) }}"
+    # Every key any option (or the question itself) could set.
+    _keys: >-
+      {{ ((_qs | selectattr('set', 'defined') | map(attribute='set') | map('list') | flatten)
+          + (_qs | selectattr('options', 'defined') | map(attribute='options') | flatten
+             | selectattr('set', 'defined') | map(attribute='set') | map('list') | flatten))
+         | unique | list }}
+    _reserved_prefix_re: "^({{ computer_setup_reserved_layer_prefixes | default(['computer_setup_']) | join('|') }})"
+  when: _layer_questions_stat.stat.exists
+
+- name: "[{{ _layer.name }}] Merge question entries into the registry"
+  ansible.builtin.set_fact:
+    computer_setup_question_registry: >-
+      {{ computer_setup_question_registry
+         | combine(dict((_qs | map(attribute='id')) | zip(_qs))) }}
+  vars:
+    # `default([], true)` (not `default([])`) so an explicit null is replaced too.
+    _qs: "{{ _incoming_questions.questions | default([], true) }}"
+  when: _layer_questions_stat.stat.exists

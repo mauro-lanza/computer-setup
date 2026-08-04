@@ -2,6 +2,13 @@
 git_user_name: Test User
 git_user_email: test@example.com
 
+# Answers to the layers' questions. `editor` is answered; `unanswered` is not
+# (it must fall back to its declared default); `phantom` refers to a question no
+# layer declares (it must be dropped, not carried into play scope).
+answers:
+  editor: picked
+  phantom: should-be-dropped
+
 # Single selection token. Optional packages and capability flags are DERIVED
 # from these ids against the merged capability registry (the layers. capabilities).
 selected_capabilities:

@@ -198,6 +198,101 @@ assert_eq "layers merge highest-priority-first, deduped by id" \
 assert_eq "  the higher-priority layer's definition wins" \
     "nvm-from-override" "$(awk -F'\t' '$1=="nvm"{print $4}' "$WORK/merged.tsv")"
 
+# ── 11. Questions: the single-select prompt path ─────────────────────────────
+# Same class of bug as the capability loop, and the same shape of test. Two
+# extra hazards here: ask_select PRINTS its result on stdout, so any prompt text
+# that leaks to stdout is captured as part of the answer; and the question list
+# must again come from FD 3, not stdin.
+echo "==> bootstrap question prompts"
+
+make_questions() {
+    printf 'editor\tselect\tDefault editor\tvscode\tvscode,zed,none\n'
+    printf 'scratch\ttext\tScratch dir\t/tmp/scratch\t\n'
+}
+make_questions > "$WORK/questions.tsv"
+
+# Drive gather_answers with a scripted answer file. Prints "<rc>|id=value;..."
+run_questions() {
+    local answers="$1"
+    (
+        INTERACTIVE=1
+        MERGED_QUESTIONS_FILE="$WORK/questions.tsv"
+        PREFS_FILE="$WORK/no-such-prefs.yml"
+        ANSWER_IDS=(); ANSWER_VALUES=()
+        gather_answers < "$answers" >/dev/null 2>&1
+        local rc=$? out="" i
+        for i in $(seq 0 $((${#ANSWER_IDS[@]} - 1))); do
+            out="${out}${ANSWER_IDS[$i]}=${ANSWER_VALUES[$i]};"
+        done
+        printf '%s|%s\n' "$rc" "$out"
+    )
+}
+
+# Choosing by number, then a typed text answer.
+printf '2\n/tmp/mine\n' > "$WORK/q-number"
+assert_eq "select by number returns the option VALUE, not the number" \
+    "0|editor=zed;scratch=/tmp/mine;" "$(run_questions "$WORK/q-number")"
+
+# Choosing by typing the value itself.
+printf 'none\n\n' > "$WORK/q-value"
+assert_eq "select accepts the option value typed literally" \
+    "0|editor=none;scratch=/tmp/scratch;" "$(run_questions "$WORK/q-value")"
+
+# Bare Enter must take the declared default, not an empty answer. An empty
+# answer would fail the engine's select validation on the very next run.
+printf '\n\n' > "$WORK/q-enter"
+assert_eq "Enter takes the declared default for both types" \
+    "0|editor=vscode;scratch=/tmp/scratch;" "$(run_questions "$WORK/q-enter")"
+
+# An out-of-range choice must re-prompt rather than be accepted or crash.
+printf '99\nzed\n/tmp/x\n' > "$WORK/q-bad"
+assert_eq "an invalid choice re-prompts instead of being accepted" \
+    "0|editor=zed;scratch=/tmp/x;" "$(run_questions "$WORK/q-bad")"
+
+# Answers must survive write_prefs and come BACK as the defaults on a re-run.
+# A one-way write would silently reset every decision on the next bootstrap.
+(
+    PREFS_FILE="$WORK/prefs-answers.yml"
+    GIT_NAME="Test User"; GIT_EMAIL="test@example.com"
+    SELECTED_CAPABILITIES=(alpha)
+    ANSWER_IDS=(editor scratch); ANSWER_VALUES=(zed "/tmp/mine")
+    write_prefs >/dev/null 2>&1
+)
+assert_eq "prefs file records the answers" "zed" \
+    "$(yq -r '.answers.editor' "$WORK/prefs-answers.yml" 2>/dev/null)"
+assert_eq "  answers survive a yq round-trip as valid YAML" "/tmp/mine" \
+    "$(yq -r '.answers.scratch' "$WORK/prefs-answers.yml" 2>/dev/null)"
+assert_eq "  a stored answer is read back as the next run's default" "zed" \
+    "$(PREFS_FILE="$WORK/prefs-answers.yml" prior_answer editor)"
+
+# With prior answers present, bare Enter must keep them rather than revert to
+# the layer's declared default.
+printf '\n\n' > "$WORK/q-enter2"
+result="$(
+    INTERACTIVE=1
+    MERGED_QUESTIONS_FILE="$WORK/questions.tsv"
+    PREFS_FILE="$WORK/prefs-answers.yml"
+    ANSWER_IDS=(); ANSWER_VALUES=()
+    gather_answers < "$WORK/q-enter2" >/dev/null 2>&1
+    printf '%s=%s' "${ANSWER_IDS[0]}" "${ANSWER_VALUES[0]}"
+)"
+assert_eq "Enter keeps the prior answer instead of the declared default" \
+    "editor=zed" "$result"
+
+# ── 12. load_questions merges layers by descending priority, dedup by id ─────
+(
+    LAYER_CACHE="$REPO_ROOT/tests/fixtures/layers_cache"
+    LAYERS_FILE="$REPO_ROOT/tests/fixtures/layers.yml"
+    load_questions >/dev/null 2>&1
+    cp "$MERGED_QUESTIONS_FILE" "$WORK/merged-q.tsv"
+)
+assert_eq "questions merge deduped by id" \
+    "editor unanswered" \
+    "$(cut -f1 "$WORK/merged-q.tsv" | tr '\n' ' ' | sed 's/ $//')"
+assert_eq "  the higher-priority layer's question wins" \
+    "Default editor (override)" \
+    "$(awk -F'\t' '$1=="editor"{print $3}' "$WORK/merged-q.tsv")"
+
 echo
 if [[ "$FAILURES" -gt 0 ]]; then
     echo "bootstrap prompt tests: ${FAILURES} failure(s)" >&2

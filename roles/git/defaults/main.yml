@@ -1,7 +1,9 @@
 ---
 git_user_name: ""
 git_user_email: ""
-# Editor: defaults to vim; overridden to "code --wait" if VS Code is installed.
+# Editor command written to core.editor. Normally supplied by the `editor`
+# question's chosen option. Empty = do not write core.editor at all, so git
+# falls back to $VISUAL/$EDITOR (and then to its own default).
 git_editor: ""
 
 # Everything below is layer-supplied. Empty defaults keep the orchestrator's own

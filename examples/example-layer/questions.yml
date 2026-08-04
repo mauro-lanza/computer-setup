@@ -1,0 +1,58 @@
+---
+# Questions this layer offers. Optional — a layer with no questions.yml simply
+# contributes none. Merged union-by-id in descending priority, exactly like
+# capabilities.yml.
+#
+# WHEN TO USE A QUESTION RATHER THAN A CAPABILITY
+#
+#   capability -> "do I want this tool?"      independent, yes/no
+#   question   -> "which one?" / "where?"     one answer
+#
+# If the decision is "install X or not", it is a capability. If picking one
+# answer excludes the others — which editor, which window manager, where
+# repositories live — it is a question. Before questions existed those decisions
+# had no representation, so they ended up hardcoded in the engine.
+#
+# Schema per item:
+#   id:       stable token (primary key; never rename — it keys the stored answer)
+#   type:     select | bool | text | path
+#   desc:     label shown in the bootstrap prompt
+#   default:  answer used when unanswered (fresh machine, or a question added
+#             after this machine's prefs file was written)
+#   set_var:  (optional) assign the raw answer to this variable
+#   options:  (select only) list of:
+#               value:   the stored answer
+#               desc:    label
+#               set:     (optional) literal vars applied when this is chosen
+#               implies: (optional) capability ids added to the selection
+#
+# `implies` is the generic dependency edge — choosing an editor selects the
+# capability that installs it.
+#
+# GUARD: a `set:` payload obeys the same reserved-key rules as vars.yml. A
+# question is layer content; only the ANSWER is machine-local. Without that, a
+# layer could reach engine-owned vars through an option payload.
+
+questions:
+  - id: example-editor
+    type: select
+    desc: "Example: which editor should own $EDITOR"
+    default: keep
+    options:
+      - value: keep
+        desc: "Leave $EDITOR alone"
+        set:
+          example_editor_command: ""
+      - value: example-tool
+        desc: "Use the example tool"
+        # Choosing this also selects the capability that installs it.
+        implies: [example-tool]
+        set:
+          example_editor_command: "example --wait"
+
+  - id: example-scratch-dir
+    type: path
+    desc: "Example: where scratch files go"
+    default: "/tmp/example"
+    # The raw answer is assigned straight to this variable.
+    set_var: example_scratch_dir

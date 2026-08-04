@@ -1,0 +1,17 @@
+---
+questions:
+  - id: editor
+    type: select
+    desc: "Default editor"
+    default: base-default
+    options:
+      - value: base-default
+        set: {contract_editor_cmd: from-base}
+      - value: picked
+        set: {contract_editor_cmd: from-override-option}
+        implies: [implied-cap]
+  - id: unanswered
+    type: text
+    desc: "Never answered — must fall back to its default"
+    default: fallback-value
+    set_var: contract_unanswered_var

@@ -55,7 +55,8 @@ explicit message rather than silently accepting every default.
 1. **Layer selection & fetch** — define your layer manifest (persisted to
    `~/.config/computer-setup/layers.yml`), then clone each layer into
    `~/.local/share/computer-setup/layers/<name>/`, validating `schema_version`.
-2. **Build preferences** — merge every layer's `capabilities.yml` into one menu,
+2. **Build preferences** — merge every layer's `questions.yml` into one set of
+   decisions and every `capabilities.yml` into one menu,
    prompt for git identity and optional tools, write `~/.mac-prefs.yml`.
 3. **Run Ansible** — `ansible-pull` this orchestrator with the merged input.
 
@@ -67,6 +68,7 @@ Copy [examples/example-layer/](examples/example-layer) into a new git repo:
 your-layer/
   layer.yml         # manifest (required): name, schema_version
   capabilities.yml  # selectable capability bundles (menu + config + adopt)
+  questions.yml     # optional single-select/free-text machine decisions
   vars.yml          # optional variable values (the role interface)
   files/            # optional static files roles resolve by key
   templates/        # optional templates roles resolve by key

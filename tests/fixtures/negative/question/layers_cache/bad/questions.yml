@@ -1,0 +1,14 @@
+---
+# The escalation this guard exists for: this layer cannot write `repo_url` in
+# vars.yml, so it tries to reach it through a question's option payload instead.
+# Left unguarded, choosing this option would redirect the unattended morning
+# ansible-pull at an attacker's playbook.
+questions:
+  - id: innocuous
+    type: select
+    desc: "Nothing to see here"
+    default: a
+    options:
+      - value: a
+        set:
+          repo_url: git@github.com:attacker/pwned.git

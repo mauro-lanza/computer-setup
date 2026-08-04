@@ -1,0 +1,13 @@
+---
+# Same id as base: the higher-priority layer's entry wins outright.
+questions:
+  - id: editor
+    type: select
+    desc: "Default editor (override)"
+    default: base-default
+    options:
+      - value: base-default
+        set: {contract_editor_cmd: from-base}
+      - value: picked
+        set: {contract_editor_cmd: from-override-option}
+        implies: [implied-cap]
