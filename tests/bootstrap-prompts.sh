@@ -55,15 +55,15 @@ assert_eq() {
 }
 
 # A capability list in the same TSV shape load_capabilities produces:
-#   id \t desc \t type \t packages \t requires_vscode
+#   id \t desc \t type \t packages \t requires
 # `vscode` sits BEFORE `ext-pack` so the in-run "VS Code was just selected"
 # unlock is exercised, and `zzz-last` is deliberately final and not named
 # `vscode` — that is the exact shape that triggered bug 2.
 make_caps() {
-    printf 'alpha\tAlpha tool\tformula\talpha\tfalse\n'
-    printf 'vscode\tVisual Studio Code\tcask\tvisual-studio-code\tfalse\n'
-    printf 'ext-pack\tEditor extension pack\tvscode\tsome.extension\ttrue\n'
-    printf 'zzz-last\tLast capability\tformula\tzzz\tfalse\n'
+    printf 'alpha\tAlpha tool\tformula\talpha\t\n'
+    printf 'vscode\tVisual Studio Code\tcask\tvisual-studio-code\t\n'
+    printf 'ext-pack\tEditor extension pack\textension\tsome.extension\tvscode\n'
+    printf 'zzz-last\tLast capability\tformula\tzzz\t\n'
 }
 
 # Drive gather_optional_tools with a scripted answer file and echo the result.
@@ -76,6 +76,11 @@ run_prompts() {
         HAS_PRIOR_PREFS="$has_prior"
         INTERACTIVE=1
         MERGED_CAPABILITIES_FILE="$WORK/caps.tsv"
+        # `requires:` gating asks whether the required capability is already
+        # present, via its adopt_if_present path in the layer cache. Point that
+        # at a controlled dir: the real ~/.local/share cache would make the
+        # result depend on what the developer happens to have installed.
+        LAYER_CACHE="${LAYER_CACHE_OVERRIDE:-$WORK/empty-cache}"
         SELECTED_CAPABILITIES=()
         # Answers arrive on the function's stdin. The capability list must come
         # from somewhere else entirely (FD 3) — that separation IS the fix, so
@@ -120,19 +125,48 @@ assert_eq "Enter defaults to no when there are no prior prefs" "0|" "$result"
 result="$(run_prompts "$WORK/all-enter" " alpha zzz-last " true)"
 assert_eq "Enter keeps prior selections on re-run" "0|alpha zzz-last" "$result"
 
-# ── 6. requires_vscode gating ────────────────────────────────────────────────
-# Selecting `vscode` in-run must unlock the later requires_vscode entry.
+# ── 6. `requires:` gating ────────────────────────────────────────────────────
+# Selecting `vscode` in-run must unlock the later entry that requires it.
 # Answers: alpha=n, vscode=y, ext-pack=y, zzz-last=n
 printf 'n\ny\ny\nn\n' > "$WORK/vscode-yes"
-result="$(PATH=/usr/bin:/bin run_prompts "$WORK/vscode-yes")"
-assert_eq "selecting vscode in-run unlocks requires_vscode entries" \
+result="$(run_prompts "$WORK/vscode-yes")"
+assert_eq "selecting a capability in-run unlocks entries requiring it" \
     "0|vscode ext-pack" "$result"
 
-# Declining vscode with no `code` on PATH must SKIP the gated entry without
-# consuming an answer for it. Answers: alpha=y, vscode=n, zzz-last=y
+# Declining vscode, with nothing present to satisfy the requirement, must SKIP
+# the gated entry without consuming an answer for it. Answers: alpha=y,
+# vscode=n, zzz-last=y — only three, because ext-pack is never offered.
 printf 'y\nn\ny\n' > "$WORK/vscode-no"
-result="$(PATH=/usr/bin:/bin run_prompts "$WORK/vscode-no")"
-assert_eq "requires_vscode entries are skipped when VS Code is unavailable" \
+result="$(run_prompts "$WORK/vscode-no")"
+assert_eq "entries are skipped when their requirement is unmet" \
+    "0|alpha zzz-last" "$result"
+
+# ...but an ALREADY-INSTALLED requirement satisfies the gate without selecting
+# it, via the capability's own adopt_if_present path. This is what replaced the
+# hardcoded `command -v code` probe, so it needs its own coverage: a layer that
+# names a different editor must gate on that editor, not on VS Code.
+mkdir -p "$WORK/present-cache/lyr"
+touch "$WORK/present-marker"
+cat > "$WORK/present-cache/lyr/capabilities.yml" <<CAPS
+---
+capabilities:
+  - id: vscode
+    desc: "Already installed"
+    type: cask
+    packages: visual-studio-code
+    adopt_if_present: "$WORK/present-marker"
+CAPS
+printf 'y\nn\ny\nn\n' > "$WORK/vscode-present"
+result="$(LAYER_CACHE_OVERRIDE="$WORK/present-cache" run_prompts "$WORK/vscode-present")"
+assert_eq "an already-present requirement satisfies the gate" \
+    "0|alpha ext-pack" "$result"
+
+# The same probe must report ABSENT when the path does not exist, or every gate
+# would silently open.
+rm -f "$WORK/present-marker"
+printf 'y\nn\ny\n' > "$WORK/vscode-absent"
+result="$(LAYER_CACHE_OVERRIDE="$WORK/present-cache" run_prompts "$WORK/vscode-absent")"
+assert_eq "  and does not when the adopt path is missing" \
     "0|alpha zzz-last" "$result"
 
 # ── 7. An empty capability list is a no-op, not a crash ──────────────────────

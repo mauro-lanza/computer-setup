@@ -20,9 +20,10 @@ capabilities:
     type: feature
     config:
       - { src: profiles.yml.j2, dest: "/tmp/cs-contract/dbt-profiles.yml", kind: template }
-  # type: vscode — the third branch of the package split. Previously asserted
+  # type: extension — the third branch of the package split. Previously asserted
   # only as "== []", which would pass even if the branch returned nothing.
   - id: vscode-peacock
     desc: "VS Code: Peacock"
-    type: vscode
+    type: extension
+    manager: vscode
     packages: johnpapa.vscode-peacock

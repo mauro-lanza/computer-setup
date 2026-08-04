@@ -16,7 +16,6 @@
   gather_facts: true
   vars:
     home_dir: "{{ ansible_facts['env']['HOME'] }}"
-    vscode_code_binary: /Applications/Visual Studio Code.app/Contents/Resources/app/bin/code
     # Mirrors local.yml — layer `repositories:` entries template against it.
     repositories_base_dir: "{{ ansible_facts['env']['HOME'] }}/Projects"
     homebrew_prefix: /opt/homebrew

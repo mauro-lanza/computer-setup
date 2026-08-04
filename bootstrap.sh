@@ -321,7 +321,7 @@ clone_layers() {
 # ═════════════════════════════════════════════════════════════════════════════
 
 # Merged capabilities across all layers as TSV rows:
-#   id desc type packages requires_vscode
+#   id desc type packages requires
 # Layers are processed in DESCENDING priority so the highest-priority definition
 # of any given id wins; each id appears once (union, dedup by id). The `id` is
 # the capability token written to ~/.mac-prefs.yml as a selection.
@@ -342,12 +342,12 @@ load_capabilities() {
             warn "Layer '$name' has an invalid capabilities.yml — skipping it."
             continue
         fi
-        while IFS=$'\t' read -r id desc type pkgs req_vscode; do
+        while IFS=$'\t' read -r id desc type pkgs requires; do
             [[ -z "$id" ]] && continue
             [[ "$seen" == *" $id "* ]] && continue
             seen="${seen}${id} "
-            printf '%s\t%s\t%s\t%s\t%s\n' "$id" "$desc" "$type" "$pkgs" "$req_vscode" >> "$MERGED_CAPABILITIES_FILE"
-        done < <(yq -r '.capabilities[]? | [.id, .desc, .type, (.packages // ""), (.requires_vscode // false)] | @tsv' "$cat")
+            printf '%s\t%s\t%s\t%s\t%s\n' "$id" "$desc" "$type" "$pkgs" "$requires" >> "$MERGED_CAPABILITIES_FILE"
+        done < <(yq -r '.capabilities[]? | [.id, .desc, .type, (.packages // ""), (.requires // "")] | @tsv' "$cat")
     done
 
     local count
@@ -655,6 +655,20 @@ gather_git_identity() {
     echo
 }
 
+# Is a capability already present on this machine? Uses the capability's own
+# `adopt_if_present` path — layer data — so bootstrap names no tool. `home_dir`
+# is the only expansion the manifest needs; the engine templates the rest.
+cap_is_present() {
+    local id="$1" probe
+    probe="$(CS_CAP_ID="$id" yq -r \
+        '.capabilities[]? | select(.id == strenv(CS_CAP_ID)) | .adopt_if_present // ""' \
+        "$LAYER_CACHE"/*/capabilities.yml 2>/dev/null | grep -v '^$' | head -1)"
+    [[ -z "$probe" ]] && return 1
+    probe="${probe//\{\{ home_dir \}\}/$HOME}"
+    probe="${probe//\{\{home_dir\}\}/$HOME}"
+    [[ -e "$probe" ]]
+}
+
 # ─── Optional tool selection ─────────────────────────────────────────────────
 # Records selected capability *ids* only. Packages, config, and gating are all
 # derived by the engine from the merged capability registry at apply time.
@@ -675,19 +689,25 @@ gather_optional_tools() {
     fi
     echo
 
-    local vscode_available=false
-    if command -v code &>/dev/null; then
-        vscode_available=true
-    fi
+    # Capabilities satisfied so far this run: anything already selected above,
+    # plus anything adopted (already installed) — see cap_is_present. Replaces a
+    # hardcoded `command -v code` probe and the vscode-only `requires_vscode`.
+    local satisfied=" "
 
     # The list is read on FD 3, not stdin: `ask_yn` in the body reads stdin, and
     # a `done < file` redirect covers the body too — so every prompt would
     # consume the next capability line as its answer.
-    local id desc type pkgs requires_vscode default
-    while IFS=$'\t' read -r -u 3 id desc type pkgs requires_vscode; do
+    local id desc type pkgs requires default
+    while IFS=$'\t' read -r -u 3 id desc type pkgs requires; do
 
-        if [[ "$requires_vscode" == "true" && "$vscode_available" != true ]]; then
-            continue
+        # A capability may require another. It is offered only when that one is
+        # satisfied — selected earlier in this run, or already present. Order in
+        # the merged list therefore matters, exactly as it did before.
+        if [[ -n "$requires" && "$satisfied" != *" $requires "* ]]; then
+            if ! cap_is_present "$requires"; then
+                continue
+            fi
+            satisfied="${satisfied}${requires} "
         fi
 
         # With a preset chosen, ITS capability list is the default set — not the
@@ -701,18 +721,17 @@ gather_optional_tools() {
         fi
 
         if ! $REVIEW_ANSWERS; then
-            [[ "$default" == "y" ]] && SELECTED_CAPABILITIES+=("$id")
-            # Keep the in-run unlock working when review is skipped.
-            [[ "$default" == "y" && "$id" == "vscode" ]] && vscode_available=true
+            if [[ "$default" == "y" ]]; then
+                SELECTED_CAPABILITIES+=("$id")
+                satisfied="${satisfied}${id} "
+            fi
             continue
         fi
 
         if ask_yn "  Enable ${desc}?" "$default"; then
             SELECTED_CAPABILITIES+=("$id")
-            # So VS Code extensions offered later this run are prompted too.
-            if [[ "$id" == "vscode" ]]; then
-                vscode_available=true
-            fi
+            # So capabilities requiring this one are offered later in this run.
+            satisfied="${satisfied}${id} "
         fi
     done 3< "$MERGED_CAPABILITIES_FILE"
 

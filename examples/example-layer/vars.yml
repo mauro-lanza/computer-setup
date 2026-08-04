@@ -18,7 +18,19 @@ repositories:
 # homebrew_adopt_casks: [iterm2]
 
 # ─── VS Code baseline extensions (list — appends across layers) ──────────────
-# vscode_baseline_extensions: [ms-azuretools.vscode-docker]
+# extension_baseline: {vscode: [ms-azuretools.vscode-docker]}
+#
+# Editors are layer data — the engine names none. Declaring a manager is what
+# makes `type: extension` capabilities installable:
+#
+# extension_managers:
+#   - id: vscode
+#     capability: vscode
+#     binary: "/Applications/Visual Studio Code.app/Contents/Resources/app/bin/code"
+#     list_args: [--list-extensions]
+#     install_args: [--install-extension]
+#     settings_key: vscode/settings.json
+#     settings_dest: "{{ home_dir }}/Library/Application Support/Code/User/settings.json"
 
 # ─── Layer-private vars (NOT an engine interface) ────────────────────────────
 # Anything the orchestrator doesn't consume is still merged into scope, so your

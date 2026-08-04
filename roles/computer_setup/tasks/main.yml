@@ -71,7 +71,6 @@
       - repo_url
       - repo_branch
       - homebrew_prefix
-      - vscode_code_binary
       - repositories_base_dir
       - repositories_override_file
       # Would let a layer turn the unattended morning upgrade into a full cask
@@ -280,9 +279,15 @@
     homebrew_optional_casks: >-
       {{ _selected_entries | selectattr('type', 'eq', 'cask')
          | map(attribute='packages') | map('split') | flatten | list }}
-    vscode_optional_extensions: >-
-      {{ _selected_entries | selectattr('type', 'eq', 'vscode')
-         | map(attribute='packages') | map('split') | flatten | list }}
+    # Extensions, grouped by the manager that installs them. Previously this was
+    # a single `vscode_optional_extensions` list and `type: vscode` — the editor
+    # was named in the engine. A capability now says `type: extension` plus
+    # `manager: <id>`, and the manager itself is layer data.
+    extension_optional: >-
+      {{ dict(_ext_grouped | map(attribute=0)
+              | zip(_ext_grouped | map(attribute=1)
+                    | map('map', attribute='packages')
+                    | map('join', ' ') | map('split') | list)) }}
     # Flattened list of config deploys ({src, dest, kind?}) from active caps.
     computer_setup_config_deploys: >-
       {{ _active_entries | selectattr('config', 'defined')
@@ -300,3 +305,8 @@
     _active_entries: >-
       {{ _active | select('in', computer_setup_capability_registry)
          | map('extract', computer_setup_capability_registry) | list }}
+    # groupby gives [(manager, [entries]), …]; each group's `packages` strings
+    # are joined and re-split, so several capabilities may feed one manager.
+    _ext_grouped: >-
+      {{ _selected_entries | selectattr('type', 'eq', 'extension')
+         | groupby('manager') }}

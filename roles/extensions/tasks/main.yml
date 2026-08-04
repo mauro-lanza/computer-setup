@@ -1,0 +1,12 @@
+---
+# Install editor extensions and deploy editor settings for every ACTIVE manager.
+# Managers are layer data (see defaults/main.yml); this role names no editor.
+- name: Install extensions and settings for each manager
+  ansible.builtin.include_tasks: manager.yml
+  loop: "{{ extension_managers | default([]) }}"
+  loop_control:
+    loop_var: _mgr
+    label: "{{ _mgr.id }}"
+  when: >-
+    (_mgr.capability is not defined)
+    or (_mgr.capability in (computer_setup_active_capabilities | default([])))

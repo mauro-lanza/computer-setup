@@ -1,0 +1,27 @@
+---
+# Editor extension managers, supplied as layer data. The engine knows nothing
+# about VS Code — or any specific editor. A manager describes how to list and
+# install extensions for one editor, and where its user settings live:
+#
+#   extension_managers:
+#     - id: vscode                     # matches a capability's `manager:`
+#       capability: vscode             # active-capability gate for this manager
+#       binary: /Applications/…/code   # absent binary = manager skipped
+#       list_args:    [--list-extensions]
+#       install_args: [--install-extension]
+#       settings_key:  vscode/settings.json   # layer file/template key (optional)
+#       settings_dest: ~/Library/…/settings.json
+#
+# Adding Cursor, VSCodium or Windsurf is therefore a layer edit, not an engine
+# change — which is the whole point: the editor was previously named in engine
+# code in five places.
+extension_managers: []
+
+# Extensions installed whenever a manager is active, regardless of selection.
+# Layer interface (list-append), keyed by manager id:
+#   extension_baseline: {vscode: [ms-python.python]}
+extension_baseline: {}
+
+# Extensions opted into via capabilities — derived by the engine from the
+# selected capabilities of `type: extension`, keyed by manager id.
+extension_optional: {}

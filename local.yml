@@ -11,7 +11,6 @@
     repo_branch: main
     homebrew_prefix: /opt/homebrew
     home_dir: "{{ ansible_facts['env']['HOME'] }}"
-    vscode_code_binary: /Applications/Visual Studio Code.app/Contents/Resources/app/bin/code
 
     # Play-scoped, not just a role default: the layer merge in pre_tasks
     # templates repository entries that reference it.
@@ -45,9 +44,10 @@
     - { role: homebrew, tags: [homebrew] }
     - { role: git, tags: [git] }
     - { role: shell, tags: [shell] }
-    # Gated on the capability rather than the binary so a same-run install
-    # (homebrew runs first) is covered; the role still stats the binary.
-    - { role: vscode, tags: [vscode], when: "'vscode' in (computer_setup_active_capabilities | default([]))" }
+    # Editor extensions + editor settings, for whatever managers the layers
+    # declare. No editor is named here: the role loops over `extension_managers`
+    # and each manager carries its own capability gate.
+    - { role: extensions, tags: [extensions] }
     # Deploys the `config:` bundles of every active capability. Tagged only with
     # its own name — it is one loop over all bundles, so a per-tool tag would
     # deploy every other tool's config too.

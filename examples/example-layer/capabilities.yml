@@ -8,7 +8,8 @@
 #   type:             formula | cask | vscode | feature   (feature = no package)
 #   packages:         space-separated brew formulae / casks / extension IDs
 #                     installed when selected (omit for `feature`)
-#   requires_vscode:  (optional bool) only prompt when VS Code is available
+#   requires:         (optional) another capability id; only prompt when that
+#                     one is selected earlier in the run or already present
 #   config:           (optional) files/templates deployed when the capability is
 #                     active (highest-priority layer supplies the file):
 #                       - { src: <files/ key>, dest: <path>, kind: file|template }
@@ -29,9 +30,10 @@ capabilities:
 
   - id: vscode-spell-checker
     desc: "VS Code: Code Spell Checker"
-    type: vscode
+    type: extension
+    manager: vscode      # matches an `extension_managers` entry in vars.yml
     packages: streetsidesoftware.code-spell-checker
-    requires_vscode: true
+    requires: vscode
 
   # A capability with no package: selecting it just deploys config.
   # Shows both kinds — a plain file from files/, and a rendered template

@@ -49,8 +49,13 @@ so the engine hardcodes no package names or paths:
 
 - **active capabilities** = `selected_capabilities` ∪ any capability whose
   `adopt_if_present` path exists (adopting an already-installed tool).
-- **packages** (`homebrew_optional_*`, `vscode_optional_extensions`) come from
-  the *selected* capabilities' `packages`, split by `type`.
+- **packages** (`homebrew_optional_*`, `extension_optional`) come from the
+  *selected* capabilities' `packages`, split by `type`. `type: extension`
+  entries also carry a `manager:` and are grouped by it — the engine names no
+  editor, and the managers themselves are layer data (`extension_managers`).
+- a capability may declare `requires: <id>`, and is then offered only when that
+  one is selected earlier in the run or already present (via its
+  `adopt_if_present` path). This replaced a hardcoded `command -v code` probe.
 - **config deploys** (`computer_setup_config_deploys`) and **reminders**
   (`computer_setup_reminders`) come from the *active* capabilities.
 - Roles and shell snippets gate on membership in the active set; a snippet
@@ -214,7 +219,7 @@ with a different path: `files/shell/*.zsh.j2` is rendered, `*.zsh` is copied,
 and both land at the same managed destination.
 | `scripts/computer-setup-layers` | Sync layer repos into the cache. Validates layer names, `schema_version`, and force-syncs to `origin` (fetch + hard reset), so a diverged or hand-edited cache can never silently persist. |
 
-The remaining roles (`homebrew`, `git`, `shell`, `vscode`, `layer_configs`,
+The remaining roles (`homebrew`, `git`, `shell`, `extensions`, `layer_configs`,
 `macos`, `runtimes`, `repositories`, `upgrade`, `drift_correction`) are ordinary
 consumers of that interface. Before adding one, apply the litmus test: if
 configuring a tool is just placing a file, it is **data** — a capability

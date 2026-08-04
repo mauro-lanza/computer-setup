@@ -5,7 +5,6 @@
   gather_facts: true
   vars:
     home_dir: "{{ ansible_facts['env']['HOME'] }}"
-    vscode_code_binary: /Applications/Visual Studio Code.app/Contents/Resources/app/bin/code
     computer_setup_layer_cache: "{{ playbook_dir }}/fixtures/layers_cache"
     computer_setup_layers_manifest: "{{ playbook_dir }}/fixtures/layers.yml"
     computer_setup_prefs_file: "{{ playbook_dir }}/fixtures/prefs.yml"
@@ -100,8 +99,10 @@
           # active but never selected, so its package must NOT appear here.
           - homebrew_optional_formulae == ['nvm-from-override', 'anomalyco/tap/opencode']
           - homebrew_optional_casks == ['zed', 'visual-studio-code']
-          # type: vscode routes to extensions, not formulae/casks.
-          - vscode_optional_extensions == ['johnpapa.vscode-peacock']
+          # type: extension routes to its MANAGER's bucket, not formulae/casks.
+          # The engine names no editor; 'vscode' here is the layer's manager id.
+          - extension_optional.keys() | list == ['vscode']
+          - extension_optional['vscode'] == ['johnpapa.vscode-peacock']
           # Gating is capability membership in the active set. 'adopted' is not
           # selected but its adopt_if_present path exists, so it becomes active.
           - "'nvm' in computer_setup_active_capabilities"
@@ -146,7 +147,7 @@
           - contract_editor_cmd == 'from-override-option'
           # A question-level `set_var:` assigns the raw answer.
           - contract_unanswered_var == 'fallback-value'
-          # `implies:` is the generic dependency edge replacing requires_vscode.
+          # `implies:` is the generic dependency edge, replacing requires_vscode.
           - "'implied-cap' in selected_capabilities"
           - "'implied-cap' in computer_setup_active_capabilities"
           # ORDERING, both directions. A layer var templates against an answer
