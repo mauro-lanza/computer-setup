@@ -126,12 +126,20 @@ expect_layer_failure capabilities "malformed capabilities.yml"
 # this script, so it drifted to 23 standing failures and stopped being read.
 # It is a gate now: .ansible-lint records the two rules waived on architectural
 # grounds, so a non-zero exit means something real.
+#
+# Missing ansible-lint is a FAILURE, not a skip. A skip printed a notice and
+# still exited 0, which is the same silent-degradation failure mode this repo
+# treats as a bug everywhere else (see tests/negative.yml, and the rationale in
+# .ansible-lint itself). A freshly-rebuilt machine is exactly where the tool is
+# absent, and exactly where "checks passed" needs to mean it.
 echo "==> ansible-lint"
-if command -v ansible-lint >/dev/null 2>&1; then
-    ansible-lint -q
-    echo "  ok  no findings"
-else
-    echo "  skip  ansible-lint not installed (brew install ansible-lint)"
+if ! command -v ansible-lint >/dev/null 2>&1; then
+    echo "ERROR: ansible-lint is not installed, so this gate cannot run." >&2
+    echo "       Install it:  brew install ansible-lint" >&2
+    echo "       (it is also the 'ansible-lint' capability in the public layer)" >&2
+    exit 1
 fi
+ansible-lint -q
+echo "  ok  no findings"
 
 echo "Checks passed"

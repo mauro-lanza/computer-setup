@@ -30,9 +30,11 @@ Run the checks locally:
 ./scripts/check.sh
 ```
 
-`check.sh` runs everything, including `ansible-lint` (install it with
-`brew install ansible-lint`; the check is skipped, with a notice, if it is
-absent). Rules waived on architectural grounds are documented in
+`check.sh` runs everything, including `ansible-lint`, which is **required** —
+the script fails if it is absent rather than skipping it. Install it with
+`brew install ansible-lint`, or select the `ansible-lint` capability during
+bootstrap so the machine keeps it under drift management. Rules waived on
+architectural grounds are documented in
 [.ansible-lint](.ansible-lint) — if you need to waive another, say why there.
 
 If you touch `bootstrap.sh`'s prompt flow, extend

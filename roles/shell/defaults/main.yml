@@ -8,7 +8,29 @@ shell_zsh_config_dir: "{{ home_dir }}/.zsh"
 
 # Filename of the orchestrator's own CLI snippet (engine-owned: drift/repos
 # helpers). Named so it is never mistaken for, or removed as, a layer snippet.
-shell_cli_snippet_name: "50-computer-setup-cli.zsh"
+#
+# The numeric prefix is the engine's effective load position, expressed on the
+# SAME 3-digit scale as layer snippets (see shell_priority_width). It must stay
+# zero-padded to that width or the lexical `~/.zsh/*.zsh` glob orders it against
+# layer snippets by string, not by number.
+shell_cli_snippet_name: "050-computer-setup-cli.zsh"
+
+# Legacy CLI snippet names this role has used before. Removed on every run so a
+# rename cannot leave an orphan behind: the stale-cleanup below only tracks
+# LAYER snippets (via the manifest), and the engine CLI is not one — a renamed
+# CLI would otherwise sit in ~/.zsh forever and be sourced a second time,
+# redefining every drift-* function from a stale template.
+shell_cli_snippet_legacy_names:
+  - "50-computer-setup-cli.zsh"
+
+# Zero-padding width for the layer-priority prefix on deployed snippets.
+# Snippets are sourced by a lexical glob (`~/.zsh/*.zsh` in the layer zshrc), so
+# the prefix must sort lexically in the same order as it sorts numerically.
+# At width 2 a layer with priority >= 100 renders "100-" which sorts BEFORE
+# "20-", silently inverting load order — and load order is what makes
+# 10-path.zsh set PATH before later snippets probe it with `command -v`.
+# 3 digits covers priorities 0-999.
+shell_priority_width: 3
 
 # Tracks layer snippets created by this role. Cleanup only removes paths listed
 # here from a previous run, so user-created files in ~/.zsh are never inferred as

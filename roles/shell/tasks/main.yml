@@ -19,6 +19,16 @@
     mode: "0644"
   notify: Shell config changed
 
+# The engine CLI is not tracked by the layer-snippet manifest, so a rename would
+# strand the old file in ~/.zsh where the zshrc glob keeps sourcing it.
+- name: Remove superseded computer-setup shell CLI snippets
+  ansible.builtin.file:
+    path: "{{ shell_zsh_config_dir }}/{{ item }}"
+    state: absent
+  loop: "{{ shell_cli_snippet_legacy_names | default([], true) }}"
+  when: item != shell_cli_snippet_name
+  notify: Shell config changed
+
 # ─── Layer-provided shell snippets ────────────────────────────────────────────
 # Gather files/shell/*.zsh from every active layer and deploy them into ~/.zsh,
 # prefixed with the layer priority + name so load order is deterministic (lower
@@ -48,7 +58,8 @@
       {{ (shell_snippet_candidates | default([])) + [{
            'src': _f.1.path,
            'dest': shell_zsh_config_dir ~ '/'
-                   ~ ('%02d' | format(_f.0.item.priority | int))
+                   ~ (('%0' ~ (shell_priority_width | int) ~ 'd')
+                      | format(_f.0.item.priority | int))
                    ~ '-' ~ _f.0.item.name ~ '-' ~ (_f.1.path | basename),
            'enabled': (_cap | length == 0)
                       or (_cap in (computer_setup_active_capabilities | default([])))

@@ -83,13 +83,21 @@
       register: gh_auth
       changed_when: false
       failed_when: false
+      # Read-only, so run it under --check too. `command` is normally SKIPPED in
+      # check mode, which leaves `gh_auth.rc` undefined; the reminder below then
+      # silently rendered without the "run gh auth login" line instead of
+      # erroring. Every dry run — including bootstrap's own "Preview changes
+      # first?" on a fresh, unauthenticated Mac — therefore hid the one
+      # instruction that machine needed. Same fix as the vscode role's
+      # extension listing (roles/vscode/tasks/main.yml).
+      check_mode: false
       tags: [always]
 
     - name: Print post-setup instructions
       ansible.builtin.debug:
         msg: |
           Setup complete!
-          {% if gh_auth.rc != 0 %}
+          {% if (gh_auth.rc | default(1)) != 0 %}
           - Run: gh auth login (handles SSH key + GitHub auth)
           {% endif %}
           {% for reminder in computer_setup_reminders | default([]) %}
