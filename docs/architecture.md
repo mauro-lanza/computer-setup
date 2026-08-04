@@ -217,7 +217,7 @@ resolve `<key>` in `templates/` directly, for keys that already carry `.j2`.
 Shell snippets are globbed rather than looked up, so they follow the same rule
 with a different path: `files/shell/*.zsh.j2` is rendered, `*.zsh` is copied,
 and both land at the same managed destination.
-| `scripts/computer-setup-layers` | Sync layer repos into the cache. Validates layer names, `schema_version`, and force-syncs to `origin` (fetch + hard reset), so a diverged or hand-edited cache can never silently persist. |
+| `scripts/computer-setup-layers` | Sync layer repos into the cache. Validates layer names, `schema_version`, and force-syncs to `origin` (fetch + hard reset), so a diverged or hand-edited cache can never silently persist. Repo URLs are used as written — an explicit `https://` is not rewritten to SSH, since that is a deliberate choice where port 22 is blocked. |
 
 The remaining roles (`homebrew`, `git`, `shell`, `extensions`, `layer_configs`,
 `macos`, `runtimes`, `repositories`, `upgrade`, `drift_correction`) are ordinary

@@ -7,8 +7,8 @@ usage() {
     cat <<'EOF'
 Usage: computer-setup-layers sync --manifest PATH --cache DIR [--schema-version N]
 
-Synchronize content layers from a manifest into the layer cache. GitHub HTTPS
-URLs are normalized to SSH before cloning or updating remotes.
+Synchronize content layers from a manifest into the layer cache. Repo URLs are
+used as written; a scheme-less github.com:owner/repo is completed to SSH.
 EOF
 }
 
@@ -16,12 +16,14 @@ log() { printf '%s\n' "$*"; }
 warn() { printf 'WARN: %s\n' "$*" >&2; }
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 
-ssh_repo_url() {
+# Normalize a manifest repo URL. A scheme-less `github.com:owner/repo` is
+# completed to SSH — it is not a usable URL as written, so there is no intent to
+# override. An explicit https:// URL is LEFT ALONE: rewriting it to SSH silently
+# overrode the operator, and broke exactly the case bootstrap itself warns about
+# (port 22 blocked, corporate proxy), where https is the deliberate choice.
+normalize_repo_url() {
     local repo="$1"
     case "$repo" in
-        git@*) printf '%s\n' "$repo" ;;
-        https://github.com/*) printf 'git@github.com:%s\n' "${repo#https://github.com/}" ;;
-        http://github.com/*) printf 'git@github.com:%s\n' "${repo#http://github.com/}" ;;
         github.com:*) printf 'git@%s\n' "$repo" ;;
         *) printf '%s\n' "$repo" ;;
     esac
@@ -98,7 +100,7 @@ sync_layers() {
         validate_manifest_entry "$manifest" "$i" "$seen_names"
         name="$(yq -r ".layers[$i].name" "$manifest")"
         seen_names="${seen_names}${name} "
-        repo="$(ssh_repo_url "$(yq -r ".layers[$i].repo" "$manifest")")"
+        repo="$(normalize_repo_url "$(yq -r ".layers[$i].repo" "$manifest")")"
         dest="$cache/$name"
 
         # The layer cache is a CACHE, not a working copy — nothing is ever
