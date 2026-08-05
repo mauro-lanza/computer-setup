@@ -54,6 +54,18 @@
   register: runtimes_tfenv_current_version
   changed_when: false
   failed_when: false
+  # Read-only, so it must run under --check too. Without this the `command`
+  # module reports "would have run", the register is left without stdout, and
+  # the install task below then skips on an undefined rc — meaning the 10:00
+  # drift check could never see a Terraform version change. `tfenv use 1.5.0`
+  # by hand reported "no drift" indefinitely.
+  #
+  # Same reasoning as "[{{ manager }}] List installed extensions" in the
+  # extensions role. The upgrade role's `brew outdated` tasks have the identical
+  # constraint but are deliberately NOT given this, because `brew outdated`
+  # needs a refreshed index that only a mutating `brew update` provides — it
+  # reports "(not checked)" instead of pretending.
+  check_mode: false
   when:
     - runtimes_tfenv_stat.stat.exists | default(false)
     - runtimes_tfenv_terraform_version | length > 0
@@ -73,3 +85,37 @@
     - runtimes_tfenv_terraform_version | length > 0
     - runtimes_tfenv_current_version.rc != 0
       or (runtimes_tfenv_current_version.stdout | trim) != runtimes_tfenv_terraform_version
+
+# ─── Drift visibility under --check ──────────────────────────────────────────
+# The two install tasks above are `shell`, and command/shell modules do NOT
+# execute under --check: Ansible reports them as "skipping", never "changed".
+# The scheduled 10:00 check counts `changed=` from the play recap, so a Node or
+# Terraform version switched by hand was invisible — `tfenv use 1.5.0` reported
+# "no drift" indefinitely.
+#
+# Those tasks cannot simply gain `check_mode: false`; that would make a dry run
+# actually install. So state the finding instead. A `debug` task DOES run in
+# check mode, and `changed_when` makes it count toward the drift total.
+- name: Report runtime version drift
+  ansible.builtin.debug:
+    msg: >-
+      {{ item.tool }}: '{{ item.current }}' is active but '{{ item.declared }}'
+      is declared — `computer-setup apply` will converge it.
+  changed_when: true
+  when:
+    - ansible_check_mode
+    - item.managed | bool
+    - item.current != item.declared
+  loop:
+    - tool: Node (nvm default alias)
+      managed: "{{ runtimes_nvm_script.stat.exists | default(false) }}"
+      current: "{{ runtimes_nvm_current_alias.content | default('') | b64decode | trim }}"
+      declared: "{{ runtimes_nvm_default_node }}"
+    - tool: Terraform (tfenv)
+      managed: >-
+        {{ (runtimes_tfenv_stat.stat.exists | default(false))
+           and (runtimes_tfenv_terraform_version | length > 0) }}
+      current: "{{ runtimes_tfenv_current_version.stdout | default('') | trim }}"
+      declared: "{{ runtimes_tfenv_terraform_version }}"
+  loop_control:
+    label: "{{ item.tool }}"
