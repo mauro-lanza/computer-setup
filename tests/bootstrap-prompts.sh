@@ -26,14 +26,22 @@
 # both are trivially caught by driving the loop with a scripted answer file.
 # Every assertion below maps to a specific way the selection path can rot.
 
+# Every assertion below runs its subject in a subshell to isolate global state,
+# then reads the result back through stdout. shellcheck cannot see that the
+# globals set inside those subshells are consumed by the functions sourced from
+# bootstrap.sh, so it reports them all as unused or lost. This directive is
+# file-scoped and must stay above the first command.
+# shellcheck disable=SC2034,SC2030,SC2031
+# shellcheck source-path=SCRIPTDIR/..
+
 set -uo pipefail
 
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
 REPO_ROOT="$PWD"
 
 # Source bootstrap.sh for its functions without running the installer.
 export COMPUTER_SETUP_BOOTSTRAP_LIB=1
-# shellcheck source=../bootstrap.sh
+# shellcheck source=bootstrap.sh
 source "$REPO_ROOT/bootstrap.sh"
 # bootstrap.sh sets -e; the harness needs to inspect failures rather than die.
 set +e

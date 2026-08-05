@@ -8,6 +8,22 @@ bash -n bootstrap.sh
 bash -n scripts/computer-setup-layers
 bash -n tests/bootstrap-prompts.sh
 
+# `bash -n` only proves the file parses. shellcheck is the actual gate for the
+# ~1,900 lines of bash here, and a FAILURE when absent for the same reason
+# ansible-lint is: a fresh machine is where the tool is missing and where
+# "passed" has to mean it. Findings are waived inline, at the line, with a
+# reason — never globally.
+echo "==> shellcheck"
+if ! command -v shellcheck >/dev/null 2>&1; then
+    echo "ERROR: shellcheck is not installed, so this gate cannot run." >&2
+    echo "       Install it:  brew install shellcheck" >&2
+    echo "       (it is also the 'shellcheck' capability in the public layer)" >&2
+    exit 1
+fi
+shellcheck -S style -x bootstrap.sh scripts/computer-setup-layers scripts/check.sh \
+    tests/bootstrap-prompts.sh
+echo "  ok  no findings"
+
 # `bash -n` proves bootstrap.sh parses, not that the prompt loop works — and
 # that loop only runs on a fresh machine, where nobody is watching it fail.
 # These drive it with scripted answers.
@@ -132,6 +148,9 @@ if [[ -z "$sv_bootstrap" || -z "$sv_playbook" || -z "$sv_sync" ]]; then
     echo "       bootstrap.sh='$sv_bootstrap' local.yml='$sv_playbook' sync='$sv_sync'" >&2
     exit 1
 fi
+# Not the "always true" pattern SC2055 targets: this compares ONE variable
+# against TWO others, so it is false exactly when all three agree.
+# shellcheck disable=SC2055
 if [[ "$sv_bootstrap" != "$sv_playbook" || "$sv_bootstrap" != "$sv_sync" ]]; then
     echo "ERROR: schema version disagreement" >&2
     echo "       bootstrap.sh SCHEMA_VERSION_MAX      = $sv_bootstrap" >&2

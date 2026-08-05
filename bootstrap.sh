@@ -89,7 +89,8 @@ require_tty() {
 }
 
 # When piped via curl, BASH_SOURCE may be empty. Fall back to current dir.
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)"
+SCRIPT_DIR="${SCRIPT_DIR:-$PWD}"
 LAYER_SYNC_SCRIPT="$SCRIPT_DIR/scripts/computer-setup-layers"
 
 # ─── Colors ───────────────────────────────────────────────────────────────────
@@ -501,6 +502,10 @@ choose_preset() {
     info "Presets — a starting point you can then review:"
     local -a ids=()
     local id desc caps ans n=1
+    # `caps`/`ans` are read but unused here: `read` assigns the remainder of the
+    # line to its LAST variable, so dropping them would fold the answers column
+    # into `desc`. Both are read back by awk in preset_answer/choose_preset.
+    # shellcheck disable=SC2034
     while IFS="$FS_U" read -r id desc caps ans; do
         ids+=("$id")
         echo "    ${n}) ${desc}"
@@ -715,10 +720,12 @@ gather_optional_tools() {
     # The list is read on FD 3, not stdin: `ask_yn` in the body reads stdin, and
     # a `done < file` redirect covers the body too — so every prompt would
     # consume the next capability line as its answer.
-    # `adopt` is read but unused here: `read` assigns the remainder of the line
-    # to its last variable, so omitting it would fold adopt_if_present into
-    # `requires`. cap_is_present reads that column from the file directly.
     local id desc type pkgs requires adopt default
+    # `pkgs`/`adopt` are read but unused here: `read` assigns the remainder of
+    # the line to its LAST variable, so omitting them would fold
+    # adopt_if_present into `requires`. cap_is_present reads that column from
+    # the file directly; packages are derived by the engine, not by bootstrap.
+    # shellcheck disable=SC2034
     while IFS="$FS_U" read -r -u 3 id desc type pkgs requires adopt; do
 
         # A capability may require another. It is offered only when that one is

@@ -17,7 +17,7 @@ layers** and never belong here.
 ## Development setup
 
 ```bash
-brew install ansible yq ansible-lint
+brew install ansible yq ansible-lint shellcheck
 ansible-galaxy collection install -r requirements.yml
 ```
 
@@ -27,11 +27,16 @@ ansible-galaxy collection install -r requirements.yml
 ./scripts/check.sh
 ```
 
-This runs everything: bash and Jinja syntax, the bootstrap prompt tests, the
-layer contract and its negative paths, and `ansible-lint`. Lint is **required** —
-the script fails if it is absent rather than skipping it. Rules waived on
-architectural grounds are documented in [.ansible-lint](.ansible-lint); if you
-need to waive another, say why there.
+This runs everything: bash and Jinja syntax, `shellcheck`, the bootstrap prompt
+tests, the layer contract and its negative paths, and `ansible-lint`. Both
+linters are **required** — the script fails if either is absent rather than
+skipping it, because a fresh machine is exactly where a tool is missing and
+where "passed" has to mean it.
+
+`ansible-lint` rules waived on architectural grounds are documented in
+[.ansible-lint](.ansible-lint). `shellcheck` findings are waived **inline, at the
+line, with a reason** — never globally — so each waiver is reviewed where it
+applies.
 
 Extend the tests when you touch what they cover:
 
