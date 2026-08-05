@@ -17,9 +17,15 @@ never touched beyond that one appended line.
 
 ### Per-directory identities
 
-`git_conditional_identities` renders `includeIf` blocks, which is how a work
-layer supplies a work address (`git_user_name`/`git_user_email` are machine
-prefs and reserved from layers).
+`git_conditional_identities` renders `includeIf` blocks — how a work layer
+supplies a work address for its own remotes without touching the machine-wide
+identity.
+
+The machine-wide `git_user_name`/`git_user_email` come from questions instead:
+a layer may PROPOSE them through a question `default:` (so a private layer can
+carry an account's noreply address), and the machine's answer wins. A layer's
+`vars.yml` still may not set them — see "The machine tier" in
+[architecture.md](architecture.md).
 
 Two condition forms, both passed to git verbatim:
 

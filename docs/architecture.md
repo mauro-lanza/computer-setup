@@ -74,10 +74,9 @@ capabilities.
 
 A capability answers "do I want this tool?" — independently, yes or no. Some
 decisions are not that shape: which editor is *the* editor, where repositories
-live. Those have one answer, and before questions existed they had no
-representation at all, so they were hardcoded in engine code instead (VS Code
-was written into `core.editor` if its binary existed, with `vim` as the only
-alternative and no way to say otherwise).
+live, which address commits carry. Those have exactly one answer. Without a
+representation for them they end up hardcoded in engine code, which is what this
+mechanism exists to prevent.
 
 A layer declares questions in `questions.yml`; they merge union-by-id in
 descending priority exactly like capabilities. The **answer** is machine-local
@@ -89,19 +88,28 @@ and lives under `answers:` in `~/.mac-prefs.yml`.
 | `type` | `select` \| `bool` \| `text` \| `path` |
 | `default` | Used when unanswered — a fresh machine, or a question added after this machine's prefs were written |
 | `set_var` | Optional: assign the raw answer to this variable |
+| `validate` | Optional (`text`/`path`): regex the answer must match |
 | `options[].set` | Optional: literal vars applied when that option is chosen |
 | `options[].implies` | Optional: capability ids added to the selection |
 
 `implies` is the generic dependency edge: choosing an editor selects the
-capability that installs it. It replaces the bespoke `requires_vscode` flag.
+capability that installs it.
+
+`validate` is checked in two places by two different regex engines — bash ERE at
+the bootstrap prompt, Python `re` on apply, because the prefs file is editable by
+hand and an `--answers` file can come from anywhere. Patterns must therefore use
+the subset both understand: `[^ @]`, `+`, `*`, `?`, `^`, `$`, `\.` are safe;
+POSIX names like `[[:space:]]` are bash-only and `\s`/`\d`/`\w` are Python-only.
+A pattern only one engine understands passes the prompt and fails every apply.
 
 Resolution order, all in `pre_tasks`:
 
 1. answers = declared defaults, overridden by stored answers
 2. an answer to a question no layer declares any more is **dropped**, not
    carried into play scope as a phantom var
-3. every `select` answer is validated against its options, and a stale one
-   fails loudly rather than silently falling back
+3. every `select` answer is validated against its options, and every answer to
+   a question declaring `validate` is checked against that pattern; a stale or
+   malformed one fails loudly rather than silently falling back
 4. `set_var` / `set` payloads become play-scope facts
 5. `implies` folds into `selected_capabilities`
 
@@ -124,8 +132,19 @@ set although a layer's `vars.yml` may not:
 | `drift_correction_enabled` | whether the scheduled agents exist at all |
 | `drift_correction_schedule_hour` | when the drift check runs |
 | `drift_correction_upgrade_schedule_hour` | when the unattended upgrade runs |
+| `git_user_name`, `git_user_email` | commit identity |
 
-These are *where things go* and *when the agent runs* — not *what code runs*.
+These are *where things go*, *when the agent runs*, and *who the commits are
+from* — not *what code runs*.
+
+Commit identity is the case that shows why the tier is a tier and not simply an
+unreserving. A GitHub noreply address is a property of the **account**, not of
+the machine, so a private layer should be able to carry it — retyping it at
+every rebuild is how a real address ends up in a public commit, and that cannot
+be retracted. But it must stay *proposed*: a layer supplies the `default:`, the
+prompt shows it, and the machine's answer wins. Unreserving the keys outright
+would invert that, because a layer's `vars.yml` is merged by `set_fact` and
+would silently beat the machine's own prefs.
 Category 3 keys stay unreachable from every direction: `repo_url`,
 `repo_branch`, the upgrade auto-approval switches and the `ansible_*` controls
 are not in the tier and must not be added to it. Widening the tier is a security

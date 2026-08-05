@@ -60,10 +60,18 @@ assert_eq() {
 # unlock is exercised, and `zzz-last` is deliberately final and not named
 # `vscode` — that is the exact shape that triggered bug 2.
 make_caps() {
-    printf 'alpha\tAlpha tool\tformula\talpha\t\n'
-    printf 'vscode\tVisual Studio Code\tcask\tvisual-studio-code\t\n'
-    printf 'ext-pack\tEditor extension pack\textension\tsome.extension\tvscode\n'
-    printf 'zzz-last\tLast capability\tformula\tzzz\t\n'
+    # Fields are separated by FS_U (ASCII Unit Separator), not tab — see the
+    # comment on FS_U in bootstrap.sh. `ext-pack` deliberately has an EMPTY
+    # packages field in no row, but `feature` capabilities do, and a tab
+    # separator would collapse those and shift `requires` into `packages`.
+    printf 'alpha%sAlpha tool%sformula%salpha%s\n' "$FS_U" "$FS_U" "$FS_U" "$FS_U"
+    printf 'vscode%sVisual Studio Code%scask%svisual-studio-code%s\n' "$FS_U" "$FS_U" "$FS_U" "$FS_U"
+    printf 'ext-pack%sEditor extension pack%sextension%ssome.extension%svscode\n' "$FS_U" "$FS_U" "$FS_U" "$FS_U"
+    printf 'zzz-last%sLast capability%sformula%szzz%s\n' "$FS_U" "$FS_U" "$FS_U" "$FS_U"
+    # A `feature` capability: no packages, but it DOES declare `requires`. With a
+    # tab separator the empty field collapses and `vscode` is read as its
+    # package list — installing a nonexistent formula.
+    printf 'feat-gated%sConfig-only tool%sfeature%s%svscode\n' "$FS_U" "$FS_U" "$FS_U" "$FS_U"
 }
 
 # Drive gather_optional_tools with a scripted answer file and echo the result.
@@ -92,17 +100,17 @@ run_prompts() {
 
 echo "==> bootstrap prompt loop"
 make_caps > "$WORK/caps.tsv"
-TOTAL=4
+TOTAL=5
 
 # ── 1. Answering yes must select EVERY capability ────────────────────────────
 # The regression signature of bug 1 is 0 selections from an all-yes run.
-printf 'y\ny\ny\ny\ny\ny\n' > "$WORK/all-yes"
+printf 'y\ny\ny\ny\ny\ny\ny\n' > "$WORK/all-yes"
 result="$(run_prompts "$WORK/all-yes")"
 rc="${result%%|*}"; sel="${result#*|}"
 count=$(printf '%s' "$sel" | wc -w | tr -d ' ')
 assert_eq "answering yes selects every capability ($TOTAL)" "$TOTAL" "$count"
 assert_eq "  selections are the capability ids, in capability order" \
-    "alpha vscode ext-pack zzz-last" "$sel"
+    "alpha vscode ext-pack zzz-last feat-gated" "$sel"
 
 # ── 2. The function must return success ──────────────────────────────────────
 # Bug 2: a trailing failed test made the loop return 1, which `set -e` turns
@@ -139,6 +147,18 @@ assert_eq "selecting a capability in-run unlocks entries requiring it" \
 printf 'y\nn\ny\n' > "$WORK/vscode-no"
 result="$(run_prompts "$WORK/vscode-no")"
 assert_eq "entries are skipped when their requirement is unmet" \
+    "0|alpha zzz-last" "$result"
+
+# Same gate, for a capability whose `packages` field is EMPTY (a `feature`).
+# With a tab separator that empty field collapses, `requires` is read as
+# `packages`, the gate disappears, and `feat-gated` is offered on a machine with
+# no editor — then "installed" as a formula literally named `vscode`.
+#
+# The trailing `y` is the trap: correct parsing never offers feat-gated, so the
+# extra answer is simply unread. Broken parsing offers it and takes the `y`.
+printf 'y\nn\ny\ny\n' > "$WORK/vscode-no-trap"
+result="$(run_prompts "$WORK/vscode-no-trap")"
+assert_eq "  a feature capability's requires survives an empty packages field" \
     "0|alpha zzz-last" "$result"
 
 # ...but an ALREADY-INSTALLED requirement satisfies the gate without selecting
@@ -185,8 +205,6 @@ make_caps > "$WORK/caps.tsv"
     INTERACTIVE=1
     MERGED_CAPABILITIES_FILE="$WORK/caps.tsv"
     PREFS_FILE="$WORK/prefs.yml"
-    GIT_NAME="Test User"
-    GIT_EMAIL="test@example.com"
     gather_optional_tools < "$WORK/all-yes" >/dev/null 2>&1 \
         && write_prefs >/dev/null 2>&1
 ) || fail "write_prefs is reachable after the prompt loop" "the chain aborted"
@@ -194,10 +212,11 @@ make_caps > "$WORK/caps.tsv"
 if [[ -f "$WORK/prefs.yml" ]]; then
     pass "write_prefs is reachable after the prompt loop"
     got="$(yq -r '.selected_capabilities | join(" ")' "$WORK/prefs.yml" 2>/dev/null)"
-    assert_eq "  prefs file records every selection" "alpha vscode ext-pack zzz-last" "$got"
-    assert_eq "  prefs file records the git identity" \
-        "Test User test@example.com" \
-        "$(yq -r '[.git_user_name, .git_user_email] | join(" ")' "$WORK/prefs.yml" 2>/dev/null)"
+    assert_eq "  prefs file records every selection" "alpha vscode ext-pack zzz-last feat-gated" "$got"
+    # Identity is an ordinary answer now, so the prefs file must NOT carry a
+    # top-level git_user_* key — that shape was the old special case.
+    assert_eq "  prefs file has no top-level git identity keys" "false false" \
+        "$(yq -r '[has("git_user_name"), has("git_user_email")] | join(" ")' "$WORK/prefs.yml" 2>/dev/null)"
     mode="$(stat -f '%OLp' "$WORK/prefs.yml" 2>/dev/null)"
     assert_eq "  prefs file is created 0600" "600" "$mode"
 else
@@ -209,7 +228,6 @@ fi
     PRIOR_SELECTED_IDS=" "; HAS_PRIOR_PREFS=false; INTERACTIVE=1
     MERGED_CAPABILITIES_FILE="$WORK/caps.tsv"
     PREFS_FILE="$WORK/prefs-empty.yml"
-    GIT_NAME="Test User"; GIT_EMAIL="test@example.com"
     gather_optional_tools < "$WORK/all-no" >/dev/null 2>&1 && write_prefs >/dev/null 2>&1
 )
 assert_eq "empty selection still writes a valid selected_capabilities list" \
@@ -226,11 +244,11 @@ echo "==> bootstrap capability merge"
     load_capabilities >/dev/null 2>&1
     cp "$MERGED_CAPABILITIES_FILE" "$WORK/merged.tsv"
 )
-merged_ids="$(cut -f1 "$WORK/merged.tsv" | tr '\n' ' ' | sed 's/ $//')"
+merged_ids="$(cut -d"$FS_U" -f1 "$WORK/merged.tsv" | tr '\n' ' ' | sed 's/ $//')"
 assert_eq "layers merge highest-priority-first, deduped by id" \
     "nvm vscode dbt vscode-peacock opencode zed adopted" "$merged_ids"
 assert_eq "  the higher-priority layer's definition wins" \
-    "nvm-from-override" "$(awk -F'\t' '$1=="nvm"{print $4}' "$WORK/merged.tsv")"
+    "nvm-from-override" "$(awk -F'\037' '$1=="nvm"{print $4}' "$WORK/merged.tsv")"
 
 # ── 11. Questions: the single-select prompt path ─────────────────────────────
 # Same class of bug as the capability loop, and the same shape of test. Two
@@ -240,8 +258,17 @@ assert_eq "  the higher-priority layer's definition wins" \
 echo "==> bootstrap question prompts"
 
 make_questions() {
-    printf 'editor\tselect\tDefault editor\tvscode\tvscode,zed,none\n'
-    printf 'scratch\ttext\tScratch dir\t/tmp/scratch\t\n'
+    printf 'editor%sselect%sDefault editor%svscode%svscode,zed,none%s\n' \
+        "$FS_U" "$FS_U" "$FS_U" "$FS_U" "$FS_U"
+    printf 'scratch%stext%sScratch dir%s/tmp/scratch%s%s\n' \
+        "$FS_U" "$FS_U" "$FS_U" "$FS_U" "$FS_U"
+}
+
+# A validated text question. `options` is empty and `validate` follows it, which
+# is exactly the empty-middle-field case a tab separator would corrupt.
+make_validated_question() {
+    printf 'email%stext%sGit email%sdefault@example.com%s%s^[^ @]+@[^ @]+\\.[^ @]+$\n' \
+        "$FS_U" "$FS_U" "$FS_U" "$FS_U" "$FS_U"
 }
 make_questions > "$WORK/questions.tsv"
 
@@ -283,11 +310,39 @@ printf '99\nzed\n/tmp/x\n' > "$WORK/q-bad"
 assert_eq "an invalid choice re-prompts instead of being accepted" \
     "0|editor=zed;scratch=/tmp/x;" "$(run_questions "$WORK/q-bad")"
 
+# ── validate: a text answer must match the pattern its layer declares ───────
+# Without this, a mistyped git address is written straight into the managed
+# gitconfig and every commit carries it. The engine re-checks on apply, because
+# the prefs file is editable by hand.
+make_validated_question > "$WORK/questions-validated.tsv"
+run_validated() {
+    (
+        INTERACTIVE=1
+        MERGED_QUESTIONS_FILE="$WORK/questions-validated.tsv"
+        PREFS_FILE="$WORK/no-such-prefs.yml"
+        ANSWER_IDS=(); ANSWER_VALUES=()
+        gather_answers < "$1" >/dev/null 2>&1
+        printf '%s' "${ANSWER_VALUES[0]}"
+    )
+}
+
+printf 'me@example.com\n' > "$WORK/v-good"
+assert_eq "a valid answer is accepted" "me@example.com" "$(run_validated "$WORK/v-good")"
+
+# The first answer violates the pattern and must be re-prompted, not stored.
+printf 'not-an-email\nsecond@example.com\n' > "$WORK/v-bad"
+assert_eq "  an answer failing validate re-prompts instead of being accepted" \
+    "second@example.com" "$(run_validated "$WORK/v-bad")"
+
+# Enter takes the default, which must itself satisfy the pattern.
+printf '\n' > "$WORK/v-enter"
+assert_eq "  Enter still takes the declared default" "default@example.com" \
+    "$(run_validated "$WORK/v-enter")"
+
 # Answers must survive write_prefs and come BACK as the defaults on a re-run.
 # A one-way write would silently reset every decision on the next bootstrap.
 (
     PREFS_FILE="$WORK/prefs-answers.yml"
-    GIT_NAME="Test User"; GIT_EMAIL="test@example.com"
     SELECTED_CAPABILITIES=(alpha)
     ANSWER_IDS=(editor scratch); ANSWER_VALUES=(zed "/tmp/mine")
     write_prefs >/dev/null 2>&1
@@ -321,11 +376,11 @@ assert_eq "Enter keeps the prior answer instead of the declared default" \
     cp "$MERGED_QUESTIONS_FILE" "$WORK/merged-q.tsv"
 )
 assert_eq "questions merge deduped by id" \
-    "editor unanswered repositories-dir drift-agents" \
-    "$(cut -f1 "$WORK/merged-q.tsv" | tr '\n' ' ' | sed 's/ $//')"
+    "editor unanswered repositories-dir drift-agents git-email" \
+    "$(cut -d"$FS_U" -f1 "$WORK/merged-q.tsv" | tr '\n' ' ' | sed 's/ $//')"
 assert_eq "  the higher-priority layer's question wins" \
     "Default editor (override)" \
-    "$(awk -F'\t' '$1=="editor"{print $3}' "$WORK/merged-q.tsv")"
+    "$(awk -F'\037' '$1=="editor"{print $3}' "$WORK/merged-q.tsv")"
 
 # ── 13. Presets ──────────────────────────────────────────────────────────────
 # A preset is a pure prefill. The risks are that it loads nothing (a yq
@@ -339,9 +394,9 @@ echo "==> bootstrap presets"
     cp "$MERGED_PRESETS_FILE" "$WORK/presets.tsv"
 )
 assert_eq "presets load from layers" "everything nothing" \
-    "$(cut -f1 "$WORK/presets.tsv" | tr '\n' ' ' | sed 's/ $//')"
+    "$(cut -d"$FS_U" -f1 "$WORK/presets.tsv" | tr '\n' ' ' | sed 's/ $//')"
 assert_eq "  capabilities survive as a csv column" "alpha,zzz-last" \
-    "$(awk -F'\t' '$1=="everything"{print $3}' "$WORK/presets.tsv")"
+    "$(awk -F'\037' '$1=="everything"{print $3}' "$WORK/presets.tsv")"
 assert_eq "  preset_answer extracts one answer" "picked" \
     "$(MERGED_PRESETS_FILE="$WORK/presets.tsv" PRESET_ID=everything preset_answer editor)"
 assert_eq "  preset_answer is empty for an unset question" "" \
@@ -381,9 +436,9 @@ assert_eq "preset capabilities replace prior selections" "alpha zzz-last" "$resu
 echo "==> bootstrap answers file"
 cat > "$WORK/answers.yml" <<'ANSWERS'
 ---
-git_user_name: File User
-git_user_email: file@example.com
 answers:
+  git-name: File User
+  git-email: file@example.com
   editor: zed
   drift-agents: false
 selected_capabilities:
@@ -392,17 +447,25 @@ selected_capabilities:
 ANSWERS
 result="$(
     load_answers_file "$WORK/answers.yml" >/dev/null 2>&1
-    printf '%s|%s|%s|%s' "$GIT_NAME" "$GIT_EMAIL" \
-        "${ANSWER_IDS[*]}" "${SELECTED_CAPABILITIES[*]}"
+    printf '%s|%s' "${ANSWER_IDS[*]}" "${SELECTED_CAPABILITIES[*]}"
 )"
-assert_eq "an answers file supplies identity, answers and selections" \
-    "File User|file@example.com|editor drift-agents|alpha ripgrep" "$result"
+assert_eq "an answers file supplies answers (identity included) and selections" \
+    "git-name git-email editor drift-agents|alpha ripgrep" "$result"
+
+# Identity travels as an ordinary answer, so it needs no special handling on
+# either side of the round trip.
+result="$(
+    load_answers_file "$WORK/answers.yml" >/dev/null 2>&1
+    printf '%s|%s' "${ANSWER_VALUES[0]}" "${ANSWER_VALUES[1]}"
+)"
+assert_eq "  the identity answers survive as ordinary answers" \
+    "File User|file@example.com" "$result"
 
 # A YAML bool must survive as the string the engine's `| bool` filter reads,
 # not as an empty value.
 result="$(
     load_answers_file "$WORK/answers.yml" >/dev/null 2>&1
-    printf '%s' "${ANSWER_VALUES[1]}"
+    printf '%s' "${ANSWER_VALUES[3]}"
 )"
 assert_eq "  a YAML bool answer is preserved as a string" "false" "$result"
 
@@ -410,17 +473,16 @@ assert_eq "  a YAML bool answer is preserved as a string" "false" "$result"
 # round-trip is the whole point of "rebuild this machine in one command".
 (
     PREFS_FILE="$WORK/prefs-roundtrip.yml"
-    GIT_NAME="Round Trip"; GIT_EMAIL="rt@example.com"
     SELECTED_CAPABILITIES=(alpha zzz-last)
-    ANSWER_IDS=(editor); ANSWER_VALUES=(zed)
+    ANSWER_IDS=(git-email editor); ANSWER_VALUES=(rt@example.com zed)
     write_prefs >/dev/null 2>&1
 )
 result="$(
     load_answers_file "$WORK/prefs-roundtrip.yml" >/dev/null 2>&1
-    printf '%s|%s|%s' "$GIT_NAME" "${ANSWER_VALUES[0]}" "${SELECTED_CAPABILITIES[*]}"
+    printf '%s|%s|%s' "${ANSWER_VALUES[0]}" "${ANSWER_VALUES[1]}" "${SELECTED_CAPABILITIES[*]}"
 )"
 assert_eq "a written prefs file is a valid --answers file" \
-    "Round Trip|zed|alpha zzz-last" "$result"
+    "rt@example.com|zed|alpha zzz-last" "$result"
 
 echo
 if [[ "$FAILURES" -gt 0 ]]; then

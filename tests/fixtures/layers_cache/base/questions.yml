@@ -25,3 +25,12 @@ questions:
     desc: "Machine tier bool"
     default: "true"
     set_var: drift_correction_enabled
+  # Commit identity is machine tier too: a layer PROPOSES it through a question
+  # (so a private layer can pre-fill an account's noreply address) but a layer
+  # var still may not set it. `validate` is the generic answer guard.
+  - id: git-email
+    type: text
+    desc: "Machine tier: commit identity, proposed by a layer"
+    default: layer-default@example.com
+    set_var: git_user_email
+    validate: "^[^ @]+@[^ @]+\\.[^ @]+$"

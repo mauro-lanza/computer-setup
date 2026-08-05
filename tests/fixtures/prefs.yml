@@ -1,10 +1,8 @@
 ---
-git_user_name: Test User
-git_user_email: test@example.com
-
 # Answers to the layers' questions. `editor` is answered; `unanswered` is not
 # (it must fall back to its declared default); `phantom` refers to a question no
-# layer declares (it must be dropped, not carried into play scope).
+# layer declares (it must be dropped, not carried into play scope). `git-email`
+# is left unanswered so the LAYER's proposed default is what reaches the engine.
 answers:
   editor: picked
   phantom: should-be-dropped

@@ -62,6 +62,19 @@
       - drift_correction_enabled
       - drift_correction_schedule_hour
       - drift_correction_upgrade_schedule_hour
+      # Commit identity. A private layer knows the right answer (a GitHub
+      # noreply address is a property of the ACCOUNT, not of the machine) and
+      # should supply it as a question `default:`, rather than have it retyped —
+      # and possibly mistyped — at every rebuild. A mistyped address pushed to a
+      # public repo cannot be retracted.
+      #
+      # Deliberately here and NOT removed from the reserved list below: a
+      # question is PROPOSED by a layer and CONFIRMED by the machine, and the
+      # answer outranks every layer var. Unreserving these outright would invert
+      # that — a layer's vars.yml is merged by set_fact and would silently beat
+      # the machine's own prefs. Neither key decides what code runs.
+      - git_user_name
+      - git_user_email
     computer_setup_reserved_layer_keys:
       - selected_capabilities
       - answers
@@ -152,6 +165,26 @@
       loop: >-
         {{ computer_setup_question_registry | dict2items
            | selectattr('value.type', 'eq', 'select') | list }}
+      loop_control:
+        label: "{{ item.key }}"
+
+    - name: Assert every answer satisfies its question's validate pattern
+      # Bootstrap enforces this at the prompt, but the prefs file is a plain
+      # YAML file a human may edit, and an --answers file comes from anywhere.
+      # Catch it here rather than render a malformed value into a config file.
+      ansible.builtin.assert:
+        that:
+          - computer_setup_answers[item.key] | string is match(item.value.validate)
+        fail_msg: >-
+          Answer '{{ computer_setup_answers[item.key] }}' for question
+          '{{ item.key }}' does not match the pattern its layer declares
+          ({{ item.value.validate }}).
+          Fix `answers.{{ item.key }}` in {{ computer_setup_prefs_file }}, or
+          re-run bootstrap.sh.
+        quiet: true
+      loop: >-
+        {{ computer_setup_question_registry | dict2items
+           | selectattr('value.validate', 'defined') | list }}
       loop_control:
         label: "{{ item.key }}"
 
@@ -279,10 +312,9 @@
     homebrew_optional_casks: >-
       {{ _selected_entries | selectattr('type', 'eq', 'cask')
          | map(attribute='packages') | map('split') | flatten | list }}
-    # Extensions, grouped by the manager that installs them. Previously this was
-    # a single `vscode_optional_extensions` list and `type: vscode` — the editor
-    # was named in the engine. A capability now says `type: extension` plus
-    # `manager: <id>`, and the manager itself is layer data.
+    # Extensions, grouped by the manager that installs them. A capability says
+    # `type: extension` plus `manager: <id>`; the manager itself is layer data,
+    # so the engine names no editor.
     extension_optional: >-
       {{ dict(_ext_grouped | map(attribute=0)
               | zip(_ext_grouped | map(attribute=1)

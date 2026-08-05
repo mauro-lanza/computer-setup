@@ -10,8 +10,8 @@
 #
 # If the decision is "install X or not", it is a capability. If picking one
 # answer excludes the others — which editor, which window manager, where
-# repositories live — it is a question. Before questions existed those decisions
-# had no representation, so they ended up hardcoded in the engine.
+# repositories live — it is a question. A decision with no representation here
+# ends up hardcoded in the engine, which is what this exists to prevent.
 #
 # Schema per item:
 #   id:       stable token (primary key; never rename — it keys the stored answer)
@@ -20,6 +20,14 @@
 #   default:  answer used when unanswered (fresh machine, or a question added
 #             after this machine's prefs file was written)
 #   set_var:  (optional) assign the raw answer to this variable
+#   validate: (optional, text/path only) a regex the answer must match.
+#             Checked TWICE, by two different engines: bash ERE at the bootstrap
+#             prompt, and Python `re` on apply (the prefs file is hand-editable,
+#             and an --answers file comes from anywhere). Stick to the common
+#             subset: [^ @], +, *, ?, ^, $, \. are safe. POSIX names like
+#             [[:space:]] work in bash but NOT in Python; \s, \d, \w work in
+#             Python but are not POSIX ERE. A pattern only one engine
+#             understands passes the prompt and then fails every apply.
 #   options:  (select only) list of:
 #               value:   the stored answer
 #               desc:    label
@@ -32,6 +40,14 @@
 # GUARD: a `set:` payload obeys the same reserved-key rules as vars.yml. A
 # question is layer content; only the ANSWER is machine-local. Without that, a
 # layer could reach engine-owned vars through an option payload.
+#
+# THE MACHINE TIER is the one exception: a handful of keys a question MAY set
+# although a layer's vars.yml may not, because the decision is machine-local but
+# the layer is entitled to PROPOSE it. `git_user_name`/`git_user_email` are
+# there — a private layer supplies its account's address as a `default:`, the
+# prompt shows it, and the machine's answer outranks every layer var. See
+# `computer_setup_machine_tier_keys` in the engine for the full list and the
+# reasoning about what must never be added to it.
 
 questions:
   - id: example-editor
@@ -56,3 +72,5 @@ questions:
     default: "/tmp/example"
     # The raw answer is assigned straight to this variable.
     set_var: example_scratch_dir
+    # Reject an answer that is not an absolute path, at the prompt and on apply.
+    validate: "^/.*$"

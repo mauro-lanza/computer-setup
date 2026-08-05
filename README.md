@@ -41,7 +41,7 @@ cd computer-setup
 ./bootstrap.sh
 ```
 
-Bootstrap prompts for layers and git identity, so it needs a terminal. Piping
+Bootstrap prompts for layers and setup decisions, so it needs a terminal. Piping
 (`curl … | bash`) also works — the script reattaches stdin to `/dev/tty` — but
 process substitution is preferred because it never puts the script on stdin in
 the first place. With no TTY at all (CI, `nohup`), bootstrap fails with an
@@ -57,8 +57,9 @@ explicit message rather than silently accepting every default.
    `~/.local/share/computer-setup/layers/<name>/`, validating `schema_version`.
 2. **Build preferences** — offer the layers' presets as a starting point, then
    merge every layer's `questions.yml` into one set of decisions and every
-   `capabilities.yml` into one menu,
-   prompt for git identity and optional tools, write `~/.mac-prefs.yml`.
+   `capabilities.yml` into one menu, prompt for both, and write
+   `~/.mac-prefs.yml`. Git identity is one of those decisions, so a private
+   layer can pre-fill it rather than have it retyped.
 3. **Run Ansible** — `ansible-pull` this orchestrator with the merged input.
 
 ## Writing your own layer

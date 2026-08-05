@@ -157,6 +157,14 @@
           # layer var naming the same key is still rejected.
           - repositories_base_dir == '/tmp/contract-repos'
           - drift_correction_enabled | bool
+          # Commit identity is machine tier: the layer PROPOSES it through a
+          # question and, unanswered here, its default is what reaches the
+          # engine. This is what lets a private layer carry an account's noreply
+          # address instead of it being retyped at every rebuild.
+          - git_user_email == 'layer-default@example.com'
+          # `validate` is registered so the engine can re-check a hand-edited
+          # prefs file, not just the bootstrap prompt.
+          - computer_setup_question_registry['git-email'].validate is defined
           # An unprovided key deploys nothing and does not create the parent dir.
           # This runs AFTER several successful deploys, so it also asserts the
           # primitive resets its resolution state between invocations rather than

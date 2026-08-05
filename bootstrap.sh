@@ -22,6 +22,11 @@ CONFIG_DIR="$HOME/.config/computer-setup"
 LAYERS_FILE="$CONFIG_DIR/layers.yml"
 LAYER_CACHE="$HOME/.local/share/computer-setup/layers"
 
+# Apple silicon prefix. Asserted in main() and in the playbook, so this is a
+# constant rather than a `brew --prefix` call that must run before Homebrew is
+# installed. Layers reference it as `{{ homebrew_prefix }}`.
+HOMEBREW_PREFIX="/opt/homebrew"
+
 # Orchestrator repo. Bootstrap authenticates GitHub before cloning layers or
 # running ansible-pull, so GitHub repos are accessed over SSH consistently.
 ORCH_OWNER="mauro-lanza"
@@ -31,6 +36,16 @@ REPO_BRANCH="${BOOTSTRAP_BRANCH:-main}"
 
 # Highest layer schema_version this orchestrator understands.
 SCHEMA_VERSION_MAX=1
+
+# Field separator for the merged capability/question/preset files.
+#
+# NOT a tab. Tab is an "IFS whitespace" character, so `IFS=$'\t' read` collapses
+# runs of tabs into one: a row with an empty middle field (a `feature`
+# capability has no `packages`; a text question has no `options`) silently
+# shifts every later column left. ASCII Unit Separator is not whitespace, so
+# empty fields survive. yq's @tsv already escapes any literal tab in a value,
+# so the translation below is lossless.
+FS_U=$'\037'
 
 export HOMEBREW_NO_ANALYTICS=1
 
@@ -126,7 +141,7 @@ install_homebrew() {
         error "Homebrew installation failed"
         exit 1
     fi
-    eval "$(/opt/homebrew/bin/brew shellenv)"
+    eval "$("$HOMEBREW_PREFIX/bin/brew" shellenv)"
     ok "Homebrew installed"
 }
 
@@ -269,7 +284,7 @@ manage_layers() {
             warn "  Name cannot be empty"
         done
         while true; do
-            read -rp "  Git repo URL (git@ preferred; GitHub HTTPS is converted to SSH): " repo
+            read -rp "  Git repo URL (SSH; 'github.com:owner/repo' is completed to git@): " repo
             [[ -n "$repo" ]] && break
             warn "  Repo URL cannot be empty"
         done
@@ -342,12 +357,14 @@ load_capabilities() {
             warn "Layer '$name' has an invalid capabilities.yml — skipping it."
             continue
         fi
-        while IFS=$'\t' read -r id desc type pkgs requires; do
+        while IFS="$FS_U" read -r id desc type pkgs requires; do
             [[ -z "$id" ]] && continue
             [[ "$seen" == *" $id "* ]] && continue
             seen="${seen}${id} "
-            printf '%s\t%s\t%s\t%s\t%s\n' "$id" "$desc" "$type" "$pkgs" "$requires" >> "$MERGED_CAPABILITIES_FILE"
-        done < <(yq -r '.capabilities[]? | [.id, .desc, .type, (.packages // ""), (.requires // "")] | @tsv' "$cat")
+            printf '%s%s%s%s%s%s%s%s%s\n' \
+                "$id" "$FS_U" "$desc" "$FS_U" "$type" "$FS_U" "$pkgs" "$FS_U" "$requires" \
+                >> "$MERGED_CAPABILITIES_FILE"
+        done < <(yq -r '.capabilities[]? | [.id, .desc, .type, (.packages // ""), (.requires // "")] | @tsv' "$cat" | tr '\t' "$FS_U")
     done
 
     local count
@@ -360,13 +377,14 @@ load_capabilities() {
 }
 
 # Merged questions across all layers as TSV rows:
-#   id type prompt default options
+#   id type prompt default options validate
 # `options` is a comma-separated list of option values (empty for non-select).
+# `validate` is an optional ERE a text/path answer must match (empty for none).
 # Same merge rule as capabilities: descending priority, union by id, first wins.
 #
 # A question is a single-select or free-text decision the MACHINE makes. The
-# capability menu can only express independent yes/no, so anything "pick one"
-# (which editor) had no representation at all before this.
+# capability menu expresses only independent yes/no, so anything "pick one"
+# (which editor) is a question, not a capability.
 load_questions() {
     MERGED_QUESTIONS_FILE="$(mktemp)"
 
@@ -381,14 +399,16 @@ load_questions() {
             warn "Layer '$name' has an invalid questions.yml — skipping it."
             continue
         fi
-        while IFS=$'\t' read -r id type prompt default options; do
+        while IFS="$FS_U" read -r id type prompt default options validate; do
             [[ -z "$id" ]] && continue
             [[ "$seen" == *" $id "* ]] && continue
             seen="${seen}${id} "
-            printf '%s\t%s\t%s\t%s\t%s\n' "$id" "$type" "$prompt" "$default" "$options" \
+            printf '%s%s%s%s%s%s%s%s%s%s%s\n' \
+                "$id" "$FS_U" "$type" "$FS_U" "$prompt" "$FS_U" "$default" \
+                "$FS_U" "$options" "$FS_U" "$validate" \
                 >> "$MERGED_QUESTIONS_FILE"
         done < <(yq -r '.questions[]? | [.id, .type, (.desc // .prompt // .id), (.default // ""),
-                        ([.options[]?.value] | join(","))] | @tsv' "$qf")
+                        ([.options[]?.value] | join(",")), (.validate // "")] | @tsv' "$qf" | tr '\t' "$FS_U")
     done
 
     local count
@@ -425,22 +445,24 @@ load_presets() {
             warn "Layer '$name' has an invalid presets.yml — skipping it."
             continue
         fi
-        while IFS=$'\t' read -r id desc caps ans; do
+        while IFS="$FS_U" read -r id desc caps ans; do
             [[ -z "$id" ]] && continue
             [[ "$seen" == *" $id "* ]] && continue
             seen="${seen}${id} "
-            printf '%s\t%s\t%s\t%s\n' "$id" "$desc" "$caps" "$ans" >> "$MERGED_PRESETS_FILE"
+            printf '%s%s%s%s%s%s%s\n' \
+                "$id" "$FS_U" "$desc" "$FS_U" "$caps" "$FS_U" "$ans" \
+                >> "$MERGED_PRESETS_FILE"
         done < <(yq -r '.presets[]? | [.id, (.desc // .id),
                         ([.capabilities[]?] | join(",")),
                         ((.answers // {}) | to_entries | map(.key + "=" + (.value | tostring)) | join(","))]
-                        | @tsv' "$pf")
+                        | @tsv' "$pf" | tr '\t' "$FS_U")
     done
 }
 
 # The preset's answer for one question id, empty when the preset does not set it.
 preset_answer() {
     [[ -z "$PRESET_ID" ]] && return 0
-    awk -F'\t' -v p="$PRESET_ID" -v k="$1" '
+    awk -F'\037' -v p="$PRESET_ID" -v k="$1" '
         $1 == p {
             n = split($4, kv, ",")
             for (i = 1; i <= n; i++) {
@@ -461,7 +483,7 @@ choose_preset() {
     info "Presets — a starting point you can then review:"
     local -a ids=()
     local id desc caps ans n=1
-    while IFS=$'\t' read -r id desc caps ans; do
+    while IFS="$FS_U" read -r id desc caps ans; do
         ids+=("$id")
         echo "    ${n}) ${desc}"
         n=$((n + 1))
@@ -487,7 +509,7 @@ choose_preset() {
     done
 
     if [[ -n "$PRESET_ID" ]]; then
-        PRESET_CAPS=" $(awk -F'\t' -v p="$PRESET_ID" '$1==p{gsub(/,/," ",$3); print $3}' \
+        PRESET_CAPS=" $(awk -F'\037' -v p="$PRESET_ID" '$1==p{gsub(/,/," ",$3); print $3}' \
             "$MERGED_PRESETS_FILE") "
         ok "Preset '${PRESET_ID}' selected"
         # Reviewing is opt-IN: the whole point of picking a preset is not being
@@ -505,14 +527,17 @@ choose_preset() {
 # `bootstrap.sh --answers <file>` skips every prompt and takes the whole
 # preference set from a YAML file with the same shape bootstrap writes:
 #
-#   git_user_name: ...
-#   git_user_email: ...
-#   answers: {editor: zed, ...}
+#   answers: {editor: zed, git-email: me@example.com, ...}
 #   selected_capabilities: [nvm, ...]
 #
 # That makes "rebuild this machine" one command, which is what actually makes
 # every-decision-is-a-prompt survivable. The file is the same shape write_prefs
 # emits, so ~/.mac-prefs.yml from an old machine works directly.
+#
+# Nothing here is required: an answer a layer no longer asks for is dropped by
+# the engine, and a question the file does not answer falls back to the default
+# its layer declares. So a partial file is valid, and an empty one means "take
+# every layer default".
 ANSWERS_FILE=""
 
 load_answers_file() {
@@ -526,20 +551,13 @@ load_answers_file() {
         exit 1
     fi
 
-    GIT_NAME="$(yq -r '.git_user_name // ""' "$f")"
-    GIT_EMAIL="$(yq -r '.git_user_email // ""' "$f")"
-    if [[ -z "$GIT_NAME" || "$GIT_EMAIL" != *@* ]]; then
-        error "Answers file must set git_user_name and a valid git_user_email."
-        exit 1
-    fi
-
     ANSWER_IDS=(); ANSWER_VALUES=()
     local k v
-    while IFS=$'\t' read -r k v; do
+    while IFS="$FS_U" read -r k v; do
         [[ -z "$k" ]] && continue
         ANSWER_IDS+=("$k")
         ANSWER_VALUES+=("$v")
-    done < <(yq -r '(.answers // {}) | to_entries | .[] | [.key, (.value | tostring)] | @tsv' "$f")
+    done < <(yq -r '(.answers // {}) | to_entries | .[] | [.key, (.value | tostring)] | @tsv' "$f" | tr '\t' "$FS_U")
 
     SELECTED_CAPABILITIES=()
     local cap
@@ -597,8 +615,6 @@ parse_args() {
 
 # ─── Prior selections (re-run friendliness) ──────────────────────────────────
 PRIOR_SELECTED_IDS=" "
-PRIOR_NAME=""
-PRIOR_EMAIL=""
 HAS_PRIOR_PREFS=false
 
 is_prior_selected() {
@@ -608,9 +624,6 @@ is_prior_selected() {
 load_prior_prefs() {
     [[ ! -f "$PREFS_FILE" ]] && return
     HAS_PRIOR_PREFS=true
-
-    PRIOR_NAME=$(yq -r '.git_user_name // ""' "$PREFS_FILE" 2>/dev/null || echo "")
-    PRIOR_EMAIL=$(yq -r '.git_user_email // ""' "$PREFS_FILE" 2>/dev/null || echo "")
 
     # Selections are just capability ids now — remember them directly.
     local cap
@@ -631,33 +644,13 @@ prior_answer() {
         "$PREFS_FILE" 2>/dev/null || true
 }
 
-# ─── Git identity ────────────────────────────────────────────────────────────
-gather_git_identity() {
-    require_tty
-    info "Git identity (used for commits)"
-    local default_hint=""
-    if [[ -n "$PRIOR_NAME" ]]; then default_hint=" [$PRIOR_NAME]"; fi
-    while true; do
-        read -rp "  Git user.name${default_hint}: " GIT_NAME
-        GIT_NAME="${GIT_NAME:-$PRIOR_NAME}"
-        [[ -n "$GIT_NAME" ]] && break
-        warn "  Name cannot be empty"
-    done
-
-    default_hint=""
-    if [[ -n "$PRIOR_EMAIL" ]]; then default_hint=" [$PRIOR_EMAIL]"; fi
-    while true; do
-        read -rp "  Git user.email${default_hint}: " GIT_EMAIL
-        GIT_EMAIL="${GIT_EMAIL:-$PRIOR_EMAIL}"
-        [[ "$GIT_EMAIL" == *@* ]] && break
-        warn "  Please enter a valid email address"
-    done
-    echo
-}
 
 # Is a capability already present on this machine? Uses the capability's own
-# `adopt_if_present` path — layer data — so bootstrap names no tool. `home_dir`
-# is the only expansion the manifest needs; the engine templates the rest.
+# `adopt_if_present` path — layer data — so bootstrap names no tool.
+#
+# Only the two path roots a probe cannot avoid are expanded here (`home_dir`,
+# `homebrew_prefix`); the engine templates every other value at apply time. Keep
+# this list in step with the `adopt_if_present` contract in docs/architecture.md.
 cap_is_present() {
     local id="$1" probe
     probe="$(CS_CAP_ID="$id" yq -r \
@@ -666,6 +659,8 @@ cap_is_present() {
     [[ -z "$probe" ]] && return 1
     probe="${probe//\{\{ home_dir \}\}/$HOME}"
     probe="${probe//\{\{home_dir\}\}/$HOME}"
+    probe="${probe//\{\{ homebrew_prefix \}\}/$HOMEBREW_PREFIX}"
+    probe="${probe//\{\{homebrew_prefix\}\}/$HOMEBREW_PREFIX}"
     [[ -e "$probe" ]]
 }
 
@@ -698,7 +693,7 @@ gather_optional_tools() {
     # a `done < file` redirect covers the body too — so every prompt would
     # consume the next capability line as its answer.
     local id desc type pkgs requires default
-    while IFS=$'\t' read -r -u 3 id desc type pkgs requires; do
+    while IFS="$FS_U" read -r -u 3 id desc type pkgs requires; do
 
         # A capability may require another. It is offered only when that one is
         # satisfied — selected earlier in this run, or already present. Order in
@@ -755,8 +750,8 @@ gather_answers() {
     info "Setup decisions — press Enter to accept the shown default:"
     echo
 
-    local id type prompt default options prior preset reply
-    while IFS=$'\t' read -r -u 3 id type prompt default options; do
+    local id type prompt default options validate prior preset reply
+    while IFS="$FS_U" read -r -u 3 id type prompt default options validate; do
         # Precedence: the question's declared default, then this machine's prior
         # answer, then the preset. The preset wins because choosing one this run
         # is a deliberate "start from that" — otherwise picking a preset on a
@@ -786,7 +781,7 @@ gather_answers() {
                 fi
                 ;;
             *)
-                reply="$(ask_text "$prompt" "$default")"
+                reply="$(ask_text "$prompt" "$default" "$validate")"
                 ;;
         esac
 
@@ -849,11 +844,21 @@ ask_select() {
     done
 }
 
+# Free-text prompt. `validate` (optional) is an ERE the answer must match; the
+# layer that declares the question owns the pattern, so bootstrap enforces a
+# shape without knowing what the value means.
 ask_text() {
-    local prompt="$1" default="$2" reply
+    local prompt="$1" default="$2" validate="${3:-}" reply
     require_tty
-    read -rp "  ${prompt} [${default}]: " reply
-    printf '%s' "${reply:-$default}"
+    while true; do
+        read -rp "  ${prompt} [${default}]: " reply
+        reply="${reply:-$default}"
+        [[ -z "$validate" ]] && break
+        [[ "$reply" =~ $validate ]] && break
+        # Prompts go to stderr: this function's stdout IS the answer.
+        warn "  '${reply}' does not match the expected format (${validate})" >&2
+    done
+    printf '%s' "$reply"
 }
 
 # ─── Write preferences file ──────────────────────────────────────────────────
@@ -875,9 +880,6 @@ write_prefs() {
         echo "---"
         echo "# Generated by bootstrap.sh — $(date +%Y-%m-%d)"
         echo "# Re-run bootstrap.sh to update; prior answers are remembered."
-        echo
-        echo "git_user_name: $(yaml_quote "$GIT_NAME")"
-        echo "git_user_email: $(yaml_quote "$GIT_EMAIL")"
         echo
         echo "# Answers to the layers' questions. The engine turns each into play-scope"
         echo "# vars via the question's set_var / the chosen option's set payload."
@@ -994,7 +996,6 @@ main() {
             echo
         fi
         choose_preset
-        gather_git_identity
         gather_answers
         gather_optional_tools
     fi
