@@ -21,6 +21,6 @@ extension_managers: []
 #
 # There is deliberately no "always install these" list beside it: a capability
 # that should always apply is one the layer's preset always selects, so the
-# selection stays visible in ~/.mac-prefs.yml instead of being invisible layer
+# selection stays visible in ~/.config/computer-setup/prefs.yml instead of being invisible layer
 # state.
 extension_optional: {}

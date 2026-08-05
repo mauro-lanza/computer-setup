@@ -17,13 +17,18 @@
     repositories_base_dir: "{{ home_dir }}/Projects"
 
     # ─── Content layers ───────────────────────────────────────────────────────
+    # Every piece of machine-local state lives under one directory: the layer
+    # manifest, the prefs file, and the optional repository override. One
+    # literal, so "back up this machine's answers" is a single `cp -r` and the
+    # paths cannot drift apart. Overridable with -e for testing.
+    computer_setup_config_dir: "{{ home_dir }}/.config/computer-setup"
+    # Written by bootstrap.sh. Absent = run standalone on empty defaults.
+    computer_setup_layers_manifest: "{{ computer_setup_config_dir }}/layers.yml"
+    computer_setup_prefs_file: "{{ computer_setup_config_dir }}/prefs.yml"
     # Cache lives outside this checkout so the drift re-clone cannot wipe it.
     # Each layer is <cache>/<name>/ with layer.yml + vars.yml + capabilities.yml
-    # + files/. Overridable with -e for testing.
+    # + files/.
     computer_setup_layer_cache: "{{ home_dir }}/.local/share/computer-setup/layers"
-    # Written by bootstrap.sh. Absent = run standalone on empty defaults.
-    computer_setup_layers_manifest: "{{ home_dir }}/.config/computer-setup/layers.yml"
-    computer_setup_prefs_file: "{{ home_dir }}/.mac-prefs.yml"
     # Where this system installs the executables it owns (the runner, the layer
     # sync helper, macos-capture, and any capability shipping a script). One
     # play var because three roles create and write into it; two independent

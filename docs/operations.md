@@ -44,7 +44,7 @@ alone tells you nothing.
 
 ```bash
 # Dry run (no changes):
-ansible-playbook -i inventory local.yml -e @$HOME/.mac-prefs.yml --check
+ansible-playbook -i inventory local.yml -e @$HOME/.config/computer-setup/prefs.yml --check
 
 # A fully converged machine reports:  changed=0  failed=0
 ```
@@ -78,7 +78,7 @@ ansible-playbook -i inventory local.yml -e @$HOME/.mac-prefs.yml --check
 | What you change | Behaviour |
 |---|---|
 | Extra files in `~/.zsh/` | Left on disk. Cleanup only removes paths recorded in `~/.zsh/.computer-setup-snippets` from a previous run. |
-| `~/.mac-prefs.yml` edited by hand | Read as-is. Malformed YAML falls back to defaults with a warning. |
+| `~/.config/computer-setup/prefs.yml` edited by hand | Read as-is. Malformed YAML falls back to defaults with a warning. |
 | Local changes in a listed repo | Never touched. Cloning uses `update: false` and only clones repos that are entirely absent. |
 
 ## Non-destructive guarantees
@@ -217,7 +217,7 @@ Tools installed via vendor scripts leave a footprint (a `~/.tool` dir plus PATH
 and completion lines in `.zshrc`). To bring one under management:
 
 1. Add it as a capability in a layer's `capabilities.yml`, then add that
-   capability's `id` to `selected_capabilities` in `~/.mac-prefs.yml`.
+   capability's `id` to `selected_capabilities` in `~/.config/computer-setup/prefs.yml`.
    Selection is by capability id, not by package name.
 2. Apply the playbook, so Homebrew installs the managed copy.
 3. Remove the manual install dir and its `.zshrc` lines.

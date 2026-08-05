@@ -1,14 +1,14 @@
 ---
 # Example repository list for the `repositories` role.
 #
-# Copy to ~/.repositories.yml (NOT committed — it's per-machine, like
-# ~/.mac-prefs.yml, and may contain private remote URLs), edit to taste, then
+# Copy to ~/.config/computer-setup/repositories.yml (NOT committed — it's per-machine, like
+# ~/.config/computer-setup/prefs.yml, and may contain private remote URLs), edit to taste, then
 # clone everything with `drift-apply --tags repositories`.
 #
 # Tip: scaffold this file automatically from a machine that already has your
 # repos checked out:
 #
-#     repos-generate > ~/.repositories.yml
+#     repos-generate > ~/.config/computer-setup/repositories.yml
 #
 # Notes:
 #   - `folder` may be absolute or reference role/play vars — `{{ ansible_env.HOME }}`

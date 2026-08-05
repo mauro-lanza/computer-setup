@@ -3,7 +3,7 @@
 # presets.yml contributes none, and bootstrap simply skips the preset menu.
 #
 # A preset is a PURE PREFILL: it supplies the defaults the prompts start from
-# and is never recorded in ~/.mac-prefs.yml. A machine set up from a preset is
+# and is never recorded in ~/.config/computer-setup/prefs.yml. A machine set up from a preset is
 # indistinguishable from one answered by hand, so presets can be edited later
 # without reconfiguring machines that used them.
 #

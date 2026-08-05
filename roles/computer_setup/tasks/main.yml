@@ -24,7 +24,7 @@
     - name: Warn about malformed preferences file
       ansible.builtin.debug:
         msg: >-
-          WARNING: ~/.mac-prefs.yml is malformed or unreadable.
+          WARNING: ~/.config/computer-setup/prefs.yml is malformed or unreadable.
           Re-run bootstrap.sh to regenerate. Continuing with defaults.
 
 - name: Seed the accumulated layer vars

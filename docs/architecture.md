@@ -45,7 +45,7 @@ merging, so the consuming role's own default applies.
 ## The capability model
 
 Selecting a tool records its capability `id` in `selected_capabilities` — the
-only selection state in `~/.mac-prefs.yml`. The engine merges every layer's
+only selection state in `~/.config/computer-setup/prefs.yml`. The engine merges every layer's
 `capabilities.yml` into a registry and derives the whole role interface from it,
 so the engine hardcodes no package names or paths:
 
@@ -86,7 +86,7 @@ mechanism exists to prevent.
 
 A layer declares questions in `questions.yml`; they merge union-by-id in
 descending priority exactly like capabilities. The **answer** is machine-local
-and lives under `answers:` in `~/.mac-prefs.yml`.
+and lives under `answers:` in `~/.config/computer-setup/prefs.yml`.
 
 | Field | Meaning |
 |---|---|
@@ -202,7 +202,7 @@ ascending and lets the last write win.
 
 `bootstrap.sh --answers <file>` skips every prompt and takes the whole
 preference set from a file with the same shape `write_prefs` emits — so a
-previous machine's `~/.mac-prefs.yml` works directly, and "rebuild this machine"
+previous machine's `~/.config/computer-setup/prefs.yml` works directly, and "rebuild this machine"
 is one command. It requires an existing layer manifest, since nothing can guess
 which layers a machine wants.
 
@@ -212,7 +212,7 @@ which layers a machine wants.
 2. The user defines a layer manifest at `~/.config/computer-setup/layers.yml`.
 3. Layers are cloned to `~/.local/share/computer-setup/layers/<name>/`.
 4. `capabilities.yml` files are merged into the bootstrap menu; selections are
-   written to `~/.mac-prefs.yml`.
+   written to `~/.config/computer-setup/prefs.yml`.
 5. `ansible-pull` applies the orchestrator with the layer manifest/cache paths.
 6. Thereafter the scheduled agents refresh the orchestrator and the layer cache
    before every check, so drift covers layer content too.

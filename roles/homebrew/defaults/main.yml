@@ -16,7 +16,7 @@ homebrew_baseline_formulae: []
 homebrew_baseline_casks: []
 homebrew_adopt_casks: []
 
-# Optional formulae/casks are resolved from ~/.mac-prefs.yml
+# Optional formulae/casks are resolved from ~/.config/computer-setup/prefs.yml
 # in local.yml pre_tasks (which keeps the prefs file format short).
 homebrew_optional_formulae: []
 homebrew_optional_casks: []

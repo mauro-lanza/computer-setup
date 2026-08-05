@@ -58,7 +58,7 @@ explicit message rather than silently accepting every default.
 2. **Build preferences** — offer the layers' presets as a starting point, then
    merge every layer's `questions.yml` into one set of decisions and every
    `capabilities.yml` into one menu, prompt for both, and write
-   `~/.mac-prefs.yml`. Git identity is one of those decisions, so a private
+   `~/.config/computer-setup/prefs.yml`. Git identity is one of those decisions, so a private
    layer can pre-fill it rather than have it retyped.
 3. **Run Ansible** — `ansible-pull` this orchestrator with the merged input.
 
@@ -99,7 +99,7 @@ the scheduled agents and the interactive commands can never drift apart.
   are left to this command because they can raise a `sudo` prompt that an
   unattended agent has no TTY to answer.
 - `drift-log` — tail the rolling log.
-- `repos-generate` — scaffold a `~/.repositories.yml` override from this machine.
+- `repos-generate` — scaffold a `~/.config/computer-setup/repositories.yml` override from this machine.
 
 Plus one standalone command in `~/.local/bin`:
 
