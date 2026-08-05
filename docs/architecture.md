@@ -151,10 +151,11 @@ be retracted. But it must stay *proposed*: a layer supplies the `default:`, the
 prompt shows it, and the machine's answer wins. Unreserving the keys outright
 would invert that, because a layer's `vars.yml` is merged by `set_fact` and
 would silently beat the machine's own prefs.
-Category 3 keys stay unreachable from every direction: `repo_url`,
-`repo_branch`, the upgrade auto-approval switches and the `ansible_*` controls
-are not in the tier and must not be added to it. Widening the tier is a security
-decision, which is why it is an enumeration rather than a prefix.
+Everything that decides *what code runs* stays unreachable from every
+direction: `computer_setup_repo_url`, `computer_setup_repo_branch`, the upgrade
+auto-approval switches and the `ansible_*` controls are not in the tier and must
+not be added to it. Widening the tier is a security decision, which is why it is
+an enumeration rather than a prefix.
 
 Both halves are asserted: `tests/contract.yml` proves a question *can* set a
 tier key, and `tests/fixtures/negative/machine-tier/` proves a layer's `vars.yml`
@@ -164,7 +165,7 @@ naming the same key is still rejected. A door, not a hole.
 
 A `set:` payload lands in play scope exactly as a layer var does. Questions are
 **layer** content — only the answer is machine-local. So without a guard, a
-layer that cannot write `repo_url` in its `vars.yml` could simply declare a
+layer that cannot write `computer_setup_repo_url` in its `vars.yml` could declare a
 question whose only option sets it, and redirect the unattended morning
 `ansible-pull` at its own playbook.
 
@@ -292,38 +293,40 @@ becomes *variables* is checked against a reserved list; data that would become
 
 ## Reserved keys
 
-A layer's `vars.yml` may not define certain keys. The authoritative list is
-`computer_setup_reserved_layer_keys`, plus the reserved *prefixes* in
-`computer_setup_reserved_layer_prefixes`, both in
-[`roles/computer_setup/tasks/main.yml`](../roles/computer_setup/tasks/main.yml).
-It is deliberately not re-listed here, because an enumeration in prose is a copy
-that goes stale. The categories are:
+A layer's `vars.yml` may not define certain keys. The authoritative lists are
+`computer_setup_reserved_layer_keys` and `computer_setup_reserved_layer_prefixes`
+in [`roles/computer_setup/tasks/main.yml`](../roles/computer_setup/tasks/main.yml).
+They are deliberately not re-listed here, because an enumeration in prose is a
+copy that goes stale.
 
-1. **Machine-local prefs** — belong in `~/.mac-prefs.yml`
-   (`selected_capabilities`, `answers`, git identity).
-2. **Engine-owned play vars** — overriding these breaks the orchestrator
-   (`home_dir`, `repo_url`, `homebrew_prefix`, …), plus the entire
-   `computer_setup_*` namespace.
-3. **Vars deciding what code runs, or runs unattended** — the whole
-   `drift_correction_*` namespace (everything baked into the deployed runner and
-   the scheduled agents), the upgrade auto-approval switches, and Ansible's own
-   execution controls (`ansible_connection`, `ansible_python_interpreter`, …).
+The split between them is an invariant, not a judgement call:
 
-A small enumerated subset of categories 1 and 3 is reachable by a *question* —
-see the machine tier above. Layers are never widened.
+> **Reserved by prefix** — everything the engine owns: `computer_setup_`,
+> `drift_correction_`, `ansible_`, and `_cs_` (the engine's short-lived internal
+> facts, e.g. `_cs_deploy_src`).
+>
+> **Reserved by name** — only names that are *public interface* and therefore
+> cannot be prefixed away: the prefs-file keys (`selected_capabilities`,
+> `answers`), the machine tier (`git_user_name`, `git_user_email`), and the play
+> vars layers legitimately template against (`home_dir`, `homebrew_prefix`,
+> `repositories_base_dir`).
 
-Categories 2 and 3 are reserved **by prefix**, not by name, so a newly added
-engine var is protected automatically. The reserved prefixes are
-`computer_setup_`, `drift_correction_` and `_cs_` — the last covering the
-engine's short-lived internal facts (`_cs_deploy_src` and friends in
-`deploy_layer_file`), which are just as much engine-owned names as the public
-ones.
+The consequence is what matters: **adding an engine variable never requires
+editing the reserved list.** A new `computer_setup_*` or `drift_correction_*`
+var is protected the moment it exists. Only the seven public-interface names are
+enumerated, and that list should essentially never grow.
 
-Category 3 is the security boundary. Layer vars land in play scope via
-`set_fact`, which outranks both role defaults and play vars — so without it, a
-compromised layer repo could redirect the unattended morning `ansible-pull` at
-its own playbook. `tests/negative.yml` asserts these guards actually *reject*,
-rather than silently degrading into no-ops.
+`ansible_` is a prefix for the same reason. It used to be five hand-picked names
+(`ansible_connection`, `ansible_python_interpreter`, …), which left
+`ansible_become_password` and `ansible_ssh_common_args` reachable by a layer —
+an enumeration nobody had remembered to extend.
+`tests/fixtures/negative/ansible-prefix/` asserts that hole is closed.
+
+This is the security boundary. Layer vars land in play scope via `set_fact`,
+which outranks both role defaults and play vars — so without it, a compromised
+layer repo could redirect the unattended morning `ansible-pull` at its own
+playbook. `tests/negative.yml` asserts these guards actually *reject*, rather
+than silently degrading into no-ops.
 
 The sync helper separately validates manifest entries before use: names must be
 unique and path-safe, required fields present, priorities numeric, and

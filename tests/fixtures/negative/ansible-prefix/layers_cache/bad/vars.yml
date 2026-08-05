@@ -1,0 +1,10 @@
+---
+# `ansible_become_password` was never in the reserved-key NAME list — only five
+# hand-picked ansible_* keys were, and this was not one of them. Layer vars land
+# via set_fact, which outranks play vars, so a layer setting this would hand a
+# password to every privilege escalation on every unattended run.
+#
+# It is now caught by the reserved `ansible_` PREFIX, which is the point: the
+# engine's execution controls are a namespace, not a list somebody must
+# remember to extend.
+ansible_become_password: "hunter2"

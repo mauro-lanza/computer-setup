@@ -100,13 +100,17 @@ expect_layer_failure schema "requires schema_version 99"
 # Reserved by PREFIX, not by name: the runner loads this key at extra-vars
 # precedence on every unattended run.
 expect_layer_failure prefix "defines reserved key"
+# Ansible's execution controls are reserved as a NAMESPACE. Enumerating five of
+# them left ansible_become_password and ansible_ssh_common_args reachable.
+expect_layer_failure ansible-prefix "defines reserved key"
 # Must fail ATTRIBUTED to the layer: a mis-shaped `capabilities:` key aborts
 # pre_tasks, which every entry point runs.
 expect_layer_failure capabilities "malformed capabilities.yml"
 
 # A question's `set:` payload lands in play scope exactly as a layer var does,
 # so it is an escalation path AROUND the reserved-key guard unless it clears the
-# same one. Assert a layer cannot reach repo_url through a question.
+# same one. Assert a layer cannot reach the orchestrator's own repo URL through
+# a question.
 expect_layer_failure question "question setting reserved key"
 
 # The machine tier widens what a QUESTION may set. It must not widen what a

@@ -14,7 +14,7 @@
 #   check    Scheduled drift detection (--check --diff). Never mutates.
 #            Logs, trims, notifies only when drift is found.
 #   upgrade  Scheduled upgrade of Homebrew formulae + Galaxy + Node.
-#            Casks are EXCLUDED (upgrade_include_casks=false): they replace app
+#            Casks are EXCLUDED (computer_setup_upgrade_include_casks=false): they replace app
 #            bundles in /Applications and can raise a sudo prompt, which is fatal
 #            in a LaunchAgent with no TTY. Use `drift-update` to include casks.
 #
@@ -26,8 +26,8 @@ set -uo pipefail
 MODE="${1:-}"
 shift 2>/dev/null || true
 
-REPO_URL="{{ repo_url }}"
-REPO_BRANCH="{{ repo_branch }}"
+REPO_URL="{{ computer_setup_repo_url }}"
+REPO_BRANCH="{{ computer_setup_repo_branch }}"
 PREFS_FILE="{{ computer_setup_prefs_file }}"
 LAYER_CACHE="{{ computer_setup_layer_cache }}"
 LAYERS_FILE="{{ computer_setup_layers_manifest }}"
@@ -111,7 +111,7 @@ sync_layers >> "$LOG_FILE" 2>&1 || log "WARN: layer sync failed; continuing with
 if [[ "$MODE" == "check" ]]; then
     MODE_ARGS=(-e homebrew_update=false --check --diff)
 else
-    MODE_ARGS=(--tags upgrade -e upgrade_assume_yes=true -e upgrade_include_casks=false)
+    MODE_ARGS=(--tags upgrade -e computer_setup_upgrade_assume_yes=true -e computer_setup_upgrade_include_casks=false)
 fi
 
 PULL_OUT=$("$ANSIBLE_PULL" "${ARGS[@]}" "${MODE_ARGS[@]}" local.yml "$@" 2>&1)

@@ -63,7 +63,7 @@
 
 # A question's `set:` payload lands in play scope exactly as a layer var does, so
 # it must clear the SAME reserved-key guard. Without this a layer that cannot
-# write `repo_url` in vars.yml could simply declare a question whose only option
+# write `computer_setup_repo_url` in vars.yml could declare a question whose option
 # sets it, and redirect the unattended morning ansible-pull. Questions are layer
 # content; only the ANSWER is machine-local.
 - name: "[{{ _layer.name }}] Assert question payloads set no reserved keys"

@@ -189,7 +189,7 @@ Failures are collected and reported together at the end.
 
 ### The scheduled agents cannot answer sudo prompts
 
-This is why the 09:00 agent runs with `upgrade_include_casks=false`: formulae,
+This is why the 09:00 agent runs with `computer_setup_upgrade_include_casks=false`: formulae,
 Galaxy collections and Node all live under `homebrew_prefix` and never need
 `sudo`, whereas cask upgrades replace bundles in `/Applications`. Do the initial
 cask installs interactively; once the apps are brew-managed, later runs see them

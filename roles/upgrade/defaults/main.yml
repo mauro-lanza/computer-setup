@@ -1,7 +1,7 @@
 ---
 # False by default, so a bare `--tags upgrade` only previews. `drift-update`
 # confirms in the terminal (a guaranteed TTY) then sets this via -e.
-upgrade_assume_yes: false
+computer_setup_upgrade_assume_yes: false
 
 # Force-upgrade casks that manage their own updates. Left false: `greedy` makes
 # Homebrew replace an app bundle the app may be updating itself, and the two
@@ -17,7 +17,7 @@ upgrade_casks_exclude: []
 # which is fatal for a TTY-less LaunchAgent, so the scheduled morning upgrade
 # sets this false and touches only formulae, Galaxy and Node. Interactive
 # `drift-update` leaves it true.
-upgrade_include_casks: true
+computer_setup_upgrade_include_casks: true
 
 # Node line to re-resolve to the newest available version on upgrade.
 upgrade_nvm_node: "{{ runtimes_nvm_default_node }}"

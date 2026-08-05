@@ -35,7 +35,7 @@ drift-apply() {
 # Confirmation happens here, in your terminal (a guaranteed TTY), rather than via
 # an in-play Ansible `pause` — a pause inside `ansible-pull` blocks forever when
 # the prompt is missed and silently skips when stdin isn't interactive. After you
-# confirm, ansible-pull runs fully non-interactively with upgrade_assume_yes=true.
+# confirm, ansible-pull runs fully non-interactively with computer_setup_upgrade_assume_yes=true.
 drift-update() {
     echo "drift-update upgrades managed tools to their latest versions:"
     echo "  Homebrew formulae + casks, Ansible Galaxy collections, Node LTS."
@@ -70,7 +70,7 @@ drift-update() {
     fi
     unset sudo_pw
 
-    drift-apply --tags upgrade -e upgrade_assume_yes=true "$@"
+    drift-apply --tags upgrade -e computer_setup_upgrade_assume_yes=true "$@"
     local rc=$?
     unset CS_SUDO_PASSWORD
     return $rc

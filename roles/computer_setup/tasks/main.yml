@@ -35,72 +35,51 @@
     computer_setup_question_registry: {}
     # Whole namespaces a layer's vars.yml may never touch. Reserved by PREFIX,
     # not enumeration, so a newly added engine var is protected automatically.
-    #
-    # `upgrade_` is deliberately not reserved — upgrade_casks_exclude is
-    # legitimate layer content. Only the two auto-approval switches are, below.
     computer_setup_reserved_layer_prefixes:
       - computer_setup_
       - drift_correction_
+      # Ansible's own execution controls. A prefix, not the five names that
+      # used to be listed: `ansible_become_password`, `ansible_ssh_common_args`
+      # and friends decide what runs and as whom, and were all reachable.
+      # A layer supplies DATA; it never has business naming an ansible_ var.
+      - ansible_
       # Engine-internal scratch facts (deploy_layer_file's _cs_tpl_src,
       # _cs_file_src, _cs_deploy_src, _cs_deploy_as_template). Short-lived, but
       # a layer defining one would be shadowing an engine variable, which is
       # exactly what "reserved by prefix" is supposed to make impossible.
       - _cs_
-    # Individual keys a layer may never define:
-    #   1. Machine-local prefs — belong in computer_setup_prefs_file.
-    #   2. Engine-owned play vars — overriding these breaks the orchestrator.
-    #   3. Anything deciding what code runs unattended. Layer vars land in play
-    #      scope via set_fact, outranking role defaults AND play vars, so these
-    #      would be arbitrary remote-code control if a layer repo were compromised.
     # Keys a QUESTION may set even though a layer's vars.yml may not. This is
     # the machine tier: the decision is machine-local, so a layer must not make
     # it, but the machine must be able to. Deliberately an enumeration, not a
     # prefix — widening it is a security decision and should require an edit
-    # here, with a reason.
-    #
-    # Everything in docs/architecture.md category 3 stays unreachable: these are
-    # WHERE things go and WHEN the agent runs, not WHAT CODE runs. repo_url,
-    # repo_branch, the upgrade auto-approval switches and the ansible_* controls
-    # are not here and must not be added.
+    # here, with a reason. See docs/architecture.md#the-machine-tier.
     computer_setup_machine_tier_keys:
       - repositories_base_dir
       - drift_correction_enabled
       - drift_correction_schedule_hour
       - drift_correction_upgrade_schedule_hour
-      # Commit identity. A private layer knows the right answer (a GitHub
-      # noreply address is a property of the ACCOUNT, not of the machine) and
-      # should supply it as a question `default:`, rather than have it retyped —
-      # and possibly mistyped — at every rebuild. A mistyped address pushed to a
-      # public repo cannot be retracted.
-      #
-      # Deliberately here and NOT removed from the reserved list below: a
-      # question is PROPOSED by a layer and CONFIRMED by the machine, and the
-      # answer outranks every layer var. Unreserving these outright would invert
-      # that — a layer's vars.yml is merged by set_fact and would silently beat
-      # the machine's own prefs. Neither key decides what code runs.
+      # Commit identity: a private layer PROPOSES it via a question `default:`,
+      # the machine's answer wins. Kept in the reserved list below too — see
+      # docs/architecture.md for why proposing and setting must stay distinct.
       - git_user_name
       - git_user_email
+    # Individual keys a layer may never define.
+    #
+    # INVARIANT: this list holds only names that are PUBLIC INTERFACE — the
+    # prefs-file keys, the machine tier, and the play vars layers legitimately
+    # template against. Everything engine-owned is covered by a prefix above,
+    # so adding an engine var never requires editing this list.
     computer_setup_reserved_layer_keys:
+      # Machine-local prefs — belong in computer_setup_prefs_file.
       - selected_capabilities
       - answers
+      # Machine tier — proposable by a question, never by a layer var.
       - git_user_name
       - git_user_email
+      # Play vars layers template against, so they cannot be prefixed away.
       - home_dir
-      - repo_url
-      - repo_branch
       - homebrew_prefix
       - repositories_base_dir
-      - repositories_override_file
-      # Would let a layer turn the unattended morning upgrade into a full cask
-      # upgrade, or auto-approve upgrades the operator never confirmed.
-      - upgrade_assume_yes
-      - upgrade_include_casks
-      # Ansible's own execution controls.
-      - ansible_connection
-      - ansible_python_interpreter
-      - ansible_shell_executable
-      - ansible_become
-      - ansible_become_user
 
 - name: Check for a layers manifest
   ansible.builtin.stat:

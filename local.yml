@@ -7,8 +7,8 @@
   vars:
     # SSH, not HTTPS: drift runs pull this repo non-interactively and HTTPS can
     # prompt for keychain credentials.
-    repo_url: "git@github.com:mauro-lanza/computer-setup.git"
-    repo_branch: main
+    computer_setup_repo_url: "git@github.com:mauro-lanza/computer-setup.git"
+    computer_setup_repo_branch: main
     homebrew_prefix: /opt/homebrew
     home_dir: "{{ ansible_facts['env']['HOME'] }}"
 

@@ -1,14 +1,14 @@
 ---
 - name: Check for a per-machine repository override
   ansible.builtin.stat:
-    path: "{{ repositories_override_file }}"
+    path: "{{ computer_setup_repositories_override_file }}"
   register: repositories_override_stat
 
 # Loaded into a namespaced var so the user-facing key stays the natural
 # `repositories:` without clobbering the merged layer value before we choose to.
 - name: Load the per-machine repository override
   ansible.builtin.include_vars:
-    file: "{{ repositories_override_file }}"
+    file: "{{ computer_setup_repositories_override_file }}"
     name: repositories_override
   when: repositories_override_stat.stat.exists
 
@@ -27,7 +27,7 @@
   ansible.builtin.debug:
     msg: >-
       No repositories to clone. Add entries via a content layer's vars.yml
-      (`repositories:`), to {{ repositories_override_file }} (see
+      (`repositories:`), to {{ computer_setup_repositories_override_file }} (see
       repositories.example.yml), or run `repos-generate` to scaffold one.
   when: repositories | length == 0
 

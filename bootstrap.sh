@@ -940,7 +940,7 @@ run_playbook() {
         -e "computer_setup_layer_cache=${LAYER_CACHE}"
         -e "computer_setup_layers_manifest=${LAYERS_FILE}"
         -e "computer_setup_prefs_file=${PREFS_FILE}"
-        -e "repo_branch=${REPO_BRANCH}"
+        -e "computer_setup_repo_branch=${REPO_BRANCH}"
     )
 
     if [[ -n "$ANSWERS_FILE" ]]; then

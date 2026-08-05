@@ -1,8 +1,8 @@
 ---
 # This role deliberately declares NO aliases for the play vars it renders
-# (repo_url, repo_branch, computer_setup_prefs_file, computer_setup_layer_cache,
-# computer_setup_layers_manifest, computer_setup_bin_dir,
-# computer_setup_runner_path). The templates reference those directly.
+# (computer_setup_repo_url, computer_setup_repo_branch, computer_setup_prefs_file,
+# computer_setup_layer_cache, computer_setup_layers_manifest,
+# computer_setup_bin_dir, computer_setup_runner_path). Templates use them directly.
 #
 # `drift_correction_` is a fully reserved prefix, so a layer can never override
 # such an alias — it would be pure indirection with no interface value, and the
