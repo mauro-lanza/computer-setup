@@ -1,13 +1,4 @@
 ---
-# `git_editor` is normally supplied by the `editor` question's chosen option
-# (see questions.yml in a layer), so the shell and git agree on one answer. A
-# layer may still set it directly, and an empty value means "leave core.editor
-# unset and let $EDITOR/$VISUAL decide" — which is a legitimate choice, not a
-# missing one. The engine probes for no specific editor binary.
-- name: Resolve git editor
-  ansible.builtin.set_fact:
-    git_editor_resolved: "{{ git_editor | default('', true) }}"
-
 - name: Deploy global .gitignore file
   ansible.builtin.copy:
     content: |

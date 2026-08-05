@@ -41,7 +41,7 @@
 # the values declared above and emit paste-ready YAML (closes the IaC loop).
 - name: Ensure ~/.local/bin exists (for macos-capture)
   ansible.builtin.file:
-    path: "{{ macos_capture_bin_dir }}"
+    path: "{{ computer_setup_bin_dir }}"
     state: directory
     mode: "0755"
 

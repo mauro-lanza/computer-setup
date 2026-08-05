@@ -17,9 +17,7 @@ repositories:
 # homebrew_baseline_casks: [iterm2]
 # homebrew_adopt_casks: [iterm2]
 
-# ─── VS Code baseline extensions (list — appends across layers) ──────────────
-# extension_baseline: {vscode: [ms-azuretools.vscode-docker]}
-#
+# ─── Editor extensions ───────────────────────────────────────────────────────
 # Editors are layer data — the engine names none. Declaring a manager is what
 # makes `type: extension` capabilities installable:
 #

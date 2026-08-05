@@ -1,7 +1,8 @@
 ---
-# Root under which relative project folders are cloned. Entries may reference
-# this as `{{ repositories_base_dir }}` or give an absolute path.
-repositories_base_dir: "{{ home_dir }}/Projects"
+# `repositories_base_dir` is NOT defaulted here. It is a play var (local.yml),
+# because the layer merge in pre_tasks templates repository entries against it —
+# and a role default would be shadowed by the play var anyway, leaving two
+# literals for one value.
 
 # Optional per-machine override. When present it fully replaces the merged
 # `repositories` list — for a machine needing repos beyond what the layers

@@ -23,8 +23,7 @@
     - name: "[{{ _mgr.id }}] Resolve which managed extensions are missing"
       ansible.builtin.set_fact:
         _mgr_missing: >-
-          {{ ((extension_baseline | default({})).get(_mgr.id, [])
-              + (extension_optional | default({})).get(_mgr.id, []))
+          {{ (extension_optional | default({})).get(_mgr.id, [])
              | unique
              | reject('in', _mgr_installed.stdout_lines | default([]))
              | list }}

@@ -23,19 +23,17 @@ drift_correction_schedule_minute: 0
 # Morning upgrade, ahead of the 10:00 drift check.
 drift_correction_upgrade_schedule_hour: 9
 drift_correction_upgrade_schedule_minute: 0
-drift_correction_label: com.computer-setup.check
-drift_correction_upgrade_label: com.computer-setup.upgrade
 drift_correction_log_dir: "{{ home_dir }}/Library/Logs"
 
 # Scheduled agents. Both run the same runner script with a different mode.
 # Staggered so the upgrade finishes before the check reports on its results —
 # otherwise a morning upgrade would look like drift for an hour.
 drift_correction_agents:
-  - label: "{{ drift_correction_upgrade_label }}"
+  - label: com.computer-setup.upgrade
     mode: upgrade
     hour: "{{ drift_correction_upgrade_schedule_hour }}"
     minute: "{{ drift_correction_upgrade_schedule_minute }}"
-  - label: "{{ drift_correction_label }}"
+  - label: com.computer-setup.check
     mode: check
     hour: "{{ drift_correction_schedule_hour }}"
     minute: "{{ drift_correction_schedule_minute }}"

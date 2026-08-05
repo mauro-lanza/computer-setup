@@ -16,11 +16,11 @@
 # change. No editor is named anywhere in engine code.
 extension_managers: []
 
-# Extensions installed whenever a manager is active, regardless of selection.
-# Layer interface (list-append), keyed by manager id:
-#   extension_baseline: {vscode: [ms-python.python]}
-extension_baseline: {}
-
 # Extensions opted into via capabilities — derived by the engine from the
 # selected capabilities of `type: extension`, keyed by manager id.
+#
+# There is deliberately no "always install these" list beside it: a capability
+# that should always apply is one the layer's preset always selects, so the
+# selection stays visible in ~/.mac-prefs.yml instead of being invisible layer
+# state.
 extension_optional: {}

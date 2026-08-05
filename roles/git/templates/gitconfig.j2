@@ -23,10 +23,11 @@
 {# path the role deliberately left alone. With neither, [core] is omitted     #}
 {# entirely rather than emitted as an empty section.                          #}
 {% set _has_excludes = (git_global_gitignore_entries | default([], true) | length > 0) %}
-{% if (git_editor_resolved | length > 0) or _has_excludes %}
+{% set _editor = git_editor | default('', true) %}
+{% if (_editor | length > 0) or _has_excludes %}
 [core]
-{% if git_editor_resolved | length > 0 %}
-	editor = {{ git_editor_resolved }}
+{% if _editor | length > 0 %}
+	editor = {{ _editor }}
 {% endif %}
 {% if _has_excludes %}
 	excludesFile = {{ home_dir }}/.gitignore_global
