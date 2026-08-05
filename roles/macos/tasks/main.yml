@@ -1,4 +1,15 @@
 ---
+# One bad default must not abort the play. `osx_defaults` refuses to change a
+# key's TYPE, so a single wrong `type:` in layer data is a hard failure — and
+# this role runs before `runtimes` and `drift_correction`. On the first real
+# fresh-machine bootstrap that is exactly what happened: a trackpad setting
+# declared `bool` where macOS stores `int` aborted the run, and the machine got
+# no version managers and no scheduled agents because of a tap-to-click
+# preference.
+#
+# Failures are collected here and reported by a post_task in local.yml — NOT at
+# the end of this role, which would still abort before `runtimes` and
+# `drift_correction`. The whole point is that every role gets to run first.
 - name: Apply macOS system defaults
   community.general.osx_defaults:
     domain: "{{ item.domain }}"
@@ -10,6 +21,8 @@
   loop_control:
     label: "{{ item.domain }} {{ item.key }}"
   notify: "{{ item.notify | default([], true) }}"
+  register: macos_defaults_results
+  ignore_errors: true
 
 # App-conditional defaults. The app paths are layer data: the engine names no
 # application, so window managers other than Rectangle need no engine change.

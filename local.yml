@@ -71,6 +71,33 @@
     - { role: drift_correction, tags: [drift_correction] }
 
   post_tasks:
+    # Reported HERE, not in the macos role, so every role runs first. osx_defaults
+    # refuses to change a key's type, so one wrong `type:` in layer data is a hard
+    # failure — and macos runs before runtimes and drift_correction. On the first
+    # real fresh-machine bootstrap that cost the machine its version managers and
+    # its scheduled agents over a tap-to-click preference.
+    - name: Report macOS defaults that could not be applied
+      ansible.builtin.fail:
+        msg: |-
+          {{ _failed | length }} macOS default(s) could not be applied. Everything
+          else completed, including the scheduled agents.
+          {% for f in _failed %}
+            • {{ f.item.domain }} {{ f.item.key }} (declared {{ f.item.type }}): {{ (f.msg | default('')) | trim }}
+          {% endfor %}
+          "Type mismatch" means the key already exists with a different type, and
+          osx_defaults will not convert it. macOS writes some keys as `int` that
+          dotfiles conventionally set as `bool` — trackpad `Clicking` is one.
+          Make the layer match the live type:
+            defaults read-type <domain> <key>
+          Beware: a machine this playbook already configured reports the type THIS
+          PLAYBOOK wrote, not the one macOS uses natively. Trust a fresh machine.
+      vars:
+        _failed: >-
+          {{ (macos_defaults_results | default({})).get('results', [])
+             | selectattr('failed', 'defined') | selectattr('failed') | list }}
+      when: _failed | length > 0
+      tags: [macos]
+
     - name: Check GitHub CLI auth status
       ansible.builtin.command: gh auth status
       register: gh_auth
