@@ -1,7 +1,14 @@
-#!/bin/zsh
+#!/bin/bash
 # Managed by ansible — do not edit manually
 #
 # computer-setup — the single entry point for operating this machine's setup.
+#
+# DELIBERATELY BASH, not zsh, even though zsh is the login shell and this used
+# to be zsh: shellcheck has no zsh mode at all ("Unknown shell: zsh"), and this
+# is the most operationally critical script here — every scheduled run goes
+# through it. Being bash is what puts it under the linter. Nothing here needed
+# zsh; it used `print`/`${var:h}` out of habit. Keep it POSIX-ish bash: macOS
+# ships bash 3.2 and that is what `#!/bin/bash` resolves to.
 #
 # Every ansible-pull this machine runs goes through here, so the `-e` argument
 # set (prefs file, layer cache, layer manifest) is defined exactly once. Add a
@@ -55,7 +62,7 @@ notify() {
     /usr/bin/osascript -e "display notification \"${2}\" with title \"${1}\"" 2>/dev/null || true
 }
 
-log() { print -r -- "$@" >> "$LOG_FILE"; }
+log() { printf '%s\n' "$*" >> "$LOG_FILE"; }
 
 usage() {
     cat <<'EOF'
@@ -91,13 +98,13 @@ sync_layers() {
 
 # ─── Interactive reconcile: stream, don't capture ────────────────────────────
 cmd_apply() {
-    sync_layers || print -u2 "WARN: layer sync failed; continuing with cached content"
+    sync_layers || printf '%s\n' "WARN: layer sync failed; continuing with cached content" >&2
     exec "$ANSIBLE_PULL" "${ARGS[@]}" local.yml "$@"
 }
 
 # ─── Interactive drift check ─────────────────────────────────────────────────
 cmd_check() {
-    sync_layers || print -u2 "WARN: layer sync failed; continuing with cached content"
+    sync_layers || printf '%s\n' "WARN: layer sync failed; continuing with cached content" >&2
     exec "$ANSIBLE_PULL" "${ARGS[@]}" -e homebrew_update=false --check --diff \
         local.yml "$@"
 }
@@ -115,8 +122,8 @@ cmd_check() {
 # `apply --tags upgrade`.
 cmd_upgrade() {
     if [[ ! -t 0 ]]; then
-        print -u2 "computer-setup upgrade needs a terminal to confirm on."
-        print -u2 "The scheduled agent runs the unattended, cask-free upgrade already."
+        printf '%s\n' "computer-setup upgrade needs a terminal to confirm on." >&2
+        printf '%s\n' "The scheduled agent runs the unattended, cask-free upgrade already." >&2
         return 1
     fi
     echo "computer-setup upgrade brings managed tools to their latest versions:"
@@ -150,7 +157,7 @@ cmd_upgrade() {
     [[ -n "$sudo_pw" ]] && export CS_SUDO_PASSWORD="$sudo_pw"
     unset sudo_pw
 
-    sync_layers || print -u2 "WARN: layer sync failed; continuing with cached content"
+    sync_layers || printf '%s\n' "WARN: layer sync failed; continuing with cached content" >&2
     "$ANSIBLE_PULL" "${ARGS[@]}" --tags upgrade \
         -e computer_setup_upgrade_assume_yes=true local.yml "$@"
     local rc=$?
@@ -175,7 +182,7 @@ cmd_log() {
 cmd_repos() {
     local base="${1:-$REPOS_BASE_DIR}"
     if [[ ! -d "$base" ]]; then
-        print -u2 "No such directory: $base"
+        printf '%s\n' "No such directory: $base" >&2
         return 1
     fi
     echo "---"
@@ -184,7 +191,7 @@ cmd_repos() {
     echo "repositories:"
     local git_dir repo remote
     find "$base" -type d -name .git -prune 2>/dev/null | sort | while read -r git_dir; do
-        repo="${git_dir:h}"
+        repo="$(dirname "$git_dir")"
         remote="$(git -C "$repo" remote get-url origin 2>/dev/null)"
         [[ -z "$remote" ]] && continue
         echo "  - folder: \"${repo}\""
@@ -301,8 +308,8 @@ case "$COMMAND" in
     _scheduled-upgrade) run_scheduled upgrade "$@" ;;
     -h|--help|help|"")  usage ;;
     *)
-        print -u2 "computer-setup: unknown command '${COMMAND}'"
-        print -u2
+        printf '%s\n' "computer-setup: unknown command '${COMMAND}'" >&2
+        printf '\n' >&2
         usage >&2
         exit 64
         ;;

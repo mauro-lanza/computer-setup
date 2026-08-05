@@ -33,6 +33,10 @@ echo "==> Bootstrap prompt behaviour"
 # Templated shell only becomes shell after rendering, so a broken runner would
 # first surface inside a LaunchAgent at 09:00. De-template and check the skeleton.
 echo "==> Templated script syntax"
+# Templated scripts cannot be linted in place — Jinja is not shell. De-template
+# first (placeholders for {{ }}, drop {% %} lines), then parse AND shellcheck.
+# Every templated script is bash now, which is the point: shellcheck has no zsh
+# mode, so a zsh template would be parse-checked only.
 check_template_syntax() {
     local src="$1" shell="$2" tmp
     tmp="$(mktemp)"
@@ -42,10 +46,15 @@ check_template_syntax() {
         echo "ERROR: $src does not parse as $shell after de-templating" >&2
         return 1
     fi
+    if [[ "$shell" == "bash" ]] && ! shellcheck -S style -s bash "$tmp"; then
+        rm -f "$tmp"
+        echo "ERROR: $src has shellcheck findings after de-templating" >&2
+        return 1
+    fi
     rm -f "$tmp"
     echo "  ok  $src"
 }
-check_template_syntax roles/drift_correction/templates/computer-setup.j2 zsh
+check_template_syntax roles/drift_correction/templates/computer-setup.j2 bash
 check_template_syntax roles/macos/templates/macos-capture.sh.j2 bash
 
 # The sed above cannot see a template Jinja itself refuses to parse — and the

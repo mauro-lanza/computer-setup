@@ -153,7 +153,7 @@
         nvm install '{{ upgrade_nvm_node }}' --latest-npm
         nvm alias default '{{ upgrade_nvm_node }}'
       args:
-        executable: /bin/zsh
+        executable: /bin/bash
       register: upgrade_nvm_result
       changed_when: "'Downloading and installing' in upgrade_nvm_result.stdout"
       when: upgrade_nvm_script.stat.exists
