@@ -292,6 +292,15 @@
               | zip(_ext_grouped | map(attribute=1)
                     | map('map', attribute='packages')
                     | map('join', ' ') | map('split') | list)) }}
+    # Third-party Homebrew taps required by SELECTED capabilities. A package
+    # named `owner/tap/formula` is unresolvable until its tap is added, and on a
+    # machine where someone once ran `brew tap` by hand that is invisible — the
+    # install just works, so the dependency goes unrecorded until a fresh Mac
+    # fails on it. Derived from the same selection as the packages themselves,
+    # so a tap is added exactly when something needs it.
+    homebrew_optional_taps: >-
+      {{ (_selected_entries | selectattr('tap', 'defined')
+          | map(attribute='tap') | list) | unique | list }}
     # Flattened list of config deploys ({src, dest, mode?}) from active caps.
     computer_setup_config_deploys: >-
       {{ _active_entries | selectattr('config', 'defined')

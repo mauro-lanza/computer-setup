@@ -12,6 +12,12 @@ homebrew_update: true
 #
 # Engine prerequisites (git, gh, yq, ansible) are installed by bootstrap.sh in
 # Phase 0, before any layer is cloned — they are not listed here.
+# Third-party taps. `homebrew_baseline_taps` is layer content (list-append) for
+# taps needed regardless of selection; `homebrew_optional_taps` is derived by
+# the engine from the `tap:` field of selected capabilities.
+homebrew_baseline_taps: []
+homebrew_optional_taps: []
+
 homebrew_baseline_formulae: []
 homebrew_baseline_casks: []
 homebrew_adopt_casks: []

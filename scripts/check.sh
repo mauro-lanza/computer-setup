@@ -160,14 +160,15 @@ for expect in \
     "is type: extension but declares no manager" \
     "preset selects capability 'does-not-exist'" \
     "preset answers question 'no-such-question'" \
-    "question implies capability 'ghost-capability'"
+    "question implies capability 'ghost-capability'" \
+    "names a tapped package but declares no tap"
 do
     if ! grep -qF "$expect" <<<"$lint_out"; then
         echo "ERROR: linter did not report: $expect" >&2
         exit 1
     fi
 done
-echo "  ok  all 6 broken references rejected"
+echo "  ok  all 7 broken references rejected"
 
 # The highest supported layer schema_version is stated in three places that
 # cannot import from each other: bootstrap.sh runs before any checkout exists

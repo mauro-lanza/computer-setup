@@ -12,3 +12,7 @@ capabilities:
   # type: extension without a manager -> the engine groups by `manager`, so this
   # never reaches any installer.
   - {id: noext, desc: "extension without a manager", type: extension, packages: some.ext}
+  # A tapped package with no tap declared. This exact shape broke the first real
+  # fresh-machine bootstrap: it resolves on a machine where the tap was added by
+  # hand once, and nowhere else.
+  - {id: notap, desc: "tapped package, no tap", type: formula, packages: owner/tap/thing}

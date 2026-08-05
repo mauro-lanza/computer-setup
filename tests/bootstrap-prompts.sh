@@ -392,6 +392,21 @@ printf '\n' > "$WORK/v-enter"
 assert_eq "  Enter still takes the declared default" "default@example.com" \
     "$(run_validated "$WORK/v-enter")"
 
+# A templated default must survive its own question's validate pattern. The
+# `repositories-dir` question defaults to `{{ home_dir }}/Projects` so it
+# resolves per-machine; that literal contains spaces inside the braces, so
+# `^[^ ]+$` rejected it and the first real fresh-machine bootstrap had to be
+# answered by hand. bootstrap does not render Jinja, so it must not validate it.
+printf '\n' > "$WORK/tmpl-default"
+result="$(ask_text "Where repos go" '{{ home_dir }}/Projects' '^[^ ]+$' < "$WORK/tmpl-default" 2>/dev/null)"
+assert_eq "  a templated default is accepted, not rejected by its own validate" \
+    "{{ home_dir }}/Projects" "$result"
+
+# The pattern must still bite on a real, non-templated answer.
+printf 'has space\nok-value\n' > "$WORK/tmpl-real"
+result="$(ask_text "Where repos go" '/tmp/x' '^[^ ]+$' < "$WORK/tmpl-real" 2>/dev/null)"
+assert_eq "  a non-templated answer is still validated" "ok-value" "$result"
+
 # Answers must survive write_prefs and come BACK as the defaults on a re-run.
 # A one-way write would silently reset every decision on the next bootstrap.
 (

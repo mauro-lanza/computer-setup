@@ -912,6 +912,15 @@ ask_text() {
         read -rp "  ${prompt} [${default}]: " reply
         reply="${reply:-$default}"
         [[ -z "$validate" ]] && break
+        # A value containing Jinja cannot be validated here: bootstrap does not
+        # render templates, so what we would test is not what will be used.
+        # `repositories-dir` defaults to `{{ home_dir }}/Projects` precisely so
+        # it resolves per-machine — and that literal contains SPACES inside the
+        # braces, so a perfectly correct `^[^ ]+$` rejected the layer's own
+        # default and forced a hand-typed answer on the first real fresh machine.
+        # Ansible re-validates the rendered value on every apply, which is where
+        # the check belongs.
+        [[ "$reply" == *'{{'*'}}'* ]] && break
         [[ "$reply" =~ $validate ]] && break
         # Prompts go to stderr: this function's stdout IS the answer.
         warn "  '${reply}' does not match the expected format (${validate})" >&2

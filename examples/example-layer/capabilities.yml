@@ -6,6 +6,11 @@
 #   id:               stable primary key (never rename; remembers prior answers)
 #   desc:             human-readable label shown in the prompt
 #   type:             formula | cask | extension | feature  (feature = no package)
+#   tap:      (formula/cask only, optional) third-party Homebrew tap this
+#             package lives in, e.g. `owner/tap` for `owner/tap/thing`. Added
+#             before any install. A tapped package WITHOUT this is a fresh-machine
+#             failure: it resolves on a machine where someone ran `brew tap` by
+#             hand and nowhere else. `computer-setup layers lint` rejects it.
 #   packages:         space-separated brew formulae / casks / extension IDs
 #                     installed when selected (omit for `feature`)
 #   manager:          required for `type: extension` — the `extension_managers`

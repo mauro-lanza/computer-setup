@@ -1,4 +1,15 @@
 ---
+# Taps FIRST. A package named `owner/tap/formula` cannot be resolved until its
+# tap is added — `brew install anomalyco/tap/opencode` fails outright with
+# "No available formula or cask with the name". This is invisible on a machine
+# where the tap was once added by hand, which is exactly how it survived until a
+# real fresh Mac hit it.
+- name: Ensure required Homebrew taps
+  community.general.homebrew_tap:
+    name: "{{ (homebrew_baseline_taps + homebrew_optional_taps) | unique }}"
+    state: present
+  when: (homebrew_baseline_taps + homebrew_optional_taps) | length > 0
+
 # Partition once: the adopt allow-list (safe to --adopt when already present in
 # /Applications but unmanaged) vs. everything else.
 - name: Compute cask install sets
