@@ -60,6 +60,24 @@ The **variable interface** plus `schema_version` is the public API — see
 orchestrator's supported maximum in `local.yml` and `bootstrap.sh`, when making a
 breaking change to it.
 
+## Gotchas that bite engine code
+
+- **Command tasks must use `argv:`** when any path can contain a space. The
+  `code` binary lives under `/Applications/Visual Studio Code.app/...`, and a
+  plain string is split on whitespace by `ansible.builtin.command`.
+- **The `homebrew`/`homebrew_cask` modules skip entirely under `--check`**, so a
+  dry run cannot report package drift. Where that signal matters, emit it from a
+  `check_mode: false` read-only task instead.
+- **A bare YAML `key:` parses to `None`, which is *defined*** — `| default([])`
+  does not fire on it. The layer merge drops null-valued keys structurally for
+  this reason; any new ingestion point for hand-editable YAML needs the same care.
+- **Jinja reads `{#` as a comment-open, even inside a shell `#` comment.** Bash
+  array-length syntax is therefore hazardous in a `.j2`; wrap it in `{% raw %}`
+  or keep the file out of `templates/`.
+
+More of these, with the failures that produced them, are in
+[docs/findings.md](docs/findings.md).
+
 ## Where rationale lives
 
 **Rationale lives in [docs/architecture.md](docs/architecture.md). Code states

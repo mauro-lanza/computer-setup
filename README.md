@@ -112,9 +112,12 @@ so the scheduled agents and everything you type by hand can never drift apart.
 
 ## Documentation
 
-- [docs/architecture.md](docs/architecture.md) — the orchestrator + layer contract.
-- [docs/operations.md](docs/operations.md) — running it, what each run enforces,
-  and hard-won provisioning findings.
+- [docs/architecture.md](docs/architecture.md) — the orchestrator + layer
+  contract, and the reasoning behind it.
+- [docs/operations.md](docs/operations.md) — what a run does to the machine, and
+  what it will and won't touch.
+- [docs/findings.md](docs/findings.md) — failures with known causes, and choices
+  that look wrong until you know what went wrong.
 - [CONTRIBUTING.md](CONTRIBUTING.md) — development setup and checks.
 
 ## License

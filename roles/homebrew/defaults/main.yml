@@ -7,8 +7,8 @@ homebrew_update: true
 #   homebrew_baseline_formulae — formulae always installed
 #   homebrew_baseline_casks    — casks always installed
 #   homebrew_adopt_casks       — casks safe to `--adopt` when already present.
-#                                Not every cask is: see "Do not adopt casks with
-#                                protected payloads" in docs/operations.md.
+#                                Not every cask is: see "Casks with protected
+#                                payloads" in docs/findings.md.
 #
 # Engine prerequisites (git, gh, yq, ansible) are installed by bootstrap.sh in
 # Phase 0, before any layer is cloned — they are not listed here.
