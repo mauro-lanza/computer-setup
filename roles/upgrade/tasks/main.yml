@@ -87,6 +87,29 @@
     - computer_setup_upgrade_assume_yes | default(false) | bool
     - not ansible_check_mode
   block:
+    # FIRST, deliberately. Every other task in this block runs a
+    # community.general module, and a collection too stale for the installed
+    # ansible-core makes those fail at result deserialization
+    # ("Unknown profile name 'module_legacy_m2c'"). This task is the only one
+    # that can repair that — and it is a plain `ansible-galaxy` command, so it
+    # depends on no collection and always runs.
+    #
+    # It used to sit third. A stale collection therefore broke the formulae
+    # upgrade above it, the block aborted, and the repair never ran: every
+    # scheduled 09:00 upgrade then failed identically forever, with no way to
+    # self-heal. Observed on 2026-08-05. Keep this first.
+    - name: Update Ansible Galaxy collections
+      ansible.builtin.command:
+        argv:
+          - ansible-galaxy
+          - collection
+          - install
+          - -r
+          - "{{ playbook_dir }}/requirements.yml"
+          - --upgrade
+      register: upgrade_galaxy
+      changed_when: "'Installing' in upgrade_galaxy.stdout"
+
     - name: Upgrade managed Homebrew formulae to latest
       community.general.homebrew:
         name: "{{ upgrade_managed_formulae }}"
@@ -115,18 +138,6 @@
       when:
         - computer_setup_upgrade_include_casks | bool
         - upgrade_managed_casks | length > 0
-
-    - name: Update Ansible Galaxy collections
-      ansible.builtin.command:
-        argv:
-          - ansible-galaxy
-          - collection
-          - install
-          - -r
-          - "{{ playbook_dir }}/requirements.yml"
-          - --upgrade
-      register: upgrade_galaxy
-      changed_when: "'Installing' in upgrade_galaxy.stdout"
 
     - name: Check if nvm is installed (to upgrade Node)
       ansible.builtin.stat:
