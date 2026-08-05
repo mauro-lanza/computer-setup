@@ -1005,6 +1005,8 @@ run_playbook() {
         fi
     fi
 
+    collect_sudo_password
+
     info "Applying changes..."
     ansible-pull \
         -U "$REPO_URL" \
@@ -1012,7 +1014,39 @@ run_playbook() {
         "${extra_args[@]}" \
         local.yml
 
+    unset CS_SUDO_PASSWORD
     ok "Playbook completed successfully"
+}
+
+# Some casks need root to place a helper outside the Homebrew prefix — Docker
+# Desktop symlinks docker-credential-osxkeychain into /usr/local/bin. Homebrew
+# shells out to sudo, and an Ansible task has no controlling terminal, so that
+# sudo can never prompt and the cask install fails outright.
+#
+# `community.general.homebrew_cask` solves it properly: given `sudo_password` it
+# writes a 0700 askpass script and sets SUDO_ASKPASS so Homebrew can use
+# `sudo -A`. Collect it HERE, where a terminal exists, and hand it over through
+# the environment — never `-e`, which would expose it in the process list.
+#
+# Optional on purpose: Enter skips, those casks are then reported at the end
+# rather than failing the run, and everything else still applies.
+collect_sudo_password() {
+    [[ -n "${ANSWERS_FILE:-}" ]] && return 0   # non-interactive: no prompt
+    [[ -t 0 ]] || return 0
+    local pw
+    echo
+    info "Some casks need root to install (e.g. Docker Desktop places a helper"
+    info "in /usr/local/bin). Ansible cannot answer a sudo prompt on its own."
+    printf "  macOS password (Enter to skip those casks): "
+    read -rs pw
+    echo
+    if [[ -n "$pw" ]]; then
+        export CS_SUDO_PASSWORD="$pw"
+        ok "Password captured for this run only"
+    else
+        info "Skipping — casks needing root will be reported at the end."
+    fi
+    unset pw
 }
 
 # ═════════════════════════════════════════════════════════════════════════════

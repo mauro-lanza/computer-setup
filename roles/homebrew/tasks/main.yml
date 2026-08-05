@@ -31,15 +31,39 @@
     # refresh cannot affect a check run's outcome anyway.
     update_homebrew: "{{ homebrew_update | bool and not ansible_check_mode }}"
 
+# Casks are installed ONE AT A TIME, with failures collected rather than fatal —
+# the same reasoning the upgrade role already applied to cask upgrades, which
+# was never carried over to installs. A single list meant the first bad cask
+# aborted the play, and homebrew runs before runtimes and drift_correction: a
+# fresh machine lost its version managers and scheduled agents because Docker
+# Desktop could not symlink a credential helper.
+#
+# `sudo_password` is the documented fix for casks that need root (see "sudo
+# inside an Ansible task has no controlling terminal" in docs/findings.md).
+# Given a password the module writes a 0700 askpass script so Homebrew can use
+# `sudo -A`. Supplied through the environment, never `-e`, which would expose it
+# in the process list. Omitted when unset, so nothing changes for scheduled runs.
 - name: Install explicitly adoptable casks
   community.general.homebrew_cask:
-    name: "{{ homebrew_casks_adopt }}"
+    name: "{{ item }}"
     state: present
     install_options: adopt
+    sudo_password: "{{ lookup('env', 'CS_SUDO_PASSWORD') | default(omit, true) }}"
+  loop: "{{ homebrew_casks_adopt }}"
+  loop_control:
+    label: "{{ item }}"
+  register: homebrew_adopt_results
+  ignore_errors: true
   when: homebrew_casks_adopt | length > 0
 
 - name: Install casks without adoption
   community.general.homebrew_cask:
-    name: "{{ homebrew_casks_fresh }}"
+    name: "{{ item }}"
     state: present
+    sudo_password: "{{ lookup('env', 'CS_SUDO_PASSWORD') | default(omit, true) }}"
+  loop: "{{ homebrew_casks_fresh }}"
+  loop_control:
+    label: "{{ item }}"
+  register: homebrew_fresh_results
+  ignore_errors: true
   when: homebrew_casks_fresh | length > 0

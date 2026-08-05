@@ -76,6 +76,33 @@
     # failure — and macos runs before runtimes and drift_correction. On the first
     # real fresh-machine bootstrap that cost the machine its version managers and
     # its scheduled agents over a tap-to-click preference.
+    # Reported here, after every role, for the same reason as the macOS defaults
+    # below: homebrew runs first, so a cask failure raised inside that role would
+    # deny the machine its version managers and scheduled agents.
+    - name: Report casks that could not be installed
+      ansible.builtin.fail:
+        msg: |-
+          {{ _failed | length }} cask(s) could not be installed. Everything else
+          completed, including the scheduled agents.
+          {% for f in _failed %}
+            • {{ f.item }}: {{ (f.msg | default('')) | trim | truncate(300) }}
+          {% endfor %}
+          "sudo: a terminal is required" means the cask needs root to place a
+          helper (Docker Desktop symlinks docker-credential-osxkeychain into
+          /usr/local/bin). An Ansible task never has a terminal, so sudo cannot
+          prompt. Either:
+            • re-run bootstrap.sh and give your password when it asks, or
+            • install that one by hand, where sudo can prompt:
+                brew install --cask <name>
+          Everything else is already configured; re-running is safe and cheap.
+      vars:
+        _failed: >-
+          {{ ((homebrew_adopt_results | default({})).get('results', [])
+              + (homebrew_fresh_results | default({})).get('results', []))
+             | selectattr('failed', 'defined') | selectattr('failed') | list }}
+      when: _failed | length > 0
+      tags: [homebrew]
+
     - name: Report macOS defaults that could not be applied
       ansible.builtin.fail:
         msg: |-
