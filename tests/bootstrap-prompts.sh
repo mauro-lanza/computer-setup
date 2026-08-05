@@ -59,19 +59,27 @@ assert_eq() {
 # `vscode` sits BEFORE `ext-pack` so the in-run "VS Code was just selected"
 # unlock is exercised, and `zzz-last` is deliberately final and not named
 # `vscode` — that is the exact shape that triggered bug 2.
+# One merged-registry row. Fields are separated by FS_U (ASCII Unit Separator),
+# not tab — see the comment on FS_U in bootstrap.sh. Joining via IFS keeps the
+# field COUNT correct by construction: the merged file now carries six columns
+# (id, desc, type, packages, requires, adopt_if_present) and a row short by one
+# would shift every later field.
+caps_row() {
+    local IFS="$FS_U"
+    printf '%s\n' "$*"
+}
+
+# $1 (optional): the adopt_if_present path for the `vscode` row, i.e. "this
+# capability is already installed on the machine".
 make_caps() {
-    # Fields are separated by FS_U (ASCII Unit Separator), not tab — see the
-    # comment on FS_U in bootstrap.sh. `ext-pack` deliberately has an EMPTY
-    # packages field in no row, but `feature` capabilities do, and a tab
-    # separator would collapse those and shift `requires` into `packages`.
-    printf 'alpha%sAlpha tool%sformula%salpha%s\n' "$FS_U" "$FS_U" "$FS_U" "$FS_U"
-    printf 'vscode%sVisual Studio Code%scask%svisual-studio-code%s\n' "$FS_U" "$FS_U" "$FS_U" "$FS_U"
-    printf 'ext-pack%sEditor extension pack%sextension%ssome.extension%svscode\n' "$FS_U" "$FS_U" "$FS_U" "$FS_U"
-    printf 'zzz-last%sLast capability%sformula%szzz%s\n' "$FS_U" "$FS_U" "$FS_U" "$FS_U"
+    caps_row alpha      "Alpha tool"            formula   alpha                ""       ""
+    caps_row vscode     "Visual Studio Code"    cask      visual-studio-code   ""       "${1:-}"
+    caps_row ext-pack   "Editor extension pack" extension some.extension       vscode   ""
+    caps_row zzz-last   "Last capability"       formula   zzz                  ""       ""
     # A `feature` capability: no packages, but it DOES declare `requires`. With a
     # tab separator the empty field collapses and `vscode` is read as its
     # package list — installing a nonexistent formula.
-    printf 'feat-gated%sConfig-only tool%sfeature%s%svscode\n' "$FS_U" "$FS_U" "$FS_U" "$FS_U"
+    caps_row feat-gated "Config-only tool"      feature   ""                   vscode   ""
 }
 
 # Drive gather_optional_tools with a scripted answer file and echo the result.
@@ -84,11 +92,11 @@ run_prompts() {
         HAS_PRIOR_PREFS="$has_prior"
         INTERACTIVE=1
         MERGED_CAPABILITIES_FILE="$WORK/caps.tsv"
-        # `requires:` gating asks whether the required capability is already
-        # present, via its adopt_if_present path in the layer cache. Point that
-        # at a controlled dir: the real ~/.local/share cache would make the
-        # result depend on what the developer happens to have installed.
-        LAYER_CACHE="${LAYER_CACHE_OVERRIDE:-$WORK/empty-cache}"
+        # gather_optional_tools resolves `requires:` entirely from the merged
+        # registry above, so it never reads the layer cache. Point it at an
+        # empty dir anyway, so a regression that reintroduces a cache lookup
+        # fails here instead of depending on what the developer has installed.
+        LAYER_CACHE="$WORK/empty-cache"
         SELECTED_CAPABILITIES=()
         # Answers arrive on the function's stdin. The capability list must come
         # from somewhere else entirely (FD 3) — that separation IS the fix, so
@@ -165,19 +173,14 @@ assert_eq "  a feature capability's requires survives an empty packages field" \
 # it, via the capability's own adopt_if_present path. This is what replaced the
 # hardcoded `command -v code` probe, so it needs its own coverage: a layer that
 # names a different editor must gate on that editor, not on VS Code.
-mkdir -p "$WORK/present-cache/lyr"
+# `adopt_if_present` is read from the MERGED registry column, not by re-globbing
+# the layer cache — the merge already decided which layer's definition of an id
+# wins, and a second, differently-ordered lookup could disagree with it (and
+# with the engine). So the probe is staged as registry data here.
 touch "$WORK/present-marker"
-cat > "$WORK/present-cache/lyr/capabilities.yml" <<CAPS
----
-capabilities:
-  - id: vscode
-    desc: "Already installed"
-    type: cask
-    packages: visual-studio-code
-    adopt_if_present: "$WORK/present-marker"
-CAPS
+make_caps "$WORK/present-marker" > "$WORK/caps.tsv"
 printf 'y\nn\ny\nn\n' > "$WORK/vscode-present"
-result="$(LAYER_CACHE_OVERRIDE="$WORK/present-cache" run_prompts "$WORK/vscode-present")"
+result="$(run_prompts "$WORK/vscode-present")"
 assert_eq "an already-present requirement satisfies the gate" \
     "0|alpha ext-pack" "$result"
 
@@ -185,9 +188,12 @@ assert_eq "an already-present requirement satisfies the gate" \
 # would silently open.
 rm -f "$WORK/present-marker"
 printf 'y\nn\ny\n' > "$WORK/vscode-absent"
-result="$(LAYER_CACHE_OVERRIDE="$WORK/present-cache" run_prompts "$WORK/vscode-absent")"
+result="$(run_prompts "$WORK/vscode-absent")"
 assert_eq "  and does not when the adopt path is missing" \
     "0|alpha zzz-last" "$result"
+
+# Restore the unstaged registry for the remaining cases.
+make_caps > "$WORK/caps.tsv"
 
 # ── 7. An empty capability list is a no-op, not a crash ──────────────────────
 : > "$WORK/caps.tsv"

@@ -19,8 +19,8 @@ shell_cli_snippet_name: "050-computer-setup-cli.zsh"
 # Snippets are sourced by a lexical glob (`~/.zsh/*.zsh` in the layer zshrc), so
 # the prefix must sort lexically in the same order as it sorts numerically.
 # At width 2 a layer with priority >= 100 renders "100-" which sorts BEFORE
-# "20-", silently inverting load order — and load order is what makes
-# 10-path.zsh set PATH before later snippets probe it with `command -v`.
+# "20-", silently inverting load order — and load order is what makes a layer's
+# PATH snippet run before later snippets probe it with `command -v`.
 # 3 digits covers priorities 0-999.
 shell_priority_width: 3
 

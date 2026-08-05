@@ -33,8 +33,18 @@ ORCH_OWNER="mauro-lanza"
 ORCH_NAME="computer-setup"
 REPO_URL="git@github.com:${ORCH_OWNER}/${ORCH_NAME}.git"
 REPO_BRANCH="${BOOTSTRAP_BRANCH:-main}"
+# Raw file base, for the two things fetched before any checkout exists
+# (requirements.yml, the layer sync helper) and for the re-run hint in
+# require_tty. One definition so the hint can never name a URL that 404s.
+RAW_BASE="https://raw.githubusercontent.com/${ORCH_OWNER}/${ORCH_NAME}/${REPO_BRANCH}"
 
 # Highest layer schema_version this orchestrator understands.
+#
+# This duplicates `computer_setup_schema_version` in local.yml and the default
+# in scripts/computer-setup-layers. It cannot simply read local.yml: under the
+# `curl | bash` install path no checkout exists yet. scripts/check.sh asserts
+# all three agree, so a bump that misses one fails the suite rather than
+# silently accepting a layer the engine will later reject.
 SCHEMA_VERSION_MAX=1
 
 # Field separator for the merged capability/question/preset files.
@@ -70,7 +80,7 @@ require_tty() {
     if [[ "$INTERACTIVE" -eq 0 ]]; then
         error "No terminal available for prompts."
         error "Re-run attached to a TTY, e.g.:"
-        error "    bash <(curl -fsSL ${1:-<raw-url>/bootstrap.sh})"
+        error "    bash <(curl -fsSL ${RAW_BASE}/bootstrap.sh)"
         error "or clone the repo and run ./bootstrap.sh"
         exit 1
     fi
@@ -171,7 +181,7 @@ install_galaxy_collections() {
     info "Installing Ansible Galaxy collections..."
     local reqs="$SCRIPT_DIR/requirements.yml"
     if [[ ! -f "$reqs" ]]; then
-        local repo_raw="https://raw.githubusercontent.com/${ORCH_OWNER}/${ORCH_NAME}/${REPO_BRANCH}"
+        local repo_raw="$RAW_BASE"
         reqs="$(mktemp)"
         trap 'rm -f "$reqs"' RETURN
         if ! curl -fsSL "$repo_raw/requirements.yml" -o "$reqs"; then
@@ -228,8 +238,15 @@ ensure_gh_auth() {
 # PHASE 1 — Layer selection & fetch
 # ═════════════════════════════════════════════════════════════════════════════
 
+# Does the manifest exist and declare at least one layer? Asked at three points
+# in the layer-management flow; an empty `layers:` list is not a manifest.
+manifest_has_layers() {
+    [[ -f "$LAYERS_FILE" ]] || return 1
+    [[ "$(yq -r '.layers | length' "$LAYERS_FILE" 2>/dev/null || echo 0)" -gt 0 ]]
+}
+
 show_layers() {
-    if [[ -f "$LAYERS_FILE" ]] && [[ "$(yq -r '.layers | length' "$LAYERS_FILE")" -gt 0 ]]; then
+    if manifest_has_layers; then
         yq -r '.layers | sort_by(.priority) | .[] | "    • \(.name) (priority \(.priority)) → \(.repo)"' "$LAYERS_FILE"
     else
         echo "    (none)"
@@ -241,7 +258,7 @@ manage_layers() {
     # A non-interactive run cannot answer "which layers?". An existing manifest
     # is used as-is; a missing one is fatal rather than a silently empty setup.
     if [[ -n "$ANSWERS_FILE" ]]; then
-        if [[ -f "$LAYERS_FILE" ]] && [[ "$(yq -r '.layers | length' "$LAYERS_FILE")" -gt 0 ]]; then
+        if manifest_has_layers; then
             ok "Using existing layer manifest (${LAYERS_FILE})"
             return
         fi
@@ -258,7 +275,7 @@ manage_layers() {
     show_layers
     echo
 
-    if [[ -f "$LAYERS_FILE" ]] && [[ "$(yq -r '.layers | length' "$LAYERS_FILE")" -gt 0 ]]; then
+    if manifest_has_layers; then
         if ! ask_yn "Reconfigure layers?" "n"; then
             ok "Keeping existing layer manifest"
             return
@@ -317,7 +334,7 @@ manage_layers() {
 clone_layers() {
     [[ ! -f "$LAYERS_FILE" ]] && return
     if [[ ! -x "$LAYER_SYNC_SCRIPT" ]]; then
-        local repo_raw="https://raw.githubusercontent.com/${ORCH_OWNER}/${ORCH_NAME}/${REPO_BRANCH}"
+        local repo_raw="$RAW_BASE"
         LAYER_SYNC_SCRIPT="$(mktemp)"
         trap 'rm -f "$LAYER_SYNC_SCRIPT"' RETURN
         curl -fsSL "$repo_raw/scripts/computer-setup-layers" -o "$LAYER_SYNC_SCRIPT"
@@ -335,52 +352,81 @@ clone_layers() {
 # PHASE 2 — Build preferences
 # ═════════════════════════════════════════════════════════════════════════════
 
-# Merged capabilities across all layers as TSV rows:
-#   id desc type packages requires
-# Layers are processed in DESCENDING priority so the highest-priority definition
-# of any given id wins; each id appears once (union, dedup by id). The `id` is
-# the capability token written to ~/.mac-prefs.yml as a selection.
+# ─── Layer merge primitive ───────────────────────────────────────────────────
+# Merge one filename across every layer into a single FS_U-delimited file.
+#
+# Layers are visited in DESCENDING priority and rows are deduped on their first
+# field, so the highest-priority layer's definition of any id wins wholesale.
+# That mirrors the engine's union-by-id merge (roles/computer_setup/tasks/
+# merge_layer_{capabilities,questions}.yml), which sorts ASCENDING and lets the
+# last write win — the same result reached from the other end.
+#
+# The row is written through verbatim rather than being split into named fields
+# and reassembled: the caller's yq projection is the single definition of the
+# column layout, so adding a column means editing one string, not two.
+merge_layer_file() {
+    local filename="$1" projection="$2" outfile="$3"
+    local seen=" " order name src line id
+
+    [[ -f "$LAYERS_FILE" ]] || return 0
+
+    order="$(yq -r '.layers | sort_by(.priority) | reverse | .[].name' "$LAYERS_FILE" 2>/dev/null || true)"
+    for name in $order; do
+        src="$LAYER_CACHE/$name/$filename"
+        [[ -f "$src" ]] || continue
+        # yq -r on a malformed file would emit nothing and succeed, so the layer
+        # would be silently ignored. Report it instead.
+        if ! yq '.' "$src" >/dev/null 2>&1; then
+            warn "Layer '$name' has an invalid $filename — skipping it."
+            continue
+        fi
+        while IFS= read -r line; do
+            id="${line%%"$FS_U"*}"
+            [[ -z "$id" ]] && continue
+            [[ "$seen" == *" $id "* ]] && continue
+            seen="${seen}${id} "
+            printf '%s\n' "$line" >> "$outfile"
+        done < <(yq -r "$projection" "$src" | tr '\t' "$FS_U")
+    done
+    return 0
+}
+
+# Number of rows a merge produced.
+merged_count() {
+    [[ -s "$1" ]] || { printf '0'; return 0; }
+    wc -l < "$1" | tr -d ' '
+}
+
+# Merged capabilities. Columns:
+#   id  desc  type  packages  requires  adopt_if_present
+# `id` is the capability token written to ~/.mac-prefs.yml as a selection.
 load_capabilities() {
     MERGED_CAPABILITIES_FILE="$(mktemp)"
 
     if [[ ! -f "$LAYERS_FILE" ]]; then
         warn "No layer manifest — no capabilities offered."
-        return
+        return 0
     fi
 
-    local seen=" " order name cat
-    order="$(yq -r '.layers | sort_by(.priority) | reverse | .[].name' "$LAYERS_FILE" 2>/dev/null || true)"
-    for name in $order; do
-        cat="$LAYER_CACHE/$name/capabilities.yml"
-        [[ -f "$cat" ]] || continue
-        if ! yq '.' "$cat" >/dev/null 2>&1; then
-            warn "Layer '$name' has an invalid capabilities.yml — skipping it."
-            continue
-        fi
-        while IFS="$FS_U" read -r id desc type pkgs requires; do
-            [[ -z "$id" ]] && continue
-            [[ "$seen" == *" $id "* ]] && continue
-            seen="${seen}${id} "
-            printf '%s%s%s%s%s%s%s%s%s\n' \
-                "$id" "$FS_U" "$desc" "$FS_U" "$type" "$FS_U" "$pkgs" "$FS_U" "$requires" \
-                >> "$MERGED_CAPABILITIES_FILE"
-        done < <(yq -r '.capabilities[]? | [.id, .desc, .type, (.packages // ""), (.requires // "")] | @tsv' "$cat" | tr '\t' "$FS_U")
-    done
+    merge_layer_file capabilities.yml \
+        '.capabilities[]? | [.id, .desc, .type, (.packages // ""), (.requires // ""),
+                             (.adopt_if_present // "")] | @tsv' \
+        "$MERGED_CAPABILITIES_FILE"
 
     local count
-    count="$(wc -l < "$MERGED_CAPABILITIES_FILE" | tr -d ' ')"
+    count="$(merged_count "$MERGED_CAPABILITIES_FILE")"
     if [[ "$count" -eq 0 ]]; then
         warn "No capabilities declared by any layer — no optional tools to offer."
     else
         ok "Capabilities: ${count} optional item(s) across layers"
     fi
+    return 0
 }
 
-# Merged questions across all layers as TSV rows:
-#   id type prompt default options validate
+# Merged questions. Columns:
+#   id  type  prompt  default  options(csv)  validate
 # `options` is a comma-separated list of option values (empty for non-select).
 # `validate` is an optional ERE a text/path answer must match (empty for none).
-# Same merge rule as capabilities: descending priority, union by id, first wins.
 #
 # A question is a single-select or free-text decision the MACHINE makes. The
 # capability menu expresses only independent yes/no, so anything "pick one"
@@ -388,32 +434,17 @@ load_capabilities() {
 load_questions() {
     MERGED_QUESTIONS_FILE="$(mktemp)"
 
-    [[ ! -f "$LAYERS_FILE" ]] && return
-
-    local seen=" " order name qf
-    order="$(yq -r '.layers | sort_by(.priority) | reverse | .[].name' "$LAYERS_FILE" 2>/dev/null || true)"
-    for name in $order; do
-        qf="$LAYER_CACHE/$name/questions.yml"
-        [[ -f "$qf" ]] || continue
-        if ! yq '.' "$qf" >/dev/null 2>&1; then
-            warn "Layer '$name' has an invalid questions.yml — skipping it."
-            continue
-        fi
-        while IFS="$FS_U" read -r id type prompt default options validate; do
-            [[ -z "$id" ]] && continue
-            [[ "$seen" == *" $id "* ]] && continue
-            seen="${seen}${id} "
-            printf '%s%s%s%s%s%s%s%s%s%s%s\n' \
-                "$id" "$FS_U" "$type" "$FS_U" "$prompt" "$FS_U" "$default" \
-                "$FS_U" "$options" "$FS_U" "$validate" \
-                >> "$MERGED_QUESTIONS_FILE"
-        done < <(yq -r '.questions[]? | [.id, .type, (.desc // .prompt // .id), (.default // ""),
-                        ([.options[]?.value] | join(",")), (.validate // "")] | @tsv' "$qf" | tr '\t' "$FS_U")
-    done
+    merge_layer_file questions.yml \
+        '.questions[]? | [.id, .type, (.desc // .id), (.default // ""),
+                          ([.options[]?.value] | join(",")), (.validate // "")] | @tsv' \
+        "$MERGED_QUESTIONS_FILE"
 
     local count
-    count="$(wc -l < "$MERGED_QUESTIONS_FILE" | tr -d ' ')"
+    count="$(merged_count "$MERGED_QUESTIONS_FILE")"
     [[ "$count" -gt 0 ]] && ok "Questions: ${count} decision(s) across layers"
+    # A bare [[ ]] as the last statement returns 1 when no layer declares a
+    # question, which under `set -e` would abort main().
+    return 0
 }
 
 # ─── Presets ─────────────────────────────────────────────────────────────────
@@ -430,33 +461,18 @@ PRESET_ID=""
 PRESET_CAPS=" "
 REVIEW_ANSWERS=true
 
-# TSV rows: id \t desc \t capabilities(csv) \t answers(k=v,csv)
+# Merged presets. Columns:
+#   id  desc  capabilities(csv)  answers(k=v,csv)
 load_presets() {
     MERGED_PRESETS_FILE="$(mktemp)"
 
-    [[ ! -f "$LAYERS_FILE" ]] && return
-
-    local seen=" " order name pf
-    order="$(yq -r '.layers | sort_by(.priority) | reverse | .[].name' "$LAYERS_FILE" 2>/dev/null || true)"
-    for name in $order; do
-        pf="$LAYER_CACHE/$name/presets.yml"
-        [[ -f "$pf" ]] || continue
-        if ! yq '.' "$pf" >/dev/null 2>&1; then
-            warn "Layer '$name' has an invalid presets.yml — skipping it."
-            continue
-        fi
-        while IFS="$FS_U" read -r id desc caps ans; do
-            [[ -z "$id" ]] && continue
-            [[ "$seen" == *" $id "* ]] && continue
-            seen="${seen}${id} "
-            printf '%s%s%s%s%s%s%s\n' \
-                "$id" "$FS_U" "$desc" "$FS_U" "$caps" "$FS_U" "$ans" \
-                >> "$MERGED_PRESETS_FILE"
-        done < <(yq -r '.presets[]? | [.id, (.desc // .id),
+    merge_layer_file presets.yml \
+        '.presets[]? | [.id, (.desc // .id),
                         ([.capabilities[]?] | join(",")),
-                        ((.answers // {}) | to_entries | map(.key + "=" + (.value | tostring)) | join(","))]
-                        | @tsv' "$pf" | tr '\t' "$FS_U")
-    done
+                        ((.answers // {}) | to_entries
+                         | map(.key + "=" + (.value | tostring)) | join(","))] | @tsv' \
+        "$MERGED_PRESETS_FILE"
+    return 0
 }
 
 # The preset's answer for one question id, empty when the preset does not set it.
@@ -542,10 +558,8 @@ ANSWERS_FILE=""
 
 load_answers_file() {
     local f="$1"
-    if [[ ! -f "$f" ]]; then
-        error "No such answers file: $f"
-        exit 1
-    fi
+    # Existence is already checked in parse_args, so the run fails before any
+    # prerequisite is installed. Only validity is re-checked here.
     if ! yq '.' "$f" >/dev/null 2>&1; then
         error "Answers file is not valid YAML: $f"
         exit 1
@@ -648,18 +662,25 @@ prior_answer() {
 # Is a capability already present on this machine? Uses the capability's own
 # `adopt_if_present` path — layer data — so bootstrap names no tool.
 #
+# Reads the MERGED registry, not the raw per-layer files: the merge already
+# resolved which layer's definition of an id wins. Globbing the cache directly
+# would resolve by directory name instead, so two layers defining the same id
+# with different probes would disagree with the engine.
+#
 # Only the two path roots a probe cannot avoid are expanded here (`home_dir`,
 # `homebrew_prefix`); the engine templates every other value at apply time. Keep
 # this list in step with the `adopt_if_present` contract in docs/architecture.md.
 cap_is_present() {
     local id="$1" probe
-    probe="$(CS_CAP_ID="$id" yq -r \
-        '.capabilities[]? | select(.id == strenv(CS_CAP_ID)) | .adopt_if_present // ""' \
-        "$LAYER_CACHE"/*/capabilities.yml 2>/dev/null | grep -v '^$' | head -1)"
+    [[ -s "${MERGED_CAPABILITIES_FILE:-}" ]] || return 1
+    probe="$(awk -F"$FS_U" -v want="$id" '$1 == want { print $6; exit }' \
+        "$MERGED_CAPABILITIES_FILE")"
     [[ -z "$probe" ]] && return 1
-    probe="${probe//\{\{ home_dir \}\}/$HOME}"
+    # Collapse any inner whitespace first ({{ home_dir }}, {{home_dir}}, and
+    # {{  home_dir  }} are one token), so each root needs a single rule below.
+    probe="$(printf '%s' "$probe" |
+        sed -E 's/\{\{[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)[[:space:]]*\}\}/{{\1}}/g')"
     probe="${probe//\{\{home_dir\}\}/$HOME}"
-    probe="${probe//\{\{ homebrew_prefix \}\}/$HOMEBREW_PREFIX}"
     probe="${probe//\{\{homebrew_prefix\}\}/$HOMEBREW_PREFIX}"
     [[ -e "$probe" ]]
 }
@@ -692,8 +713,11 @@ gather_optional_tools() {
     # The list is read on FD 3, not stdin: `ask_yn` in the body reads stdin, and
     # a `done < file` redirect covers the body too — so every prompt would
     # consume the next capability line as its answer.
-    local id desc type pkgs requires default
-    while IFS="$FS_U" read -r -u 3 id desc type pkgs requires; do
+    # `adopt` is read but unused here: `read` assigns the remainder of the line
+    # to its last variable, so omitting it would fold adopt_if_present into
+    # `requires`. cap_is_present reads that column from the file directly.
+    local id desc type pkgs requires adopt default
+    while IFS="$FS_U" read -r -u 3 id desc type pkgs requires adopt; do
 
         # A capability may require another. It is offered only when that one is
         # satisfied — selected earlier in this run, or already present. Order in
@@ -906,12 +930,6 @@ write_prefs() {
 # PHASE 3 — Run Ansible
 # ═════════════════════════════════════════════════════════════════════════════
 
-# Keep GitHub access on SSH. This avoids macOS keychain prompts for HTTPS tokens.
-resolve_repo_url() {
-    REPO_URL="git@github.com:${ORCH_OWNER}/${ORCH_NAME}.git"
-    ok "Using GitHub SSH remote (no keychain prompts)"
-}
-
 run_playbook() {
     echo
     info "Running playbook..."
@@ -954,7 +972,16 @@ run_playbook() {
 # ═════════════════════════════════════════════════════════════════════════════
 # Main
 # ═════════════════════════════════════════════════════════════════════════════
+# The three merge files live for the whole run (the prompt loops read them on
+# FD 3), so they cannot be cleaned per-function. Remove them on any exit path.
+cleanup_merge_files() {
+    rm -f "${MERGED_CAPABILITIES_FILE:-}" \
+          "${MERGED_QUESTIONS_FILE:-}" \
+          "${MERGED_PRESETS_FILE:-}"
+}
+
 main() {
+    trap cleanup_merge_files EXIT
     parse_args "$@"
 
     reattach_stdin
@@ -1002,7 +1029,6 @@ main() {
     write_prefs
 
     # ── Phase 3 ──────────────────────────────────────────────────────────────
-    resolve_repo_url
     run_playbook
 
     echo

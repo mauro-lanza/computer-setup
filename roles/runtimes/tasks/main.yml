@@ -7,7 +7,7 @@
 # The capability ids are vars, not literals, so a layer may register a manager
 # under a different id. The task bodies stay bespoke on purpose — see
 # defaults/main.yml for why they are not layer data.
-- name: Check if nvm is available
+- name: Check if nvm is installed (to converge the default Node alias)
   ansible.builtin.stat:
     path: "{{ homebrew_prefix }}/opt/nvm/nvm.sh"
   register: runtimes_nvm_script
@@ -36,8 +36,9 @@
   changed_when: true
   when:
     - runtimes_nvm_script.stat.exists | default(false)
-    - runtimes_nvm_current_alias is failed
-      or (runtimes_nvm_current_alias.content | default('') | b64decode | trim) != runtimes_nvm_default_node
+    # `failed_when: false` on the slurp above means it never reports failed, so
+    # the missing-file case surfaces here as an absent `.content` instead.
+    - (runtimes_nvm_current_alias.content | default('') | b64decode | trim) != runtimes_nvm_default_node
 
 - name: Check if tfenv is available
   ansible.builtin.stat:

@@ -55,9 +55,15 @@ so the engine hardcodes no package names or paths:
   *selected* capabilities' `packages`, split by `type`. `type: extension`
   entries also carry a `manager:` and are grouped by it — the engine names no
   editor, and the managers themselves are layer data (`extension_managers`).
-- a capability may declare `requires: <id>`, and is then offered only when that
-  one is selected earlier in the run or already present (via its
+- a capability may declare `requires: <id>`, and is then **offered** only when
+  that one is selected earlier in the run or already present (via its
   `adopt_if_present` path). This replaced a hardcoded `command -v code` probe.
+  Note the scope: `requires` is a *menu* gate, enforced in `bootstrap.sh`
+  against the merged registry. The engine does not re-check it, so a
+  `selected_capabilities` list that names a gated id — hand-edited, or carried
+  in via `--answers` from an older machine — still installs it. That is
+  tolerable because the prefs file is the machine's own declaration, but it
+  means `requires` constrains what you are *asked*, not what can be *applied*.
 - **config deploys** (`computer_setup_config_deploys`) and **reminders**
   (`computer_setup_reminders`) come from the *active* capabilities.
 - Roles and shell snippets gate on membership in the active set; a snippet
@@ -186,6 +192,13 @@ a re-run is a deliberate "start from that instead".
 
 Presets live entirely in `bootstrap.sh`. The engine has no concept of them.
 
+Capabilities, questions and presets are all merged by one bootstrap helper,
+`merge_layer_file`, which walks the manifest in descending priority and dedupes
+rows on their first field. The caller supplies only the filename and a `yq`
+projection, so a column layout is defined in exactly one place. It reaches the
+same union-by-id result as the engine's `merge_layer_*.yml`, which walks
+ascending and lets the last write win.
+
 `bootstrap.sh --answers <file>` skips every prompt and takes the whole
 preference set from a file with the same shape `write_prefs` emits — so a
 previous machine's `~/.mac-prefs.yml` works directly, and "rebuild this machine"
@@ -255,7 +268,7 @@ layer data, reached through one of these interfaces:
 | Decision | Layer interface |
 |---|---|
 | Which editor(s) to manage — binary, settings key, extension install command | `extension_managers`; a capability declares `type: extension` + `manager:` |
-| Whether a capability applies at all | `requires: <capability-id>`, resolved against `adopt_if_present` |
+| Whether a capability is offered at all | `requires: <capability-id>`, resolved against `adopt_if_present` (bootstrap-side; see the capability model above) |
 | App-conditional macOS defaults (Rectangle, Raycast, …) | `macos_conditional_defaults[].app` |
 | Which whole-file shell configs exist (`zshrc`, `p10k.zsh`, …) | `shell_config_files` |
 | Which capability gates nvm / tfenv | `runtimes_*_capability` |
@@ -300,7 +313,11 @@ A small enumerated subset of categories 1 and 3 is reachable by a *question* —
 see the machine tier above. Layers are never widened.
 
 Categories 2 and 3 are reserved **by prefix**, not by name, so a newly added
-engine var is protected automatically.
+engine var is protected automatically. The reserved prefixes are
+`computer_setup_`, `drift_correction_` and `_cs_` — the last covering the
+engine's short-lived internal facts (`_cs_deploy_src` and friends in
+`deploy_layer_file`), which are just as much engine-owned names as the public
+ones.
 
 Category 3 is the security boundary. Layer vars land in play scope via
 `set_fact`, which outranks both role defaults and play vars — so without it, a

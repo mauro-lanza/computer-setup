@@ -14,20 +14,20 @@
 
 - name: Ensure wrapper script directory exists
   ansible.builtin.file:
-    path: "{{ drift_correction_wrapper_dir }}"
+    path: "{{ computer_setup_bin_dir }}"
     state: directory
     mode: "0755"
 
 - name: Deploy layer sync helper
   ansible.builtin.copy:
     src: "{{ playbook_dir }}/scripts/computer-setup-layers"
-    dest: "{{ drift_correction_wrapper_dir }}/computer-setup-layers"
+    dest: "{{ computer_setup_bin_dir }}/computer-setup-layers"
     mode: "0755"
 
 - name: Deploy the computer-setup runner script
   ansible.builtin.template:
     src: computer-setup-run.sh.j2
-    dest: "{{ drift_correction_runner_path }}"
+    dest: "{{ computer_setup_runner_path }}"
     mode: "0755"
   notify: Reload scheduled agents
 

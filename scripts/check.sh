@@ -113,6 +113,30 @@ expect_layer_failure question "question setting reserved key"
 # layer var may set, or the tier becomes a hole rather than a door.
 expect_layer_failure machine-tier "defines reserved key"
 
+# The highest supported layer schema_version is stated in three places that
+# cannot import from each other: bootstrap.sh runs before any checkout exists
+# under `curl | bash`, and the sync helper is deployed standalone. Duplication
+# is therefore forced — but disagreement is not. A bump that updates only one
+# would let bootstrap accept a layer the engine then rejects, on a fresh machine,
+# mid-provision. Assert them equal instead of documenting that they should be.
+echo "==> Schema version agreement"
+sv_bootstrap="$(sed -n 's/^SCHEMA_VERSION_MAX=\([0-9]*\)$/\1/p' bootstrap.sh)"
+sv_playbook="$(yq -r '.[0].vars.computer_setup_schema_version' local.yml)"
+sv_sync="$(sed -n 's/.*schema_version_max=\([0-9]*\)$/\1/p' scripts/computer-setup-layers)"
+if [[ -z "$sv_bootstrap" || -z "$sv_playbook" || -z "$sv_sync" ]]; then
+    echo "ERROR: could not read the schema version from all three sources" >&2
+    echo "       bootstrap.sh='$sv_bootstrap' local.yml='$sv_playbook' sync='$sv_sync'" >&2
+    exit 1
+fi
+if [[ "$sv_bootstrap" != "$sv_playbook" || "$sv_bootstrap" != "$sv_sync" ]]; then
+    echo "ERROR: schema version disagreement" >&2
+    echo "       bootstrap.sh SCHEMA_VERSION_MAX      = $sv_bootstrap" >&2
+    echo "       local.yml computer_setup_schema_version = $sv_playbook" >&2
+    echo "       scripts/computer-setup-layers default = $sv_sync" >&2
+    exit 1
+fi
+echo "  ok  all three agree on schema_version $sv_bootstrap"
+
 # A gate, not an advisory: .ansible-lint waives the two rules that contradict
 # this architecture, so any finding is real. Missing ansible-lint is a FAILURE —
 # a fresh machine is where the tool is absent and where "passed" must mean it.

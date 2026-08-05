@@ -26,14 +26,14 @@ set -uo pipefail
 MODE="${1:-}"
 shift 2>/dev/null || true
 
-REPO_URL="{{ drift_correction_repo_url }}"
-REPO_BRANCH="{{ drift_correction_repo_branch }}"
-PREFS_FILE="{{ drift_correction_prefs_file }}"
-LAYER_CACHE="{{ drift_correction_layer_cache }}"
-LAYERS_FILE="{{ drift_correction_layers_manifest }}"
+REPO_URL="{{ repo_url }}"
+REPO_BRANCH="{{ repo_branch }}"
+PREFS_FILE="{{ computer_setup_prefs_file }}"
+LAYER_CACHE="{{ computer_setup_layer_cache }}"
+LAYERS_FILE="{{ computer_setup_layers_manifest }}"
 LOG_FILE="{{ computer_setup_log_file }}"
 ANSIBLE_PULL="{{ homebrew_prefix }}/bin/ansible-pull"
-LAYER_SYNC="{{ drift_correction_wrapper_dir }}/computer-setup-layers"
+LAYER_SYNC="{{ computer_setup_bin_dir }}/computer-setup-layers"
 MAX_LINES={{ drift_correction_log_max_lines }}
 CONNECTIVITY_TIMEOUT={{ drift_correction_connectivity_timeout }}
 

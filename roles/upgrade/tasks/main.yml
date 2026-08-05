@@ -128,7 +128,7 @@
       register: upgrade_galaxy
       changed_when: "'Installing' in upgrade_galaxy.stdout"
 
-    - name: Check if nvm is available
+    - name: Check if nvm is installed (to upgrade Node)
       ansible.builtin.stat:
         path: "{{ homebrew_prefix }}/opt/nvm/nvm.sh"
       register: upgrade_nvm_script

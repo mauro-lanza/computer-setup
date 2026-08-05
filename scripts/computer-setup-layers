@@ -71,6 +71,8 @@ validate_manifest_entry() {
 }
 
 sync_layers() {
+    # Default duplicated from local.yml's computer_setup_schema_version;
+    # scripts/check.sh asserts they agree. Normally passed in with --schema-version.
     local manifest="" cache="" schema_version_max=1
     while [[ $# -gt 0 ]]; do
         case "$1" in

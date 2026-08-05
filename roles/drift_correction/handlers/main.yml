@@ -2,10 +2,14 @@
 # Reload every scheduled agent. `bootout` before `bootstrap` because launchd
 # will not replace a loaded job in place; the `|| true` covers the first run,
 # when there is nothing to boot out yet.
+#
+# The GUI domain target is resolved from Ansible facts, the same way the removal
+# task in tasks/main.yml does it — not from a `$(id -u)` subshell, so both paths
+# always name the identical launchd domain.
 - name: Reload scheduled agents
   ansible.builtin.shell: |
-    launchctl bootout gui/$(id -u) "{{ home_dir }}/Library/LaunchAgents/{{ agent.label }}.plist" 2>/dev/null || true
-    launchctl bootstrap gui/$(id -u) "{{ home_dir }}/Library/LaunchAgents/{{ agent.label }}.plist"
+    launchctl bootout gui/{{ ansible_facts['user_uid'] }} "{{ home_dir }}/Library/LaunchAgents/{{ agent.label }}.plist" 2>/dev/null || true
+    launchctl bootstrap gui/{{ ansible_facts['user_uid'] }} "{{ home_dir }}/Library/LaunchAgents/{{ agent.label }}.plist"
   args:
     executable: /bin/zsh
   loop: "{{ drift_correction_agents }}"

@@ -41,6 +41,11 @@
     computer_setup_reserved_layer_prefixes:
       - computer_setup_
       - drift_correction_
+      # Engine-internal scratch facts (deploy_layer_file's _cs_tpl_src,
+      # _cs_file_src, _cs_deploy_src, _cs_deploy_as_template). Short-lived, but
+      # a layer defining one would be shadowing an engine variable, which is
+      # exactly what "reserved by prefix" is supposed to make impossible.
+      - _cs_
     # Individual keys a layer may never define:
     #   1. Machine-local prefs — belong in computer_setup_prefs_file.
     #   2. Engine-owned play vars — overriding these breaks the orchestrator.
@@ -320,7 +325,7 @@
               | zip(_ext_grouped | map(attribute=1)
                     | map('map', attribute='packages')
                     | map('join', ' ') | map('split') | list)) }}
-    # Flattened list of config deploys ({src, dest, kind?}) from active caps.
+    # Flattened list of config deploys ({src, dest, mode?}) from active caps.
     computer_setup_config_deploys: >-
       {{ _active_entries | selectattr('config', 'defined')
          | map(attribute='config') | flatten | list }}

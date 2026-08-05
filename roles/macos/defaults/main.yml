@@ -15,5 +15,5 @@ macos_conditional_defaults: []
 
 # Read-only helper that diffs live defaults against the declared values and
 # emits paste-ready YAML.
-macos_capture_bin_dir: "{{ home_dir }}/.local/bin"
+macos_capture_bin_dir: "{{ computer_setup_bin_dir }}"
 macos_capture_path: "{{ macos_capture_bin_dir }}/macos-capture"

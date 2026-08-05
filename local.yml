@@ -24,10 +24,15 @@
     # Written by bootstrap.sh. Absent = run standalone on empty defaults.
     computer_setup_layers_manifest: "{{ home_dir }}/.config/computer-setup/layers.yml"
     computer_setup_prefs_file: "{{ home_dir }}/.mac-prefs.yml"
+    # Where this system installs the executables it owns (the runner, the layer
+    # sync helper, macos-capture, and any capability shipping a script). One
+    # play var because three roles create and write into it; two independent
+    # role defaults for the same directory could drift apart silently.
+    computer_setup_bin_dir: "{{ home_dir }}/.local/bin"
     # Single entry point for every ansible-pull: deployed by drift_correction,
     # invoked by the shell role's CLI functions. Play-scoped because two roles
     # reference it.
-    computer_setup_runner_path: "{{ home_dir }}/.local/bin/computer-setup-run"
+    computer_setup_runner_path: "{{ computer_setup_bin_dir }}/computer-setup-run"
     # Rolling log the runner appends to and `drift-log` tails. Play-scoped for
     # the same reason: drift_correction writes it, shell's CLI reads it.
     computer_setup_log_file: "{{ home_dir }}/Library/Logs/computer-setup.log"
