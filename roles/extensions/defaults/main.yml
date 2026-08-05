@@ -1,26 +1,21 @@
 ---
-# Editor extension managers, supplied as layer data. The engine knows nothing
-# about VS Code — or any specific editor. A manager describes how to list and
-# install extensions for one editor, and where its user settings live:
+# Editor extension managers, supplied as layer data — adding Cursor or VSCodium
+# is a layer edit, not an engine change. See "The engine names no tool" in
+# docs/architecture.md.
 #
-#   extension_managers:
-#     - id: vscode                     # matches a capability's `manager:`
-#       capability: vscode             # active-capability gate for this manager
-#       binary: /Applications/…/code   # absent binary = manager skipped
-#       list_args:    [--list-extensions]
-#       install_args: [--install-extension]
-#       settings_key:  vscode/settings.json   # layer file/template key (optional)
-#       settings_dest: ~/Library/…/settings.json
-#
-# Adding Cursor, VSCodium or Windsurf is therefore a layer edit, not an engine
-# change. No editor is named anywhere in engine code.
+# Item schema:
+#   id            matches a capability's `manager:`
+#   capability    active-capability gate for this manager
+#   binary        absent binary = manager skipped
+#   list_args     default [--list-extensions]
+#   install_args  default [--install-extension]
+#   settings_key  layer file/template key (optional)
+#   settings_dest where those settings are written (optional)
 extension_managers: []
 
 # Extensions opted into via capabilities — derived by the engine from the
-# selected capabilities of `type: extension`, keyed by manager id.
-#
-# There is deliberately no "always install these" list beside it: a capability
-# that should always apply is one the layer's preset always selects, so the
-# selection stays visible in ~/.config/computer-setup/prefs.yml instead of being invisible layer
-# state.
+# selected capabilities of `type: extension`, keyed by manager id. There is
+# deliberately no "always install these" list beside it: a capability that should
+# always apply is one a preset always selects, which keeps the selection visible
+# in the prefs file rather than as invisible layer state.
 extension_optional: {}

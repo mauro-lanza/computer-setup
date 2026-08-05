@@ -3,15 +3,15 @@
 # Set to false (e.g. via -e homebrew_update=false) to skip on re-runs.
 homebrew_update: true
 
-# Safe empty defaults — the actual baseline is the variable interface, supplied
-# and merged (list-append) across content layers' vars.yml:
+# Safe empty defaults — the real baseline is layer content (list-append):
 #   homebrew_baseline_formulae — formulae always installed
-#   homebrew_baseline_casks     — casks always installed
-#   homebrew_adopt_casks         — casks safe to `--adopt` when already present
-# See computer-setup-layer-public for the shareable baseline.
+#   homebrew_baseline_casks    — casks always installed
+#   homebrew_adopt_casks       — casks safe to `--adopt` when already present.
+#                                Not every cask is: see "Do not adopt casks with
+#                                protected payloads" in docs/operations.md.
 #
-# NOTE: engine prerequisites (git, gh, yq, ansible) are installed by bootstrap.sh
-# in Phase 0, before any layer is cloned — they are not listed here.
+# Engine prerequisites (git, gh, yq, ansible) are installed by bootstrap.sh in
+# Phase 0, before any layer is cloned — they are not listed here.
 homebrew_baseline_formulae: []
 homebrew_baseline_casks: []
 homebrew_adopt_casks: []

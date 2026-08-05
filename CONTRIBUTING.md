@@ -60,6 +60,28 @@ The **variable interface** plus `schema_version` is the public API — see
 orchestrator's supported maximum in `local.yml` and `bootstrap.sh`, when making a
 breaking change to it.
 
+## Where rationale lives
+
+**Rationale lives in [docs/architecture.md](docs/architecture.md). Code states
+the rule in a line or two and points there.**
+
+This repo records *why* things are built the way they are, which is worth
+keeping — but the same argument had been written out in full in up to six
+places, and prose that exists twice is prose that goes stale in one of them. The
+layers already learned this once: `capabilities.yml` in both content layers says
+"the schema is defined once, in the engine — do not restate it here, that is how
+the two copies drifted apart before."
+
+So, when you are about to explain a decision in a comment:
+
+- Is it **what this variable means**, or the **shape of an item** in it? That is
+  interface documentation — it belongs next to the variable.
+- Is it **why the design is this way**, what was rejected, or what broke once?
+  That belongs in `docs/architecture.md`. Leave a one-line rule and a pointer.
+
+A comment that reads like a paragraph is a signal you are writing the second
+copy.
+
 ## Adding a role or capability
 
 - New roles go under `roles/` and into the `roles:` list in `local.yml` with a

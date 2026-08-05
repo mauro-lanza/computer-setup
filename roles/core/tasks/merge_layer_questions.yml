@@ -2,12 +2,7 @@
 # Merge one layer's questions.yml into the question registry, a dict keyed by
 # question id. Loop var: `_layer`. Layers run in ascending priority, so a
 # higher-priority layer's entry for the same id wins outright — same rule as
-# capabilities.
-#
-# A question is a decision the MACHINE makes, not the layer: which editor, where
-# repositories live. The layer declares the question and its options; the answer
-# lives in the prefs file. Capabilities can only express "yes/no, independently",
-# so anything single-select has no other representation.
+# capabilities. See "The question model" in docs/architecture.md.
 
 - name: "[{{ _layer.name }}] Stat questions.yml"
   ansible.builtin.stat:
@@ -62,10 +57,9 @@
   when: _layer_questions_stat.stat.exists
 
 # A question's `set:` payload lands in play scope exactly as a layer var does, so
-# it must clear the SAME reserved-key guard. Without this a layer that cannot
-# write `computer_setup_repo_url` in vars.yml could declare a question whose option
-# sets it, and redirect the unattended morning ansible-pull. Questions are layer
-# content; only the ANSWER is machine-local.
+# it must clear the SAME reserved-key guard — questions are layer content, only
+# the ANSWER is machine-local. See "Questions are an escalation path, and are
+# guarded as one" in docs/architecture.md.
 - name: "[{{ _layer.name }}] Assert question payloads set no reserved keys"
   ansible.builtin.assert:
     that:
@@ -87,9 +81,8 @@
              | selectattr('set', 'defined') | map(attribute='set') | map('list') | flatten))
          | unique | list }}
     _reserved_prefix_re: "^({{ computer_setup_reserved_layer_prefixes | default(['computer_setup_']) | join('|') }})"
-    # The machine tier: keys a question MAY set although a layer var may not,
-    # because the decision is machine-local. Subtracted from the reserved set
-    # rather than exempted case by case, so the two lists cannot drift apart.
+    # The machine tier is subtracted from the reserved set rather than exempted
+    # case by case, so the two lists cannot drift apart.
     _reserved: >-
       {{ ((computer_setup_reserved_layer_keys | default([]))
           + (_keys | select('match', _reserved_prefix_re) | list))

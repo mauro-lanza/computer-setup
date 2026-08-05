@@ -48,19 +48,16 @@
       # a layer defining one would be shadowing an engine variable, which is
       # exactly what "reserved by prefix" is supposed to make impossible.
       - _cs_
-    # Keys a QUESTION may set even though a layer's vars.yml may not. This is
-    # the machine tier: the decision is machine-local, so a layer must not make
-    # it, but the machine must be able to. Deliberately an enumeration, not a
-    # prefix — widening it is a security decision and should require an edit
-    # here, with a reason. See docs/architecture.md#the-machine-tier.
+    # The machine tier: keys a QUESTION may set although a layer's vars.yml may
+    # not. An enumeration, not a prefix — widening it is a security decision and
+    # must require an edit here. See "The machine tier" in docs/architecture.md.
     computer_setup_machine_tier_keys:
       - repositories_base_dir
       - drift_correction_enabled
       - drift_correction_schedule_hour
       - drift_correction_upgrade_schedule_hour
-      # Commit identity: a private layer PROPOSES it via a question `default:`,
-      # the machine's answer wins. Kept in the reserved list below too — see
-      # docs/architecture.md for why proposing and setting must stay distinct.
+      # Also in the reserved list below, deliberately: a layer PROPOSES identity
+      # via a question default, it never sets it.
       - git_user_name
       - git_user_email
     # Individual keys a layer may never define.
@@ -100,19 +97,11 @@
           {{ (_layers_manifest.layers | default([], true))
              | sort(attribute='priority') }}
 
-    # ─── Questions and answers ────────────────────────────────────────────────────
-    # Questions are layer-declared; answers are machine-local (prefs file).
-    #
-    # ORDER MATTERS, and it is not the obvious one. Answers are applied TWICE:
-    #
-    #   1. before the layer var merge, so a layer's vars.yml can template against an
-    #      answer the way it templates against a play var. `repositories_base_dir` is
-    #      the reason: layers write `folder: "{{ repositories_base_dir }}/thing"`, and
-    #      include_vars templates those values as it reads them. Applied only after
-    #      the merge, answering "put my repos in ~/src" would have templated the old
-    #      value into every repository entry and silently done nothing.
-    #   2. after the merge, so an answer still OUTRANKS a layer var of the same name.
-    #      The machine is more specific than the layer that proposed the question.
+    # ─── Questions and answers ────────────────────────────────────────────────
+    # ORDER MATTERS and is not the obvious one: answers are applied TWICE, once
+    # before the layer var merge (so a layer's vars.yml can template against an
+    # answer) and once after (so an answer outranks a layer var of the same
+    # name). See "Resolution order" in docs/architecture.md.
     - name: Merge each layer's questions.yml into the question registry
       ansible.builtin.include_tasks: merge_layer_questions.yml
       loop: "{{ computer_setup_active_layers }}"
@@ -265,9 +254,8 @@
          | flatten | unique | list }}
 
 - name: Probe for adoptable capabilities already present
-  # A capability declaring `adopt_if_present: <path>` becomes active when that
-  # path exists, even if never selected — so an already-configured machine is
-  # adopted and kept managed. The engine hardcodes no tool paths.
+  # `adopt_if_present: <path>` makes a capability active when that path exists,
+  # even if never selected. See "The capability model" in docs/architecture.md.
   ansible.builtin.stat:
     path: "{{ item.value.adopt_if_present }}"
   loop: >-

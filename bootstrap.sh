@@ -451,15 +451,10 @@ load_questions() {
 }
 
 # ─── Presets ─────────────────────────────────────────────────────────────────
-# A preset is a named bundle of answers + capability selections. It is a PURE
-# PREFILL: it only supplies the defaults the prompts start from, and is never
-# recorded in the prefs file. A machine set up from a preset is indistinguishable
-# from one answered by hand, so a preset can be edited later without silently
-# reconfiguring machines that once used it.
-#
-# This exists because "every decision is re-answerable" and "bootstrap asks 50+
-# questions one at a time" are the same statement. A preset plus "review? [y/N]"
-# keeps the first true without making a fresh machine unbearable.
+# A named bundle of answers + capability selections, and a PURE PREFILL: it only
+# seeds the prompts and is never recorded in the prefs file. Presets live
+# entirely here; the engine has no concept of them. See "Presets" in
+# docs/architecture.md.
 PRESET_ID=""
 PRESET_CAPS=" "
 REVIEW_ANSWERS=true
@@ -547,20 +542,11 @@ choose_preset() {
 }
 
 # ─── Non-interactive answers (zero-touch rebuild) ────────────────────────────
-# `bootstrap.sh --answers <file>` skips every prompt and takes the whole
-# preference set from a YAML file with the same shape bootstrap writes:
-#
-#   answers: {editor: zed, git-email: me@example.com, ...}
-#   selected_capabilities: [nvm, ...]
-#
-# That makes "rebuild this machine" one command, which is what actually makes
-# every-decision-is-a-prompt survivable. The file is the same shape write_prefs
-# emits, so ~/.config/computer-setup/prefs.yml from an old machine works directly.
-#
-# Nothing here is required: an answer a layer no longer asks for is dropped by
-# the engine, and a question the file does not answer falls back to the default
-# its layer declares. So a partial file is valid, and an empty one means "take
-# every layer default".
+# `--answers <file>` skips every prompt and takes the whole preference set from a
+# file with the same shape write_prefs emits, so a previous machine's prefs.yml
+# works directly. Nothing in it is required: unknown answers are dropped and
+# unanswered questions fall back to their layer default, so a partial file is
+# valid and an empty one means "take every layer default".
 ANSWERS_FILE=""
 
 load_answers_file() {

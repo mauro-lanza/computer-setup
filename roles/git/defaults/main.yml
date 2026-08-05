@@ -20,32 +20,18 @@ git_config_sections: {}
 git_global_gitignore_entries: []
 
 # ─── Where the managed config lives ──────────────────────────────────────────
-# This role owns ONE file completely, and reaches ~/.gitconfig only to add a
-# single `include.path` pointing at it. Never replace ~/.gitconfig wholesale:
-# it carries the user's signing key, credential helper and includeIf rules.
-#
-# The include is appended, so git reads the managed values LAST and they still
-# win over anything earlier in ~/.gitconfig — full enforcement, no collateral
-# damage.
+# This role owns git_managed_config_path completely and reaches ~/.gitconfig only
+# to append one `include.path`. See "git config is included, not imposed" in
+# docs/operations.md.
 git_managed_config_dir: "{{ home_dir }}/.config/git"
 git_managed_config_path: "{{ git_managed_config_dir }}/computer-setup.gitconfig"
 
-# Per-directory identities, rendered as `includeIf gitdir:` blocks. This is what
-# makes the work/personal layer split actually work: git_user_name/email are
-# machine-local prefs (reserved from layers), so a work layer had no way to say
-# "use my work address under this directory".
+# Per-directory identities, rendered as `includeIf` blocks — how a work layer
+# supplies a work address without touching the machine-wide identity.
 #
 # Item schema: { condition: <git includeIf condition>, email:, name?: }
-# `name` defaults to the global git_user_name.
-#
-# `condition` is passed to git verbatim, so both forms work:
-#
-#   condition: "gitdir:~/Projects/work/"
-#       Matches by location. Git resolves symlinks first, so the pattern must be
-#       the REAL path (/private/tmp/... on macOS, not /tmp/...).
-#
-#   condition: "hasconfig:remote.*.url:git@github.com:acme/**"
-#       Matches by remote URL (git >= 2.36). Layout-independent, so work and
-#       personal checkouts can share one directory — which is what makes this
-#       usable without relocating existing clones.
+#   name       defaults to the global git_user_name
+#   condition  passed to git verbatim; both `gitdir:` and `hasconfig:` forms
+#              work, with a symlink caveat on `gitdir:` — see
+#              "Per-directory identities" in docs/operations.md.
 git_conditional_identities: []

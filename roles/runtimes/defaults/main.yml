@@ -1,13 +1,8 @@
 ---
-# Version managers the engine can drive. Each has a bespoke task pair, because
-# each is driven differently (nvm must be sourced into a shell; tfenv is a
-# binary) — and DELIBERATELY so.
-#
-# The obvious generalisation is a data table carrying each manager's shell
-# commands. That is rejected: layer vars would then be arbitrary shell executed
-# as the user on every drift run, which is exactly the remote-code-execution
-# path the reserved-key guard exists to close. Adding pyenv/rbenv/mise is a
-# small, reviewable engine change; making it layer data is not.
+# Version managers the engine can drive. Each keeps a bespoke task body on
+# purpose — generalising them into a data table would make layer vars into
+# arbitrary shell run on every drift run. See "Where this deliberately stops" in
+# docs/architecture.md.
 #
 # What IS data: which capability gates each manager, and which version to pin.
 

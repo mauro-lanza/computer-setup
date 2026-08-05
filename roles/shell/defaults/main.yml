@@ -6,13 +6,10 @@
 # everything in here (e.g. `for f in ~/.zsh/*.zsh(N); do source $f; done`).
 shell_zsh_config_dir: "{{ home_dir }}/.zsh"
 
-# Zero-padding width for the layer-priority prefix on deployed snippets.
-# Snippets are sourced by a lexical glob (`~/.zsh/*.zsh` in the layer zshrc), so
-# the prefix must sort lexically in the same order as it sorts numerically.
-# At width 2 a layer with priority >= 100 renders "100-" which sorts BEFORE
-# "20-", silently inverting load order — and load order is what makes a layer's
-# PATH snippet run before later snippets probe it with `command -v`.
-# 3 digits covers priorities 0-999.
+# Zero-padding width for the layer-priority prefix on deployed snippets. Sourcing
+# is a lexical glob, so the prefix must sort lexically the way it sorts
+# numerically: at width 2, priority 100 renders "100-" and sorts BEFORE "20-",
+# silently inverting load order. 3 digits covers priorities 0-999.
 shell_priority_width: 3
 
 # Tracks layer snippets created by this role. Cleanup only removes paths listed
@@ -21,8 +18,7 @@ shell_priority_width: 3
 shell_snippet_manifest_path: "{{ shell_zsh_config_dir }}/.computer-setup-snippets"
 
 # Whole-file shell configs resolved across layers. Keys are layer data, so a
-# layer using starship instead of Powerlevel10k just changes this list — no
-# prompt is assumed by the engine.
+# layer using starship instead of Powerlevel10k just changes this list.
 #
 # Item schema: { key: <layer file key>, dest: <path>, backup?: bool }
 shell_config_files:
