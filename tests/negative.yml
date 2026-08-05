@@ -24,4 +24,4 @@
   tasks:
     - name: Initialize computer-setup orchestration
       ansible.builtin.import_role:
-        name: computer_setup
+        name: core

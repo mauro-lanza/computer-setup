@@ -147,7 +147,7 @@
 # config file is assumed by the engine.
 - name: Deploy layer-provided shell config files
   ansible.builtin.include_role:
-    name: computer_setup
+    name: core
     tasks_from: deploy_layer_file
   vars:
     computer_setup_lookup_key: "{{ item.key }}"

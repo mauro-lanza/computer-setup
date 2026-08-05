@@ -50,7 +50,7 @@
 
     - name: "[{{ _mgr.id }}] Deploy editor settings from layers"
       ansible.builtin.include_role:
-        name: computer_setup
+        name: core
         tasks_from: deploy_layer_file
       vars:
         computer_setup_lookup_key: "{{ _mgr.settings_key }}"

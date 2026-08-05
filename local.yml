@@ -46,7 +46,7 @@
   pre_tasks:
     - name: Initialize computer-setup orchestration
       ansible.builtin.import_role:
-        name: computer_setup
+        name: core
       tags: [always]
 
   roles:
@@ -60,7 +60,7 @@
     # Deploys the `config:` bundles of every active capability. Tagged only with
     # its own name — it is one loop over all bundles, so a per-tool tag would
     # deploy every other tool's config too.
-    - { role: layer_configs, tags: [layer_configs] }
+    - { role: capability_configs, tags: [capability_configs] }
     - { role: macos, tags: [macos] }
     - { role: runtimes, tags: [runtimes] }
     # `never`: the daily drift check must not clone repos, and bootstrap must not

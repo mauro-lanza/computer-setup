@@ -360,7 +360,7 @@ clone_layers() {
 #
 # Layers are visited in DESCENDING priority and rows are deduped on their first
 # field, so the highest-priority layer's definition of any id wins wholesale.
-# That mirrors the engine's union-by-id merge (roles/computer_setup/tasks/
+# That mirrors the engine's union-by-id merge (roles/core/tasks/
 # merge_layer_{capabilities,questions}.yml), which sorts ASCENDING and lets the
 # last write win — the same result reached from the other end.
 #

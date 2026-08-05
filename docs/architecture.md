@@ -219,7 +219,9 @@ which layers a machine wants.
 
 ## Orchestrator primitives
 
-`local.yml` delegates all layer handling to the `computer_setup` role:
+`local.yml` delegates all layer handling to the `core` role. It is not a role in
+the ordinary sense — it configures nothing. It is the engine: play initialisation
+plus a library of primitives the real roles call via `tasks_from`.
 
 | Primitive | Purpose |
 |---|---|
@@ -255,7 +257,7 @@ Shell snippets are globbed rather than looked up, so they follow the same rule
 with a different path: `files/shell/*.zsh.j2` is rendered, `*.zsh` is copied,
 and both land at the same managed destination.
 
-The remaining roles (`homebrew`, `git`, `shell`, `extensions`, `layer_configs`,
+The remaining roles (`homebrew`, `git`, `shell`, `extensions`, `capability_configs`,
 `macos`, `runtimes`, `repositories`, `upgrade`, `drift_correction`) are ordinary
 consumers of that interface. Before adding one, apply the litmus test: if
 configuring a tool is just placing a file, it is **data** — a capability
@@ -295,7 +297,7 @@ becomes *variables* is checked against a reserved list; data that would become
 
 A layer's `vars.yml` may not define certain keys. The authoritative lists are
 `computer_setup_reserved_layer_keys` and `computer_setup_reserved_layer_prefixes`
-in [`roles/computer_setup/tasks/main.yml`](../roles/computer_setup/tasks/main.yml).
+in [`roles/core/tasks/main.yml`](../roles/core/tasks/main.yml).
 They are deliberately not re-listed here, because an enumeration in prose is a
 copy that goes stale.
 

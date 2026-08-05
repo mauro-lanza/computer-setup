@@ -12,7 +12,7 @@
   pre_tasks:
     - name: Initialize computer-setup orchestration
       ansible.builtin.import_role:
-        name: computer_setup
+        name: core
       tags: [always]
   tasks:
     - name: Create a scratch dir for deploy assertions
@@ -22,7 +22,7 @@
 
     - name: Deploy fixture file via the engine primitive
       ansible.builtin.include_role:
-        name: computer_setup
+        name: core
         tasks_from: deploy_layer_file
       vars:
         computer_setup_lookup_key: contract.txt
@@ -34,7 +34,7 @@
       # template must win: promotion is a property of the key, not of priority.
       # This is what lets one value reach several config files.
       ansible.builtin.include_role:
-        name: computer_setup
+        name: core
         tasks_from: deploy_layer_file
       vars:
         computer_setup_lookup_key: promoted.conf
@@ -44,7 +44,7 @@
       # The key never carries the .j2 suffix: `contract.out` resolves
       # templates/contract.out.j2 by the one two-step rule, highest layer first.
       ansible.builtin.include_role:
-        name: computer_setup
+        name: core
         tasks_from: deploy_layer_file
       vars:
         computer_setup_lookup_key: contract.out
@@ -55,7 +55,7 @@
     # raises on it unless the primitive guards for that.
     - name: Deploy a key that no layer provides (must no-op, not fail)
       ansible.builtin.include_role:
-        name: computer_setup
+        name: core
         tasks_from: deploy_layer_file
       vars:
         computer_setup_lookup_key: no-layer-provides-this.txt
