@@ -12,12 +12,8 @@ append one `include.path`. Anything you put in `~/.gitconfig` — signing keys,
 credential helpers, your own `includeIf` blocks — is preserved.
 
 The include is appended, so managed values are read **last** and still win over
-entries above them. Enforcement is kept; the collateral damage is not.
-
-**Migration.** A `~/.gitconfig` carrying this role's own marker comment is
-recognised as previously role-owned: it is backed up and reduced to a stub
-holding just the include. A file you wrote is never touched beyond the appended
-include.
+entries above them. Full enforcement, no collateral damage: `~/.gitconfig` is
+never touched beyond that one appended line.
 
 ### Per-directory identities
 
@@ -55,7 +51,7 @@ ansible-playbook -i inventory local.yml -e @$HOME/.mac-prefs.yml --check
 |---|---|
 | `~/.zshrc` | Replaced from the layer-provided `zshrc` every run (timestamped backup kept). Edit it in the layer. |
 | `~/.zsh/*.zsh` managed snippets | Regenerated from the engine template and layer `files/shell/*.zsh`. |
-| `~/.gitconfig` | Re-rendered whole from `gitconfig.j2`. Anything not declared in a layer is dropped; backup kept. |
+| `~/.config/git/computer-setup.gitconfig` | Re-rendered whole from `gitconfig.j2`. Anything not declared in a layer is dropped. `~/.gitconfig` itself is only appended to — see "Additive" below. |
 | `~/.gitignore_global` | Replaced entirely from `git_global_gitignore_entries`. |
 | `~/.p10k.zsh` | Replaced from the layer-provided `p10k.zsh`. |
 | macOS defaults | `osx_defaults` enforces the layer-declared value; System Settings changes are reverted. |

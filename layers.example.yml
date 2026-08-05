@@ -8,7 +8,9 @@
 #
 # Fields:
 #   name:     unique layer name; also the layer-cache directory name
-#   repo:     git URL. GitHub HTTPS URLs are converted to SSH by bootstrap.
+#   repo:     git URL. Bootstrap authenticates GitHub over SSH, so prefer
+#             git@github.com:owner/repo.git — a bare `github.com:owner/repo`
+#             is completed to that form.
 #   priority: merge order (higher wins scalars)
 layers:
   - name: public

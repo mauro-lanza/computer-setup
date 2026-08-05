@@ -3,10 +3,9 @@
 #
 # The single entry point for every `ansible-pull` this machine runs.
 #
-# Previously the pull invocation (prefs file + layer cache + layers manifest
-# `-e` flags) was rebuilt independently in three places: bootstrap.sh, the
-# `drift-apply` shell function, and the drift-check wrapper. Adding one variable
-# meant editing all three. That argument set now lives here, once.
+# Every caller — bootstrap.sh, `drift-apply`, and the scheduled drift check —
+# goes through this script, so the `-e` argument set (prefs file, layer cache,
+# layers manifest) is defined exactly once. Add a variable here, not per caller.
 #
 # Usage: computer-setup-run <mode> [extra ansible-pull args...]
 #
@@ -57,8 +56,8 @@ log() { print -r -- "$@" >> "$LOG_FILE"; }
 # ORCHESTRATOR only; the layers are separate repos in a separate cache. Skipping
 # it leaves the engine ahead of the layers, and any change that spans both — a
 # var the engine stopped defining and a layer still references — fails the run.
-# `apply` used to exec straight past this, so the one mode a human runs by hand
-# was the one that could not pick up layer changes.
+# This includes `apply` — the mode a human runs by hand is the one that most
+# needs current layers.
 sync_layers() {
     [[ -n "$LAYERS_FILE" && -f "$LAYERS_FILE" && -n "$LAYER_CACHE" ]] || return 0
     "$LAYER_SYNC" sync --manifest "$LAYERS_FILE" --cache "$LAYER_CACHE" \

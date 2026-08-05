@@ -30,8 +30,8 @@ shell_priority_width: 3
 shell_snippet_manifest_path: "{{ shell_zsh_config_dir }}/.computer-setup-snippets"
 
 # Whole-file shell configs resolved across layers. Keys are layer data, so a
-# layer using starship instead of Powerlevel10k just changes this list — the
-# engine previously named `zshrc` and `p10k.zsh` in task code.
+# layer using starship instead of Powerlevel10k just changes this list — no
+# prompt is assumed by the engine.
 #
 # Item schema: { key: <layer file key>, dest: <path>, backup?: bool }
 shell_config_files:

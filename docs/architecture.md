@@ -10,7 +10,9 @@ Each layer is a git repo with this structure:
 
 ```text
 layer.yml         # required manifest: name, schema_version
-capabilities.yml  # selectable capability bundles (packages, config, adopt, reminders)
+capabilities.yml  # optional selectable capabilities (packages, config, adopt, reminders)
+questions.yml     # optional setup questions that set layer vars
+presets.yml       # optional named bundles of answers + capabilities
 vars.yml          # optional role variable values
 files/            # optional static files resolved by roles
 templates/        # optional templates resolved by roles
@@ -192,7 +194,8 @@ which layers a machine wants.
 | `tasks/merge_layer_vars.yml` | Merge one layer's `vars.yml` into play scope: enforces `schema_version`, rejects reserved keys, appends lists, overrides scalars. |
 | `tasks/merge_layer_capabilities.yml` | Merge one layer's `capabilities.yml` into the capability registry. |
 | `tasks/merge_layer_questions.yml` | Merge one layer's `questions.yml` into the question registry, rejecting any `set:` payload that names a reserved key. |
-| `tasks/deploy_layer_file.yml` | Resolve **and** deploy one layer file/template: creates the parent dir, copies or templates, no-ops when no layer provides the key. The primitive behind every "a layer supplies this file" case — capability `config:` bundles, the prompt, VS Code settings, `~/.zshrc`. |
+| `tasks/deploy_layer_file.yml` | Resolve **and** deploy one layer file/template: creates the parent dir, copies or templates, no-ops when no layer provides the key. The primitive behind every "a layer supplies this file" case — capability `config:` bundles, the prompt, editor settings, `~/.zshrc`. |
+| `scripts/computer-setup-layers` | Sync layer repos into the cache. Validates layer names and `schema_version`, and force-syncs to `origin` (fetch + hard reset), so a diverged or hand-edited cache can never silently persist. Repo URLs are used as written — an explicit `https://` is not rewritten to SSH, since that is a deliberate choice where port 22 is blocked. |
 
 ### File vs template resolution
 
@@ -211,13 +214,13 @@ otherwise the only option. Templates render late, after the layer merge, so they
 A key should be supplied as either a file or a template across all layers, not
 both: step 1 wins over step 2 regardless of layer priority.
 
-Capability `config:` entries with an explicit `kind: template` skip step 1 and
-resolve `<key>` in `templates/` directly, for keys that already carry `.j2`.
+A lookup key is always written **without** the `.j2` suffix — whether a layer
+supplies the key as a template is the layer's business, not the caller's. This
+is the only resolution rule; there is no per-caller override.
 
 Shell snippets are globbed rather than looked up, so they follow the same rule
 with a different path: `files/shell/*.zsh.j2` is rendered, `*.zsh` is copied,
 and both land at the same managed destination.
-| `scripts/computer-setup-layers` | Sync layer repos into the cache. Validates layer names, `schema_version`, and force-syncs to `origin` (fetch + hard reset), so a diverged or hand-edited cache can never silently persist. Repo URLs are used as written — an explicit `https://` is not rewritten to SSH, since that is a deliberate choice where port 22 is blocked. |
 
 The remaining roles (`homebrew`, `git`, `shell`, `extensions`, `layer_configs`,
 `macos`, `runtimes`, `repositories`, `upgrade`, `drift_correction`) are ordinary
@@ -227,17 +230,20 @@ configuring a tool is just placing a file, it is **data** — a capability
 
 ## The engine names no tool
 
-The engine's invariant is that it hardcodes no tool, app, or editor. That was
-aspirational in several places; these are now data:
+The engine hardcodes no tool, app, or editor. Every tool-specific decision is
+layer data, reached through one of these interfaces:
 
-| Was hardcoded | Now |
+| Decision | Layer interface |
 |---|---|
-| VS Code binary, role gate, `type: vscode`, `settings.json` key | `extension_managers` (layer data), `type: extension` + `manager:` |
-| `requires_vscode` | `requires: <capability-id>`, resolved against `adopt_if_present` |
-| `/Applications/Rectangle.app` | `macos_conditional_defaults[].app` |
-| `zshrc`, `p10k.zsh` lookup keys | `shell_config_files` |
-| nvm / tfenv capability-id literals | `runtimes_*_capability` vars |
-| Terraform version pinned in engine defaults | layer var, empty by default |
+| Which editor(s) to manage — binary, settings key, extension install command | `extension_managers`; a capability declares `type: extension` + `manager:` |
+| Whether a capability applies at all | `requires: <capability-id>`, resolved against `adopt_if_present` |
+| App-conditional macOS defaults (Rectangle, Raycast, …) | `macos_conditional_defaults[].app` |
+| Which whole-file shell configs exist (`zshrc`, `p10k.zsh`, …) | `shell_config_files` |
+| Which capability gates nvm / tfenv | `runtimes_*_capability` |
+| Terraform version | layer var, empty by default |
+
+If you find yourself typing a tool's name into `roles/`, one of these interfaces
+is the right place instead.
 
 ### Where this deliberately stops
 

@@ -1,9 +1,9 @@
 # Static files supplied by this layer.
 #
 # Roles resolve certain files across all layers' `files/` directories in
-# descending priority order (highest-priority layer wins), falling back to the
-# role's own bundled copy. A private layer can therefore override a file shipped
-# by a public one.
+# descending priority order (highest-priority layer wins). The engine ships no
+# content of its own, so a key no layer supplies is simply not deployed. A
+# private layer can override a file shipped by a public one.
 #
 # Any key below may instead be supplied as ../templates/<key>.j2, which is
 # rendered rather than copied. The key is unchanged; see docs/architecture.md.
@@ -11,9 +11,12 @@
 # Engine-recognized file keys (path relative to this files/ directory).
 # These three are the only keys the orchestrator looks up by name:
 #
-#   zshrc                 → ~/.zshrc  (sources ~/.zsh/*.zsh, prompt, plugins)
-#   p10k.zsh              → Powerlevel10k prompt config      (shell role)
-#   vscode/settings.json  → VS Code user settings            (vscode role)
+#   zshrc     → ~/.zshrc  (sources ~/.zsh/*.zsh, prompt, plugins)
+#   p10k.zsh  → Powerlevel10k prompt config
+#
+# Both are named by `shell_config_files` (shell role defaults). Editor settings
+# are NOT an engine key: each `extension_managers` entry names its own
+# `settings_key`, so `vscode/settings.json` is layer data too.
 #
 # Everything else is a key YOUR layer invents. A capability's `config:` entry
 # names any `src` it likes and the engine resolves that string across layers —

@@ -12,10 +12,10 @@ answers:
 # Single selection token. Optional packages and capability flags are DERIVED
 # from these ids against the merged capability registry (the layers. capabilities).
 selected_capabilities:
-  - nvm       # defined in BOTH layers — override must win
-  - opencode  # base: formula anomalyco/tap/opencode
-  - zed       # base: cask zed
-  - vscode    # override: cask visual-studio-code
-  - dbt       # override: feature (no package)
-  - vscode-peacock  # override: type vscode -> extension
-  - ghost     # not in any active layer's capabilities — must be silently ignored
+  - nvm             # defined in BOTH layers — override must win
+  - opencode        # base: formula anomalyco/tap/opencode
+  - zed             # base: cask zed
+  - vscode          # override: cask visual-studio-code
+  - dbt             # override: feature (no package)
+  - vscode-peacock  # override: type extension (manager: vscode)
+  - ghost           # not in any active layer's capabilities — must be silently ignored

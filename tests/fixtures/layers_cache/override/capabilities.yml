@@ -19,9 +19,10 @@ capabilities:
     desc: "dbt (BigQuery profile)"
     type: feature
     config:
-      - { src: profiles.yml.j2, dest: "/tmp/cs-contract/dbt-profiles.yml", kind: template }
-  # type: extension — the third branch of the package split. Previously asserted
-  # only as "== []", which would pass even if the branch returned nothing.
+      - { src: profiles.yml, dest: "/tmp/cs-contract/dbt-profiles.yml" }
+  # type: extension — the third branch of the package split. Asserted by
+  # identity, not just "== []", which would pass even if the branch returned
+  # nothing.
   - id: vscode-peacock
     desc: "VS Code: Peacock"
     type: extension

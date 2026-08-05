@@ -5,16 +5,23 @@
 # The `id` IS the capability token. Schema per item:
 #   id:               stable primary key (never rename; remembers prior answers)
 #   desc:             human-readable label shown in the prompt
-#   type:             formula | cask | vscode | feature   (feature = no package)
+#   type:             formula | cask | extension | feature  (feature = no package)
 #   packages:         space-separated brew formulae / casks / extension IDs
 #                     installed when selected (omit for `feature`)
+#   manager:          required for `type: extension` — the `extension_managers`
+#                     id (in vars.yml) that installs it
 #   requires:         (optional) another capability id; only prompt when that
 #                     one is selected earlier in the run or already present
 #   config:           (optional) files/templates deployed when the capability is
 #                     active (highest-priority layer supplies the file):
-#                       - { src: <files/ key>, dest: <path>, kind: file|template }
+#                       - { src: <lookup key>, dest: <path>, mode: <octal> }
+#                     `src` is written WITHOUT any .j2 suffix: templates/<src>.j2
+#                     wins if it exists, else files/<src> is copied verbatim.
 #   adopt_if_present: (optional) a path; when it exists the capability is active
-#                     even if not selected (adopt an existing install)
+#                     even if not selected (adopt an existing install).
+#                     Only `{{ home_dir }}` and `{{ homebrew_prefix }}` are
+#                     expanded here — this is also read by bootstrap, before
+#                     Ansible exists to template anything else.
 #   reminders:        (optional) post-setup message strings shown when active
 
 capabilities:
@@ -45,6 +52,5 @@ capabilities:
     config:
       - src: example/config.toml
         dest: "{{ home_dir }}/.config/example/config.toml"
-      - src: example.conf.j2
+      - src: example.conf
         dest: "{{ home_dir }}/.config/example/example.conf"
-        kind: template

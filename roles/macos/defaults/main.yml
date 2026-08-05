@@ -6,10 +6,9 @@
 # `notify: Restart Dock and Finder` for entries affecting Dock/Finder UI.
 macos_defaults: []
 
-# Defaults applied only when a given app is installed. Rectangle used to be
-# hardcoded here and in tasks/main.yml — the one app the engine named. It is now
-# data, so any app-conditional defaults (Raycast, Amethyst, AeroSpace, Moom)
-# need no engine change.
+# Defaults applied only when a given app is installed. Pure layer data, so
+# app-conditional defaults (Rectangle, Raycast, Amethyst, AeroSpace, Moom) need
+# no engine change.
 #
 # Item schema: { app: <path>, defaults: [ {domain, key, type, value, notify?} ] }
 macos_conditional_defaults: []

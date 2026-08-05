@@ -150,8 +150,8 @@
 # skipped if no layer provides it. The orchestrator ships none of its own — a
 # layer must provide ~/.zshrc, or no shell config is deployed at all.
 #
-# The list is data (`shell_config_files`): the engine used to name `zshrc` and
-# `p10k.zsh` in task code, which quietly made Powerlevel10k the assumed prompt.
+# The list is data (`shell_config_files`), so no particular prompt or shell
+# config file is assumed by the engine.
 - name: Deploy layer-provided shell config files
   ansible.builtin.include_role:
     name: computer_setup
@@ -159,7 +159,6 @@
   vars:
     computer_setup_lookup_key: "{{ item.key }}"
     computer_setup_deploy_dest: "{{ item.dest }}"
-    computer_setup_lookup_fallback_dir: "{{ playbook_dir }}/roles/shell/files"
     computer_setup_deploy_backup: "{{ item.backup | default(false) }}"
     computer_setup_deploy_notify: Shell config changed
   loop: "{{ shell_config_files | default([]) }}"

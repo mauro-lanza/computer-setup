@@ -21,13 +21,12 @@ git_global_gitignore_entries: []
 
 # ─── Where the managed config lives ──────────────────────────────────────────
 # This role owns ONE file completely, and reaches ~/.gitconfig only to add a
-# single `include.path` pointing at it. ~/.gitconfig used to be replaced
-# wholesale, which destroyed any signing key, credential helper or includeIf the
-# user already had — with no merge mode and no opt-out.
+# single `include.path` pointing at it. Never replace ~/.gitconfig wholesale:
+# it carries the user's signing key, credential helper and includeIf rules.
 #
 # The include is appended, so git reads the managed values LAST and they still
-# win over anything earlier in ~/.gitconfig. Enforcement is kept; the collateral
-# damage is not.
+# win over anything earlier in ~/.gitconfig — full enforcement, no collateral
+# damage.
 git_managed_config_dir: "{{ home_dir }}/.config/git"
 git_managed_config_path: "{{ git_managed_config_dir }}/computer-setup.gitconfig"
 

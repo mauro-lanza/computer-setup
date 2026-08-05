@@ -56,7 +56,6 @@
       vars:
         computer_setup_lookup_key: "{{ _mgr.settings_key }}"
         computer_setup_deploy_dest: "{{ _mgr.settings_dest }}"
-        computer_setup_lookup_fallback_dir: "{{ playbook_dir }}/roles/extensions/files"
       when:
         - _mgr.settings_key is defined
         - _mgr.settings_dest is defined

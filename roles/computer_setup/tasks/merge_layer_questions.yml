@@ -7,7 +7,7 @@
 # A question is a decision the MACHINE makes, not the layer: which editor, where
 # repositories live. The layer declares the question and its options; the answer
 # lives in the prefs file. Capabilities can only express "yes/no, independently",
-# so anything single-select had no representation before this.
+# so anything single-select has no other representation.
 
 - name: "[{{ _layer.name }}] Stat questions.yml"
   ansible.builtin.stat:
@@ -44,15 +44,21 @@
       - (_qs | rejectattr('type', 'defined') | list | length) == 0
       - (_qs | rejectattr('type', 'in', _kinds) | list | length) == 0
       - (_selects | rejectattr('options', 'defined') | list | length) == 0
+      - (_validated | rejectattr('type', 'in', _validatable) | list | length) == 0
     fail_msg: >-
       Layer '{{ _layer.name }}' has a malformed questions.yml: every entry needs
-      an `id` and a `type` (one of {{ _kinds | join(', ') }}), and every `select`
-      needs an `options` list.
+      an `id` and a `type` (one of {{ _kinds | join(', ') }}), every `select`
+      needs an `options` list, and `validate:` applies only to
+      {{ _validatable | join('/') }} questions.
     quiet: true
   vars:
     _qs: "{{ _incoming_questions.questions | default([], true) }}"
     _kinds: [bool, text, path, select]
+    # `validate` is a free-text guard; bool and select are already constrained by
+    # their own type, so allowing it there would only be a second way to be wrong.
+    _validatable: [text, path]
     _selects: "{{ _qs | selectattr('type', 'defined') | selectattr('type', 'eq', 'select') | list }}"
+    _validated: "{{ _qs | selectattr('validate', 'defined') | selectattr('type', 'defined') | list }}"
   when: _layer_questions_stat.stat.exists
 
 # A question's `set:` payload lands in play scope exactly as a layer var does, so

@@ -3,7 +3,7 @@
 # (see questions.yml in a layer), so the shell and git agree on one answer. A
 # layer may still set it directly, and an empty value means "leave core.editor
 # unset and let $EDITOR/$VISUAL decide" — which is a legitimate choice, not a
-# missing one. The engine no longer probes for a specific editor binary.
+# missing one. The engine probes for no specific editor binary.
 - name: Resolve git editor
   ansible.builtin.set_fact:
     git_editor_resolved: "{{ git_editor | default('', true) }}"
@@ -35,9 +35,8 @@
 
 # ─── Managed git config (included, not imposed) ──────────────────────────────
 # This role owns git_managed_config_path completely and touches ~/.gitconfig
-# only to add one `include.path`. Previously ~/.gitconfig was replaced wholesale
-# on every run, destroying any signing key, credential helper or includeIf the
-# user already had.
+# only to add one `include.path`. Never replace ~/.gitconfig wholesale: it
+# carries the user's signing key, credential helper and includeIf rules.
 
 - name: Ensure the managed git config directory exists
   ansible.builtin.file:
@@ -83,33 +82,6 @@
                           git_managed_config_dir ~ '/identity-\1.gitconfig') | list) }}
   loop_control:
     label: "{{ item | basename }}"
-
-# Migration: on machines set up before this change, ~/.gitconfig is entirely
-# this role's output. Leaving it would duplicate every managed value and, worse,
-# leave a stale copy that wins over the include. Detect our own marker — never
-# a file the user wrote — back it up, and reduce it to a stub.
-- name: Detect a previously role-owned ~/.gitconfig
-  ansible.builtin.lineinfile:
-    path: "{{ home_dir }}/.gitconfig"
-    regexp: '^# (Managed by ansible|Managed by computer-setup) — do not edit manually\.$'
-    state: absent
-  check_mode: true
-  changed_when: false
-  register: git_legacy_marker
-  failed_when: false
-
-- name: Replace a role-owned ~/.gitconfig with a stub
-  ansible.builtin.copy:
-    dest: "{{ home_dir }}/.gitconfig"
-    mode: "0644"
-    backup: true
-    content: |
-      # Your personal git config. computer-setup does NOT own this file.
-      #
-      # Managed settings live in the included file below and are read last, so
-      # they win over anything above. Add whatever you like here — signing keys,
-      # credential helpers, extra includeIf blocks — it will be preserved.
-  when: git_legacy_marker.found | default(0) | int > 0
 
 - name: Include the managed config from ~/.gitconfig
   # Appended, so managed values are read LAST and still win. git_config drives
