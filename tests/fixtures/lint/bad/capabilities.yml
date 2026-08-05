@@ -1,0 +1,14 @@
+---
+# Every entry here is a cross-reference that fails SILENTLY at runtime: the id is
+# looked up in the merged registry, is not found, and the reference is skipped
+# with no error. `computer-setup-layers lint` exists to make each one loud.
+capabilities:
+  # Two entries with one id: the merge collapses them to whichever it reaches
+  # last, so one of these silently does not exist.
+  - {id: dup, desc: "first", type: formula, packages: a}
+  - {id: dup, desc: "second", type: formula, packages: b}
+  # Gated on a capability no layer declares -> never offered, no error.
+  - {id: gated, desc: "gated on a ghost", type: formula, packages: g, requires: nonexistent}
+  # type: extension without a manager -> the engine groups by `manager`, so this
+  # never reaches any installer.
+  - {id: noext, desc: "extension without a manager", type: extension, packages: some.ext}

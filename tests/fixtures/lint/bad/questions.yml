@@ -1,0 +1,7 @@
+questions:
+  - id: q1
+    type: select
+    desc: "pick"
+    default: a
+    options:
+      - {value: a, implies: [ghost-capability]}

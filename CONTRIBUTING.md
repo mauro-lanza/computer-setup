@@ -52,6 +52,19 @@ Extend the tests when you touch what they cover:
   `schema_version`, malformed `capabilities.yml`). These assert a bad layer is
   *rejected for the stated reason*, so a guard cannot silently degrade into a
   no-op that still looks like a passing suite.
+- **`tests/fixtures/lint/`** — the layer linter. Capabilities, questions and
+  presets refer to each other by id, and every such reference fails *silently*
+  when wrong: a preset naming a capability that does not exist simply selects
+  nothing. Each broken reference in the fixture must be reported by name.
+
+Lint your own layers after editing them:
+
+```bash
+computer-setup layers lint --cache ~/.local/share/computer-setup/layers
+```
+
+It also reports capabilities that appear in no preset — a report, not an error,
+since presets are curated on purpose.
 
 ## Changing the contract
 

@@ -5,10 +5,19 @@ PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
 
 usage() {
     cat <<'EOF'
-Usage: computer-setup-layers sync --manifest PATH --cache DIR [--schema-version N]
+Usage:
+  computer-setup-layers sync --manifest PATH --cache DIR [--schema-version N]
+  computer-setup-layers lint (--cache DIR | --layer DIR)
 
-Synchronize content layers from a manifest into the layer cache. Repo URLs are
-used as written; a scheme-less github.com:owner/repo is completed to SSH.
+sync  Synchronize content layers from a manifest into the layer cache. Repo URLs
+      are used as written; a scheme-less github.com:owner/repo becomes SSH.
+
+lint  Check that a layer's cross-references resolve. Capabilities, questions and
+      presets refer to each other by id, and every one of those references fails
+      SILENTLY when it is wrong: a preset naming a capability that does not exist
+      selects nothing, and an `implies:` naming one installs nothing. --cache
+      lints the whole merged set (ids resolve across layers, as at runtime);
+      --layer lints one directory on its own.
 EOF
 }
 
@@ -162,11 +171,168 @@ sync_layers() {
     done
 }
 
+# ─── lint ────────────────────────────────────────────────────────────────────
+# Capabilities, questions and presets reference each other by id, and EVERY one
+# of those references degrades silently when wrong: bootstrap matches the id
+# against the merged registry, finds nothing, and moves on. A typo in a preset
+# is invisible until you notice a tool was never installed.
+#
+# Ids resolve across ALL layers at runtime (the registries are merged before
+# anything is read), so --cache lints the merged set. --layer lints one
+# directory as its own universe, which is what the example layer and the test
+# fixtures need.
+
+lint_fail_count=0
+lint_note_count=0
+lint_err()  { printf '  ERROR: %s\n' "$*" >&2; lint_fail_count=$((lint_fail_count + 1)); }
+lint_note() { printf '  note:  %s\n' "$*"; lint_note_count=$((lint_note_count + 1)); }
+
+# An unresolved id is only DEFINITELY wrong when the whole merged set is in
+# view. Linting one directory cannot know whether a sibling layer declares it —
+# cross-layer references are legal and normal (an extension capability in one
+# layer requiring the editor cask from another). So --cache errors and --layer
+# only notes.
+LINT_SCOPE="cache"
+lint_ref_problem() {
+    if [[ "$LINT_SCOPE" == "cache" ]]; then
+        lint_err "$*"
+    else
+        lint_note "$* (unresolved here; may resolve against another layer)"
+    fi
+}
+
+# Emit a yq projection over a file, or nothing when the file is absent/invalid.
+# A malformed file is reported once, here, rather than yielding a confusing
+# cascade of "reference does not resolve" errors.
+lint_read() {
+    local file="$1" expr="$2"
+    [[ -f "$file" ]] || return 0
+    if ! yq '.' "$file" >/dev/null 2>&1; then
+        lint_err "$(basename "$(dirname "$file")")/$(basename "$file") is not valid YAML"
+        return 0
+    fi
+    yq -r "$expr" "$file" 2>/dev/null | grep -v '^null$' || true
+}
+
+lint_has()   { printf '%s\n' "$2" | grep -qxF -- "$1"; }
+lint_count() { printf '%s\n' "$1" | grep -cv '^$' || true; }
+
+lint_layers() {
+    local cache="" single=""
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --cache) cache="$2"; shift 2 ;;
+            --layer) single="$2"; shift 2 ;;
+            --manifest) shift 2 ;;   # accepted and ignored: lint reads the cache
+            -h|--help) usage; exit 0 ;;
+            *) die "Unknown argument: $1" ;;
+        esac
+    done
+
+    local -a dirs=()
+    if [[ -n "$single" ]]; then
+        [[ -d "$single" ]] || die "No such layer directory: $single"
+        dirs=("$single")
+        LINT_SCOPE="layer"
+    elif [[ -n "$cache" ]]; then
+        [[ -d "$cache" ]] || die "No such layer cache: $cache"
+        local d
+        for d in "$cache"/*/; do
+            [[ -f "${d}layer.yml" ]] && dirs+=("${d%/}")
+        done
+        [[ ${#dirs[@]} -gt 0 ]] || die "No layers found in $cache"
+    else
+        die "lint needs --cache DIR or --layer DIR"
+    fi
+
+    # ── Universe of ids, merged across every layer being linted ──────────────
+    # Duplicates ACROSS layers are legal and are the override mechanism: a
+    # higher-priority layer redeclares an id to replace it wholesale (the
+    # personal layer does exactly this to pre-fill the git identity questions).
+    # Only a duplicate WITHIN one layer is a bug, since the two entries silently
+    # collapse to whichever the merge reaches last.
+    local all_caps="" all_questions="" all_preset_caps="" d ids dupes name
+    for d in "${dirs[@]}"; do
+        name="$(basename "$d")"
+
+        ids="$(lint_read "$d/capabilities.yml" '.capabilities[]?.id')"
+        dupes="$(printf '%s\n' "$ids" | grep -v '^$' | sort | uniq -d || true)"
+        [[ -n "$dupes" ]] && lint_err "[$name] capability id declared twice in this layer: $(printf '%s' "$dupes" | tr '\n' ' ')"
+        all_caps+="$ids"$'\n'
+
+        ids="$(lint_read "$d/questions.yml" '.questions[]?.id')"
+        dupes="$(printf '%s\n' "$ids" | grep -v '^$' | sort | uniq -d || true)"
+        [[ -n "$dupes" ]] && lint_err "[$name] question id declared twice in this layer: $(printf '%s' "$dupes" | tr '\n' ' ')"
+        all_questions+="$ids"$'\n'
+
+        all_preset_caps+="$(lint_read "$d/presets.yml" '.presets[]?.capabilities[]?')"$'\n'
+    done
+    all_caps="$(printf '%s' "$all_caps" | grep -v '^$' || true)"
+    all_questions="$(printf '%s' "$all_questions" | grep -v '^$' || true)"
+    all_preset_caps="$(printf '%s' "$all_preset_caps" | grep -v '^$' || true)"
+
+    for d in "${dirs[@]}"; do
+        local ref
+        name="$(basename "$d")"
+
+        # capability.requires -> a real capability
+        while IFS= read -r ref; do
+            [[ -z "$ref" ]] && continue
+            lint_has "$ref" "$all_caps" \
+                || lint_ref_problem "[$name] capability requires '$ref', which no layer declares"
+        done <<< "$(lint_read "$d/capabilities.yml" '.capabilities[]? | select(.requires) | .requires')"
+
+        # type: extension must name the manager that installs it
+        while IFS= read -r ref; do
+            [[ -z "$ref" ]] && continue
+            lint_err "[$name] capability '$ref' is type: extension but declares no manager:"
+        done <<< "$(lint_read "$d/capabilities.yml" '.capabilities[]? | select(.type == "extension") | select(has("manager") | not) | .id')"
+
+        # preset.capabilities -> a real capability
+        while IFS= read -r ref; do
+            [[ -z "$ref" ]] && continue
+            lint_has "$ref" "$all_caps" \
+                || lint_ref_problem "[$name] preset selects capability '$ref', which no layer declares"
+        done <<< "$(lint_read "$d/presets.yml" '.presets[]?.capabilities[]?')"
+
+        # preset.answers -> a real question
+        while IFS= read -r ref; do
+            [[ -z "$ref" ]] && continue
+            lint_has "$ref" "$all_questions" \
+                || lint_ref_problem "[$name] preset answers question '$ref', which no layer declares"
+        done <<< "$(lint_read "$d/presets.yml" '.presets[]?.answers? | select(. != null) | keys | .[]')"
+
+        # question option implies -> a real capability
+        while IFS= read -r ref; do
+            [[ -z "$ref" ]] && continue
+            lint_has "$ref" "$all_caps" \
+                || lint_ref_problem "[$name] question implies capability '$ref', which no layer declares"
+        done <<< "$(lint_read "$d/questions.yml" '.questions[]?.options[]?.implies[]?')"
+    done
+
+    # Report, not an error: presets are curated, so a capability outside every
+    # preset is usually deliberate. Worth seeing when you add one.
+    local uncovered
+    uncovered="$(comm -23 <(printf '%s\n' "$all_caps" | sort -u | grep -v '^$') \
+                          <(printf '%s\n' "$all_preset_caps" | sort -u | grep -v '^$') || true)"
+    if [[ -n "$uncovered" ]]; then
+        printf '  note:  %s capability(ies) in no preset: %s\n' \
+            "$(lint_count "$uncovered")" "$(printf '%s' "$uncovered" | tr '\n' ' ')"
+    fi
+
+    if [[ "$lint_fail_count" -gt 0 ]]; then
+        printf 'ERROR: %s cross-reference problem(s)\n' "$lint_fail_count" >&2
+        exit 1
+    fi
+    log "  ok  $(lint_count "$all_caps") capabilities, $(lint_count "$all_questions") questions: all references resolve"
+}
+
 main() {
     local command="${1:-}"
     shift || true
     case "$command" in
         sync) sync_layers "$@" ;;
+        lint) lint_layers "$@" ;;
         -h|--help|"") usage ;;
         *) die "Unknown command: $command" ;;
     esac

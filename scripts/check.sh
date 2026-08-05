@@ -132,6 +132,34 @@ expect_layer_failure question "question setting reserved key"
 # layer var may set, or the tier becomes a hole rather than a door.
 expect_layer_failure machine-tier "defines reserved key"
 
+# Capabilities, questions and presets refer to each other by id, and every one of
+# those references fails SILENTLY when wrong — a preset naming a capability that
+# does not exist just selects nothing. The linter makes them loud.
+echo "==> Layer lint (reference layer)"
+./scripts/computer-setup-layers lint --layer examples/example-layer
+
+# ...and it has to actually reject. Same standard as the negative layer contract
+# cases: a linter that cannot fail looks exactly like a clean layer.
+echo "==> Layer lint (negative)"
+lint_out="$(./scripts/computer-setup-layers lint --cache "$PWD/tests/fixtures/lint" 2>&1)" && {
+    echo "ERROR: the broken lint fixture was ACCEPTED — the linter is not enforcing" >&2
+    exit 1
+}
+for expect in \
+    "capability id declared twice" \
+    "capability requires 'nonexistent'" \
+    "is type: extension but declares no manager" \
+    "preset selects capability 'does-not-exist'" \
+    "preset answers question 'no-such-question'" \
+    "question implies capability 'ghost-capability'"
+do
+    if ! grep -qF "$expect" <<<"$lint_out"; then
+        echo "ERROR: linter did not report: $expect" >&2
+        exit 1
+    fi
+done
+echo "  ok  all 6 broken references rejected"
+
 # The highest supported layer schema_version is stated in three places that
 # cannot import from each other: bootstrap.sh runs before any checkout exists
 # under `curl | bash`, and the sync helper is deployed standalone. Duplication

@@ -400,6 +400,43 @@ merged_count() {
     wc -l < "$1" | tr -d ' '
 }
 
+# Order the merged capability rows so a gated capability always follows the one
+# it `requires:`.
+#
+# `requires:` is a MENU gate resolved in one forward pass: an entry is offered
+# only if its requirement was selected EARLIER in the run (or is already
+# present). So a capability listed before its requirement was silently never
+# offered — no error, no prompt, just missing from a fresh machine. That made
+# the order of two entries in a layer file, across layers merged by priority, a
+# load-bearing invariant nobody could see.
+#
+# A stable topological pass removes the invariant instead of documenting it:
+# emit each row, then immediately emit anything requiring it (recursively).
+# Rows whose requirement is not in the registry at all keep their original
+# position — the prompt loop still gates them on `adopt_if_present`, which is
+# the "requirement supplied by something outside the registry" case.
+order_capabilities_by_requires() {
+    local file="$1" tmp
+    tmp="$(mktemp)"
+    awk -F"$FS_U" -v OFS="$FS_U" '
+        { id[NR] = $1; req[NR] = $5; line[NR] = $0; known[$1] = NR; n = NR }
+        END {
+            for (i = 1; i <= n; i++) {
+                # Emit only roots here: a row whose requirement exists in the
+                # registry is emitted by the recursive walk from that row.
+                if (req[i] == "" || !(req[i] in known)) emit(i)
+            }
+        }
+        function emit(i,   j) {
+            if (done[i]) return
+            done[i] = 1
+            print line[i]
+            for (j = 1; j <= n; j++)
+                if (!done[j] && req[j] == id[i]) emit(j)
+        }
+    ' "$file" > "$tmp" && mv "$tmp" "$file"
+}
+
 # Merged capabilities. Columns:
 #   id  desc  type  packages  requires  adopt_if_present
 # `id` is the capability token written to ~/.config/computer-setup/prefs.yml as a selection.
@@ -415,6 +452,8 @@ load_capabilities() {
         '.capabilities[]? | [.id, .desc, .type, (.packages // ""), (.requires // ""),
                              (.adopt_if_present // "")] | @tsv' \
         "$MERGED_CAPABILITIES_FILE"
+
+    order_capabilities_by_requires "$MERGED_CAPABILITIES_FILE"
 
     local count
     count="$(merged_count "$MERGED_CAPABILITIES_FILE")"

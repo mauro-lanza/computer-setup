@@ -20,8 +20,8 @@
 #                                 checkouts already on this machine.
 #   computer-setup capture [...]  Diff live macOS defaults against the declared
 #                                 values (delegates to macos-capture).
-#   computer-setup layers <...>   Sync the content layers (delegates to
-#                                 computer-setup-layers).
+#   computer-setup layers <...>   Sync or lint the content layers (delegates
+#                                 to computer-setup-layers).
 #
 # INTERNAL MODES, invoked by the LaunchAgents — not for interactive use:
 #   computer-setup _scheduled-check    `check` with logging + notification
@@ -67,7 +67,8 @@ computer-setup — operate this machine's configuration.
   log [n]          Tail the rolling log (default 100 lines).
   repos [dir]      Print a repositories.yml scaffolded from existing checkouts.
   capture [args]   Diff live macOS defaults against the declared values.
-  layers <args>    Sync the content-layer cache.
+  layers sync      Refresh the content-layer cache.
+  layers lint      Check that layer cross-references actually resolve.
 
 To clone repositories that are missing:  computer-setup apply --tags repositories
 EOF

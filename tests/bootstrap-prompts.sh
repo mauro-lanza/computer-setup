@@ -203,6 +203,45 @@ assert_eq "  and does not when the adopt path is missing" \
 # Restore the unstaged registry for the remaining cases.
 make_caps > "$WORK/caps.tsv"
 
+# ── 6b. `requires:` must survive a capability declared BEFORE its requirement ─
+# This was a silent, invisible failure: `requires` is resolved in one forward
+# pass, so a gated entry listed above its requirement was never offered at all —
+# no error, no prompt, just absent from a fresh machine. The order of two lines
+# in a layer file (or the priority order two layers merge in) was a load-bearing
+# invariant nobody could see. load_capabilities now reorders topologically.
+echo "==> capability requires-ordering"
+{
+    caps_row ext-early "Extension, declared first" extension some.ext vscode ""
+    caps_row alpha     "Alpha tool"                formula   alpha     ""     ""
+    caps_row vscode    "Visual Studio Code"        cask      vscode    ""     ""
+} > "$WORK/caps-unordered.tsv"
+cp "$WORK/caps-unordered.tsv" "$WORK/caps-ordered.tsv"
+order_capabilities_by_requires "$WORK/caps-ordered.tsv"
+assert_eq "a dependent is reordered to follow its requirement" \
+    "alpha vscode ext-early" \
+    "$(cut -d"$FS_U" -f1 "$WORK/caps-ordered.tsv" | tr '\n' ' ' | sed 's/ $//')"
+
+# And the whole point: it is now actually OFFERED. Answers: alpha=y, vscode=y,
+# ext-early=y. Before the fix ext-early was skipped and never selectable.
+cp "$WORK/caps-ordered.tsv" "$WORK/caps.tsv"
+printf 'y\ny\ny\n' > "$WORK/reorder-yes"
+result="$(run_prompts "$WORK/reorder-yes")"
+assert_eq "  and is then offered, instead of silently vanishing" \
+    "0|alpha vscode ext-early" "$result"
+
+# A requirement that no layer declares must NOT be reordered away; the entry
+# keeps its place and stays gated on adopt_if_present.
+{
+    caps_row orphan "Needs something unregistered" formula o external-thing ""
+    caps_row alpha  "Alpha tool"                   formula alpha ""          ""
+} > "$WORK/caps-orphan.tsv"
+order_capabilities_by_requires "$WORK/caps-orphan.tsv"
+assert_eq "  an unregistered requirement leaves the row in place" \
+    "orphan alpha" \
+    "$(cut -d"$FS_U" -f1 "$WORK/caps-orphan.tsv" | tr '\n' ' ' | sed 's/ $//')"
+
+make_caps > "$WORK/caps.tsv"
+
 # ── 7. An empty capability list is a no-op, not a crash ──────────────────────
 : > "$WORK/caps.tsv"
 result="$(run_prompts "$WORK/all-yes")"
