@@ -64,7 +64,7 @@ ansible-playbook -i inventory local.yml -e @$HOME/.config/computer-setup/prefs.y
 | NVM default alias | Mismatch is detected and `nvm alias default <declared>` re-run. |
 | tfenv active version | Reverted to `runtimes_tfenv_terraform_version` (and never auto-upgraded). |
 | Capability config files | Re-deployed from the providing layer whenever the capability is active. |
-| `computer-setup-run`, LaunchAgent plists | Regenerated, then the agents are reloaded. |
+| `computer-setup`, LaunchAgent plists | Regenerated, then the agents are reloaded. |
 
 ### Additive — nothing of yours is removed
 
@@ -140,13 +140,13 @@ prompt:
 sudo: a terminal is required to read the password
 ```
 
-Two things that do **not** work, both tried: running `drift-update` from a real
+Two things that do **not** work, both tried: running `computer-setup upgrade` from a real
 terminal (the terminal you launch from is not the terminal the task runs in), and
 pre-caching with `sudo -v` (the ticket is not usable from the task's context).
 
 The fix is an askpass helper. `community.general.homebrew_cask` implements it:
 given `sudo_password` it writes a 0700 temp askpass script and exports
-`SUDO_ASKPASS`, so Homebrew invokes `sudo -A`. `drift-update` collects the
+`SUDO_ASKPASS`, so Homebrew invokes `sudo -A`. `computer-setup upgrade` collects the
 password in your shell and passes it via the `CS_SUDO_PASSWORD` environment
 variable — never `-e`, which would expose it in the process list. Press Enter at
 the prompt to skip those casks.

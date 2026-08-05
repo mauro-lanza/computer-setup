@@ -34,12 +34,11 @@
     # play var because three roles create and write into it; two independent
     # role defaults for the same directory could drift apart silently.
     computer_setup_bin_dir: "{{ home_dir }}/.local/bin"
-    # Single entry point for every ansible-pull: deployed by drift_correction,
-    # invoked by the shell role's CLI functions. Play-scoped because two roles
-    # reference it.
-    computer_setup_runner_path: "{{ computer_setup_bin_dir }}/computer-setup-run"
-    # Rolling log the runner appends to and `drift-log` tails. Play-scoped for
-    # the same reason: drift_correction writes it, shell's CLI reads it.
+    # The single entry point for operating this machine: every ansible-pull goes
+    # through it, and the scheduled agents invoke its internal modes. Play-scoped
+    # because drift_correction deploys it and the agents reference it.
+    computer_setup_command_path: "{{ computer_setup_bin_dir }}/computer-setup"
+    # Rolling log the scheduled modes append to and `computer-setup log` tails.
     computer_setup_log_file: "{{ home_dir }}/Library/Logs/computer-setup.log"
     # Highest layer schema_version this orchestrator understands.
     computer_setup_schema_version: 1
@@ -65,9 +64,9 @@
     - { role: macos, tags: [macos] }
     - { role: runtimes, tags: [runtimes] }
     # `never`: the daily drift check must not clone repos, and bootstrap must not
-    # try before SSH auth exists. Run with `drift-apply --tags repositories`.
+    # try before SSH auth exists. Run with `computer-setup apply --tags repositories`.
     - { role: repositories, tags: [repositories, never] }
-    # `never`: only `--tags upgrade` runs it, via the `drift-update` helper.
+    # `never`: only `--tags upgrade` runs it, via the `computer-setup upgrade` helper.
     - { role: upgrade, tags: [upgrade, never] }
     - { role: drift_correction, tags: [drift_correction] }
 

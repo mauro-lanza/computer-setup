@@ -45,8 +45,7 @@ check_template_syntax() {
     rm -f "$tmp"
     echo "  ok  $src"
 }
-check_template_syntax roles/drift_correction/templates/computer-setup-run.sh.j2 zsh
-check_template_syntax roles/shell/templates/computer-setup-cli.zsh.j2 zsh
+check_template_syntax roles/drift_correction/templates/computer-setup.j2 zsh
 check_template_syntax roles/macos/templates/macos-capture.sh.j2 bash
 
 # The sed above cannot see a template Jinja itself refuses to parse — and the

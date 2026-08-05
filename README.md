@@ -86,30 +86,29 @@ The **variable interface** plus `schema_version` is the public API. Merge rules,
 the capability model, and reserved keys are all specified in
 [docs/architecture.md](docs/architecture.md).
 
-## Maintenance helpers
+## The `computer-setup` command
 
-Shell functions installed by the setup. The three that run the playbook delegate
-to `~/.local/bin/computer-setup-run`, which owns the `ansible-pull` invocation so
-the scheduled agents and the interactive commands can never drift apart.
+One command in `~/.local/bin` operates the whole system. It owns the
+`ansible-pull` invocation — repo, branch, prefs, layer cache, layer manifest —
+so the scheduled agents and everything you type by hand can never drift apart.
 
-- `drift-check` — run the same check the 10:00 agent runs (never mutates).
-- `drift-apply` — reconcile detected drift now.
-- `drift-update` — upgrade managed tools **including casks**, with confirmation.
-  The 09:00 agent already upgrades formulae, Galaxy collections and Node; casks
-  are left to this command because they can raise a `sudo` prompt that an
-  unattended agent has no TTY to answer.
-- `drift-log` — tail the rolling log.
-- `repos-generate` — scaffold a `~/.config/computer-setup/repositories.yml` override from this machine.
+- `computer-setup apply` — reconcile the machine now. Streams to your terminal.
+- `computer-setup check` — the same check the 10:00 agent runs (never mutates).
+- `computer-setup upgrade` — upgrade managed tools **including casks**, with
+  confirmation. The 09:00 agent already upgrades formulae, Galaxy collections
+  and Node; casks are left to this command because they can raise a `sudo`
+  prompt that an unattended agent has no TTY to answer.
+- `computer-setup log [n]` — tail the rolling log.
+- `computer-setup repos` — scaffold a `repositories.yml` from this machine's
+  checkouts. To clone the ones that are *missing*, run
+  `computer-setup apply --tags repositories`.
+- `computer-setup capture` — read-only; diffs this machine's live macOS
+  `defaults` against the values declared by your layers and emits paste-ready
+  YAML, so a setting you tweaked in System Settings can be adopted back into a
+  layer. `computer-setup capture --domain <domain>` dumps every key in a domain.
+- `computer-setup layers sync …` — refresh the content-layer cache.
 
-Plus one standalone command in `~/.local/bin`:
-
-- `macos-capture` — read-only; diffs this machine's live macOS `defaults`
-  against the values declared by your layers and emits paste-ready YAML, so a
-  setting you tweaked in System Settings can be adopted back into a layer.
-  `macos-capture --domain <domain>` dumps every key in a domain.
-
-To clone listed repositories that are missing, run
-`drift-apply --tags repositories`.
+`computer-setup` with no arguments prints this list.
 
 ## Documentation
 

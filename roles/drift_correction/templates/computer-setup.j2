@@ -1,0 +1,308 @@
+#!/bin/zsh
+# Managed by ansible — do not edit manually
+#
+# computer-setup — the single entry point for operating this machine's setup.
+#
+# Every ansible-pull this machine runs goes through here, so the `-e` argument
+# set (prefs file, layer cache, layer manifest) is defined exactly once. Add a
+# variable here, not per caller.
+#
+#   computer-setup apply [args]   Reconcile now. Streams to your terminal: no
+#                                 log capture, no notification, no connectivity
+#                                 guard — you can watch it fail.
+#   computer-setup check [args]   Drift detection (--check --diff). Never
+#                                 mutates. Logs, trims, notifies only on drift.
+#                                 This is what the scheduled agent runs.
+#   computer-setup upgrade        Upgrade managed tools INCLUDING casks, after
+#                                 confirming in your terminal.
+#   computer-setup log [n]        Tail the rolling log (default 100 lines).
+#   computer-setup repos          Print a repositories.yml scaffolded from the
+#                                 checkouts already on this machine.
+#   computer-setup capture [...]  Diff live macOS defaults against the declared
+#                                 values (delegates to macos-capture).
+#   computer-setup layers <...>   Sync the content layers (delegates to
+#                                 computer-setup-layers).
+#
+# INTERNAL MODES, invoked by the LaunchAgents — not for interactive use:
+#   computer-setup _scheduled-check    `check` with logging + notification
+#   computer-setup _scheduled-upgrade  formulae/Galaxy/Node only, no casks
+#
+# The scheduled modes exit 0 when the repo is unreachable — see the
+# connectivity guard below.
+
+set -uo pipefail
+
+REPO_URL="{{ computer_setup_repo_url }}"
+REPO_BRANCH="{{ computer_setup_repo_branch }}"
+PREFS_FILE="{{ computer_setup_prefs_file }}"
+LAYER_CACHE="{{ computer_setup_layer_cache }}"
+LAYERS_FILE="{{ computer_setup_layers_manifest }}"
+LOG_FILE="{{ computer_setup_log_file }}"
+ANSIBLE_PULL="{{ homebrew_prefix }}/bin/ansible-pull"
+BIN_DIR="{{ computer_setup_bin_dir }}"
+LAYER_SYNC="${BIN_DIR}/computer-setup-layers"
+MAX_LINES={{ drift_correction_log_max_lines }}
+CONNECTIVITY_TIMEOUT={{ drift_correction_connectivity_timeout }}
+REPOS_BASE_DIR="{{ repositories_base_dir }}"
+
+# ─── The pull argument set — single source of truth ──────────────────────────
+ARGS=(-U "$REPO_URL" -C "$REPO_BRANCH")
+[[ -f "$PREFS_FILE" ]] && ARGS+=(-e "@${PREFS_FILE}" -e "computer_setup_prefs_file=${PREFS_FILE}")
+[[ -n "$LAYER_CACHE" ]] && ARGS+=(-e "computer_setup_layer_cache=${LAYER_CACHE}")
+[[ -f "$LAYERS_FILE" ]] && ARGS+=(-e "computer_setup_layers_manifest=${LAYERS_FILE}")
+
+notify() {
+    /usr/bin/osascript -e "display notification \"${2}\" with title \"${1}\"" 2>/dev/null || true
+}
+
+log() { print -r -- "$@" >> "$LOG_FILE"; }
+
+usage() {
+    cat <<'EOF'
+computer-setup — operate this machine's configuration.
+
+  apply [args]     Reconcile now. Streams to your terminal.
+  check [args]     Drift detection (--check --diff). Never mutates.
+  upgrade          Upgrade managed tools INCLUDING casks, after confirming.
+  log [n]          Tail the rolling log (default 100 lines).
+  repos [dir]      Print a repositories.yml scaffolded from existing checkouts.
+  capture [args]   Diff live macOS defaults against the declared values.
+  layers <args>    Sync the content-layer cache.
+
+To clone repositories that are missing:  computer-setup apply --tags repositories
+EOF
+}
+
+# Refresh every content layer so the merge reflects the latest layer content
+# (drift covers orchestrator + all layers).
+#
+# EVERY mode must do this before running the playbook. ansible-pull updates the
+# ORCHESTRATOR only; the layers are separate repos in a separate cache. Skipping
+# it leaves the engine ahead of the layers, and any change that spans both — a
+# var the engine stopped defining and a layer still references — fails the run.
+# This includes `apply` — the mode a human runs by hand is the one that most
+# needs current layers.
+sync_layers() {
+    [[ -n "$LAYERS_FILE" && -f "$LAYERS_FILE" && -n "$LAYER_CACHE" ]] || return 0
+    "$LAYER_SYNC" sync --manifest "$LAYERS_FILE" --cache "$LAYER_CACHE" \
+        --schema-version {{ computer_setup_schema_version }}
+}
+
+# ─── Interactive reconcile: stream, don't capture ────────────────────────────
+cmd_apply() {
+    sync_layers || print -u2 "WARN: layer sync failed; continuing with cached content"
+    exec "$ANSIBLE_PULL" "${ARGS[@]}" local.yml "$@"
+}
+
+# ─── Interactive drift check ─────────────────────────────────────────────────
+cmd_check() {
+    sync_layers || print -u2 "WARN: layer sync failed; continuing with cached content"
+    exec "$ANSIBLE_PULL" "${ARGS[@]}" -e homebrew_update=false --check --diff \
+        local.yml "$@"
+}
+
+# ─── Upgrade managed tools, including casks ──────────────────────────────────
+# The scheduled 09:00 agent already upgrades formulae, Galaxy and Node. It
+# deliberately skips casks: those replace app bundles in /Applications and can
+# raise a sudo prompt, which a LaunchAgent has no TTY to answer. This command is
+# how casks get upgraded — run it when you're at the keyboard.
+#
+# Confirmation happens HERE, in your terminal (a guaranteed TTY), rather than via
+# an in-play Ansible `pause` — a pause inside `ansible-pull` blocks forever when
+# the prompt is missed and silently skips when stdin isn't interactive. This is
+# why upgrade stays its own verb instead of being folded into
+# `apply --tags upgrade`.
+cmd_upgrade() {
+    if [[ ! -t 0 ]]; then
+        print -u2 "computer-setup upgrade needs a terminal to confirm on."
+        print -u2 "The scheduled agent runs the unattended, cask-free upgrade already."
+        return 1
+    fi
+    echo "computer-setup upgrade brings managed tools to their latest versions:"
+    echo "  Homebrew formulae + casks, Ansible Galaxy collections, Node LTS."
+    echo
+    echo "Quit any app being upgraded first — replacing a running app can fail"
+    echo "and leave it half-installed."
+    printf "Proceed? [y/N]: "
+    local reply
+    read -r reply
+    if [[ "$reply" != [Yy]* ]]; then
+        echo "Aborted — nothing changed."
+        return 0
+    fi
+    # Casks that replace files they own (Docker Desktop) need root. Homebrew
+    # shells out to sudo, and by then we are several processes deep inside
+    # Ansible with pipes for stdin — sudo has no terminal to prompt on, and a
+    # credential cached with `sudo -v` out here is not usable in there either.
+    #
+    # The homebrew_cask module solves this properly: given `sudo_password` it
+    # writes a 0700 askpass script and sets SUDO_ASKPASS, which Homebrew turns
+    # into `sudo -A`. Collect the password here, where a terminal exists, and
+    # hand it over through the environment — not `-e`, which would expose it in
+    # the process list.
+    local sudo_pw
+    echo
+    echo "Some casks need root to upgrade (e.g. Docker Desktop)."
+    printf "macOS password (Enter to skip those casks): "
+    read -rs sudo_pw
+    echo
+    [[ -n "$sudo_pw" ]] && export CS_SUDO_PASSWORD="$sudo_pw"
+    unset sudo_pw
+
+    sync_layers || print -u2 "WARN: layer sync failed; continuing with cached content"
+    "$ANSIBLE_PULL" "${ARGS[@]}" --tags upgrade \
+        -e computer_setup_upgrade_assume_yes=true local.yml "$@"
+    local rc=$?
+    unset CS_SUDO_PASSWORD
+    return $rc
+}
+
+cmd_log() {
+    if [[ -f "$LOG_FILE" ]]; then
+        tail -n "${1:-100}" "$LOG_FILE"
+    else
+        echo "No log yet at $LOG_FILE"
+    fi
+}
+
+# ─── Repository list scaffold ────────────────────────────────────────────────
+# Prints a repositories.yml built from the checkouts already on this machine.
+# To clone the repos that are MISSING, run `computer-setup apply --tags
+# repositories` — the role is gated behind the `never` tag so the scheduled
+# agents never clone and bootstrap never touches private repos before SSH auth
+# exists. Cloning is non-destructive: existing checkouts are untouched.
+cmd_repos() {
+    local base="${1:-$REPOS_BASE_DIR}"
+    if [[ ! -d "$base" ]]; then
+        print -u2 "No such directory: $base"
+        return 1
+    fi
+    echo "---"
+    echo "# Generated by \`computer-setup repos\` from ${base} on $(date +%Y-%m-%d)"
+    echo "# Review, then save as {{ computer_setup_repositories_override_file }}"
+    echo "repositories:"
+    local git_dir repo remote
+    find "$base" -type d -name .git -prune 2>/dev/null | sort | while read -r git_dir; do
+        repo="${git_dir:h}"
+        remote="$(git -C "$repo" remote get-url origin 2>/dev/null)"
+        [[ -z "$remote" ]] && continue
+        echo "  - folder: \"${repo}\""
+        echo "    remote: \"${remote}\""
+    done
+}
+
+# ─── Scheduled modes (LaunchAgents) ──────────────────────────────────────────
+# Logged, notified, and guarded on connectivity. Never interactive.
+run_scheduled() {
+    local mode="$1"; shift
+
+    {
+        echo
+        echo "──────────────────────────────────────────────────────────"
+        echo "${mode} — $(date '+%Y-%m-%d %H:%M:%S %z')"
+        echo "──────────────────────────────────────────────────────────"
+    } >> "$LOG_FILE"
+
+    # EXPORTED, not scoped to the probe. A command-prefix assignment would apply
+    # to `git ls-remote` alone, leaving the layer sync and the ansible-pull free
+    # to hit an interactive host-key or passphrase prompt — inside a LaunchAgent
+    # with no TTY, that hangs forever. BatchMode makes any such prompt an
+    # immediate failure instead.
+    export GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=${CONNECTIVITY_TIMEOUT} -o StrictHostKeyChecking=accept-new"
+
+    # Probe the transport we actually use: an SSH git fetch against the real
+    # repo. An HTTPS probe passes on networks that allow 443 but block 22
+    # (corporate wifi, hotels, captive portals); the pull then fails and fires a
+    # "check failed" notification indistinguishable from a real breakage. A
+    # closed laptop, a blocked port and an expired key are all "can't work right
+    # now", not "your config is broken".
+    if ! git ls-remote --exit-code "$REPO_URL" "$REPO_BRANCH" >/dev/null 2>&1; then
+        log "RESULT: skipped — ${REPO_URL} unreachable (offline, port 22 blocked, or SSH key unavailable)"
+        exit 0
+    fi
+
+    sync_layers >> "$LOG_FILE" 2>&1 || log "WARN: layer sync failed; continuing with cached content"
+
+    # check:   -e homebrew_update=false — `state=present` never upgrades, so
+    #          refreshing the Homebrew index adds time with zero detection value.
+    # upgrade: formulae/Galaxy/Node only; casks need sudo and there's no TTY.
+    local -a mode_args
+    if [[ "$mode" == "check" ]]; then
+        mode_args=(-e homebrew_update=false --check --diff)
+    else
+        mode_args=(--tags upgrade -e computer_setup_upgrade_assume_yes=true
+                   -e computer_setup_upgrade_include_casks=false)
+    fi
+
+    local pull_out rc
+    pull_out=$("$ANSIBLE_PULL" "${ARGS[@]}" "${mode_args[@]}" local.yml "$@" 2>&1)
+    rc=$?
+
+    log "$pull_out"
+
+    # Trim to the last MAX_LINES lines (prevents unbounded growth, no newsyslog).
+    if [[ -f "$LOG_FILE" ]]; then
+        local tmp
+        tmp=$(mktemp)
+        tail -n "$MAX_LINES" "$LOG_FILE" > "$tmp" && mv "$tmp" "$LOG_FILE"
+    fi
+
+    # Count `changed=N` from the LAST recap only: ansible-pull emits two PLAY
+    # RECAP blocks and the first is its own repo checkout (always changed=1).
+    local changed_count
+    changed_count=$(echo "$pull_out" | awk '
+        /PLAY RECAP/ { in_recap = 1; total = 0; next }
+        in_recap && /changed=/ {
+            match($0, /changed=[0-9]+/)
+            total += substr($0, RSTART+8, RLENGTH-8)
+        }
+        END { print total+0 }
+    ')
+
+    if [[ $rc -ne 0 ]]; then
+        notify "computer-setup ${mode} failed" "ansible-pull exited rc=$rc. Run \`computer-setup log\`."
+        log "RESULT: ansible-pull failed (rc=$rc)"
+        exit "$rc"
+    fi
+
+    if [[ "$mode" == "check" ]]; then
+        if [[ "$changed_count" -gt 0 ]]; then
+            notify "Configuration drift detected" "$changed_count task(s) would change. Run \`computer-setup apply\` to reconcile."
+            log "RESULT: drift detected ($changed_count changed task(s))"
+        else
+            log "RESULT: no drift"
+        fi
+    else
+        if [[ "$changed_count" -gt 0 ]]; then
+            notify "Tools upgraded" "$changed_count task(s) changed. Casks not included — run \`computer-setup upgrade\` for those."
+            log "RESULT: upgraded ($changed_count changed task(s))"
+        else
+            log "RESULT: already up to date"
+        fi
+    fi
+
+    exit 0
+}
+
+# ─── Dispatch ────────────────────────────────────────────────────────────────
+COMMAND="${1:-}"
+shift 2>/dev/null || true
+
+case "$COMMAND" in
+    apply)              cmd_apply "$@" ;;
+    check)              cmd_check "$@" ;;
+    upgrade)            cmd_upgrade "$@" ;;
+    log)                cmd_log "$@" ;;
+    repos)              cmd_repos "$@" ;;
+    capture)            exec "${BIN_DIR}/macos-capture" "$@" ;;
+    layers)             exec "$LAYER_SYNC" "$@" ;;
+    _scheduled-check)   run_scheduled check "$@" ;;
+    _scheduled-upgrade) run_scheduled upgrade "$@" ;;
+    -h|--help|help|"")  usage ;;
+    *)
+        print -u2 "computer-setup: unknown command '${COMMAND}'"
+        print -u2
+        usage >&2
+        exit 64
+        ;;
+esac

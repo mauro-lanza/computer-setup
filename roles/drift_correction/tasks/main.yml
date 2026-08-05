@@ -24,10 +24,10 @@
     dest: "{{ computer_setup_bin_dir }}/computer-setup-layers"
     mode: "0755"
 
-- name: Deploy the computer-setup runner script
+- name: Deploy the computer-setup command
   ansible.builtin.template:
-    src: computer-setup-run.sh.j2
-    dest: "{{ computer_setup_runner_path }}"
+    src: computer-setup.j2
+    dest: "{{ computer_setup_command_path }}"
     mode: "0755"
   notify: Reload scheduled agents
 

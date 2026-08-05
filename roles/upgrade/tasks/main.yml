@@ -1,7 +1,7 @@
 ---
 # Opt-in upgrade path, gated behind the `upgrade`/`never` tags in local.yml so
-# the daily drift check and normal `drift-apply` never run it. Trigger with
-# `drift-update`, which confirms in your terminal then runs this with
+# the daily drift check and normal `computer-setup apply` never run it. Trigger with
+# `computer-setup upgrade`, which confirms in your terminal then runs this with
 # `-e computer_setup_upgrade_assume_yes=true`.
 #
 # Without that flag this role only PREVIEWS, so a scheduled run can never
@@ -63,7 +63,7 @@
 
       Homebrew casks:
       {% if not (computer_setup_upgrade_include_casks | bool) %}
-        (skipped — computer_setup_upgrade_include_casks=false; run `drift-update` to include casks)
+        (skipped — computer_setup_upgrade_include_casks=false; run `computer-setup upgrade` to include casks)
       {% elif upgrade_managed_casks | length == 0 %}
         (none managed)
       {% elif upgrade_outdated_casks.skipped | default(false) %}
@@ -104,7 +104,7 @@
         # Casks replacing root-owned files make Homebrew call sudo, which has no
         # terminal this deep inside Ansible. Given a password the module writes a
         # 0700 askpass script so Homebrew can use `sudo -A`. Passed through the
-        # environment by `drift-update` (never `-e`, which the process list would
+        # environment by `computer-setup upgrade` (never `-e`, which the process list would
         # expose); omitted when unset, so scheduled runs are unaffected.
         sudo_password: "{{ lookup('env', 'CS_SUDO_PASSWORD') | default(omit, true) }}"
       loop: "{{ upgrade_managed_casks }}"
@@ -170,7 +170,7 @@
 - name: Explain how to apply when not confirmed
   ansible.builtin.debug:
     msg: >-
-      Preview only — no upgrades applied. Run `drift-update` to upgrade
+      Preview only — no upgrades applied. Run `computer-setup upgrade` to upgrade
       (it confirms in your terminal first), or pass `-e computer_setup_upgrade_assume_yes=true`
       to apply non-interactively.
   when: >-

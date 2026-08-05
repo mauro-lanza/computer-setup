@@ -1,5 +1,5 @@
 ---
-# False by default, so a bare `--tags upgrade` only previews. `drift-update`
+# False by default, so a bare `--tags upgrade` only previews. `computer-setup upgrade`
 # confirms in the terminal (a guaranteed TTY) then sets this via -e.
 computer_setup_upgrade_assume_yes: false
 
@@ -16,7 +16,7 @@ upgrade_casks_exclude: []
 # Whether cask upgrades are attempted at all. Casks can trigger a sudo prompt,
 # which is fatal for a TTY-less LaunchAgent, so the scheduled morning upgrade
 # sets this false and touches only formulae, Galaxy and Node. Interactive
-# `drift-update` leaves it true.
+# `computer-setup upgrade` leaves it true.
 computer_setup_upgrade_include_casks: true
 
 # Node line to re-resolve to the newest available version on upgrade.

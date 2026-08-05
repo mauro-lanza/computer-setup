@@ -1,21 +1,14 @@
 ---
-# The shell role is a generic process: it deploys the orchestrator's own CLI
-# snippet, then whatever zsh content the active content layers provide. It holds
-# no shell content of its own — aliases, functions, integrations, and ~/.zshrc
-# all come from layers (files/shell/*.zsh, files/zshrc).
+# The shell role deploys whatever zsh content the active content layers provide.
+# It holds no shell content of its own — aliases, functions, integrations, and
+# ~/.zshrc all come from layers (files/shell/*.zsh, files/zshrc), and the
+# engine's own commands are a script in ~/.local/bin, not a sourced snippet.
 
 - name: Create managed shell config directory
   ansible.builtin.file:
     path: "{{ shell_zsh_config_dir }}"
     state: directory
     mode: "0755"
-
-- name: Deploy computer-setup shell CLI
-  ansible.builtin.template:
-    src: computer-setup-cli.zsh.j2
-    dest: "{{ shell_zsh_config_dir }}/{{ shell_cli_snippet_name }}"
-    mode: "0644"
-  notify: Shell config changed
 
 # ─── Layer-provided shell snippets ────────────────────────────────────────────
 # Gather files/shell/*.zsh from every active layer and deploy them into ~/.zsh,

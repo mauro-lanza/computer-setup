@@ -2,7 +2,7 @@
 # This role deliberately declares NO aliases for the play vars it renders
 # (computer_setup_repo_url, computer_setup_repo_branch, computer_setup_prefs_file,
 # computer_setup_layer_cache, computer_setup_layers_manifest,
-# computer_setup_bin_dir, computer_setup_runner_path). Templates use them directly.
+# computer_setup_bin_dir, computer_setup_command_path). Templates use them directly.
 #
 # `drift_correction_` is a fully reserved prefix, so a layer can never override
 # such an alias — it would be pure indirection with no interface value, and the
@@ -13,7 +13,7 @@
 # ones (enabled, schedule hours) are answerable via questions.
 #
 # Whether the two scheduled LaunchAgents are installed at all. The CLI helpers
-# (drift-check / drift-apply / drift-update / drift-log) are deployed either way,
+# (computer-setup apply / check / upgrade / log) are deployed either way,
 # so turning this off keeps the tooling and drops only the unattended jobs.
 # Normally answered by the `drift-agents` question; defaults to on so an existing
 # machine keeps its agents.

@@ -14,7 +14,7 @@
 
 # `default(x, true)` throughout: a bare `repositories:` key parses to None, which
 # is DEFINED, so plain `default()` would not fire and `| length` below aborts the
-# role. `repos-generate` emits exactly that on a machine with no checkouts yet.
+# role. `computer-setup repos` emits exactly that on a machine with no checkouts yet.
 - name: Resolve the effective repository list
   ansible.builtin.set_fact:
     repositories: "{{ _override | default(repositories, true) | default([], true) }}"
@@ -28,7 +28,7 @@
     msg: >-
       No repositories to clone. Add entries via a content layer's vars.yml
       (`repositories:`), to {{ computer_setup_repositories_override_file }} (see
-      repositories.example.yml), or run `repos-generate` to scaffold one.
+      repositories.example.yml), or run `computer-setup repos` to scaffold one.
   when: repositories | length == 0
 
 - name: Ensure the base projects directory exists
