@@ -10,12 +10,18 @@
 # Failures are collected here and reported by a post_task in local.yml — NOT at
 # the end of this role, which would still abort before `runtimes` and
 # `drift_correction`. The whole point is that every role gets to run first.
+#
+# `host` is optional and defaults to omitted. A handful of preferences (menu bar
+# / Control Center item visibility, screensaver) are stored per-machine under
+# ~/Library/Preferences/ByHost and are invisible to a plain `defaults read`;
+# those entries declare `host: currentHost`.
 - name: Apply macOS system defaults
   community.general.osx_defaults:
     domain: "{{ item.domain }}"
     key: "{{ item.key }}"
     type: "{{ item.type }}"
     value: "{{ item.value }}"
+    host: "{{ item.host | default(omit) }}"
     state: present
   loop: "{{ macos_defaults }}"
   loop_control:
@@ -40,6 +46,7 @@
     key: "{{ item.1.key }}"
     type: "{{ item.1.type }}"
     value: "{{ item.1.value }}"
+    host: "{{ item.1.host | default(omit) }}"
     state: present
   loop: >-
     {{ macos_conditional_app_stat.results | default([])
