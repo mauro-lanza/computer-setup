@@ -21,3 +21,8 @@ computer_setup_upgrade_include_casks: true
 
 # Node line to re-resolve to the newest available version on upgrade.
 upgrade_nvm_node: "{{ runtimes_nvm_default_node }}"
+
+# Records which ansible-core the Galaxy collections were last resolved against.
+# State, not config: it describes what this machine did, and deleting it costs
+# nothing but one extra `--upgrade` on the next run.
+upgrade_galaxy_core_marker: "{{ home_dir }}/.local/state/computer-setup/galaxy-core-version"

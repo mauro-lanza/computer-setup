@@ -98,17 +98,73 @@
     # upgrade above it, the block aborted, and the repair never ran: every
     # scheduled 09:00 upgrade then failed identically forever, with no way to
     # self-heal. Observed on 2026-08-05. Keep this first.
+    #
+    # --upgrade is added only when the running ansible-core differs from the one
+    # these collections were last resolved against, recorded in
+    # upgrade_galaxy_core_marker. That is the only condition under which the
+    # pinned collection can actually be too stale to load, so it is the only
+    # condition worth a Galaxy round trip.
+    #
+    # Keyed on the RUNNING core rather than on "is Homebrew about to bump
+    # ansible?" — the obvious signal, and the wrong one. It sees only the bumps
+    # this playbook performs, so a core upgraded any other way (a manual `brew
+    # upgrade`, or ansible pulled in as another formula's dependency) would
+    # never trigger it, and the stale collection would stay stale forever. That
+    # is precisely the permanent-failure loop described above, re-entered
+    # through a side door. A recorded version catches every path, because it
+    # compares against what is actually running.
+    #
+    # Note this repairs on the run AFTER the core changes, which is soon enough:
+    # upgrading the `ansible` formula mid-play does not change the already-
+    # running interpreter, so the tasks below still execute under the old core.
+    # The next run then starts here, with the repair, before any
+    # community.general task can fail.
+    #
+    # Every other run is a plain `install`, satisfied from what is already on
+    # disk, with no Galaxy API round trip. The daily round trip bought nothing
+    # — community.general releases nowhere near daily — while exposing every
+    # run to galaxy_cache/api.json corruption: one bad cached response then
+    # fails every ansible-galaxy call for its full 24h TTL ("Missing expected
+    # 'results' in ansible-galaxy cache"). Observed 2026-08-16 and 2026-08-17.
+    # --clear-response-cache is what makes that self-healing — a run that does
+    # reach the network starts from a cold cache instead of trusting a
+    # possibly-poisoned one.
+    - name: Read the ansible-core version the collections were resolved against
+      ansible.builtin.slurp:
+        src: "{{ upgrade_galaxy_core_marker }}"
+      register: upgrade_galaxy_core_recorded
+      # Absent on a first run, and after that only if someone deleted it.
+      # Either way the comparison below treats it as "unknown" and re-resolves.
+      failed_when: false
+
     - name: Update Ansible Galaxy collections
       ansible.builtin.command:
-        argv:
-          - ansible-galaxy
-          - collection
-          - install
-          - -r
-          - "{{ playbook_dir }}/requirements.yml"
-          - --upgrade
+        argv: >-
+          {{ ['ansible-galaxy', 'collection', 'install', '-r',
+              playbook_dir ~ '/requirements.yml', '--clear-response-cache']
+             + (['--upgrade'] if _core_changed | bool else []) }}
+      vars:
+        _recorded_core: >-
+          {{ (upgrade_galaxy_core_recorded.content | b64decode | trim)
+             if (upgrade_galaxy_core_recorded.content is defined) else '' }}
+        _core_changed: "{{ _recorded_core != ansible_version.full }}"
       register: upgrade_galaxy
       changed_when: "'Installing' in upgrade_galaxy.stdout"
+
+    - name: Ensure the state directory exists
+      ansible.builtin.file:
+        path: "{{ upgrade_galaxy_core_marker | dirname }}"
+        state: directory
+        mode: "0755"
+
+    # Written unconditionally, and only after the install above succeeded: if it
+    # failed, the marker keeps the old value so the next run retries with
+    # --upgrade rather than assuming the repair happened.
+    - name: Record the ansible-core version the collections are resolved against
+      ansible.builtin.copy:
+        content: "{{ ansible_version.full }}\n"
+        dest: "{{ upgrade_galaxy_core_marker }}"
+        mode: "0644"
 
     - name: Upgrade managed Homebrew formulae to latest
       community.general.homebrew:
