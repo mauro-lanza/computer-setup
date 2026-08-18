@@ -135,7 +135,7 @@ set although a layer's `vars.yml` may not:
 | Key | Decision |
 |---|---|
 | `repositories_base_dir` | where repositories are cloned |
-| `drift_correction_enabled` | whether the scheduled agents exist at all |
+| `drift_correction_enabled` | whether the engine's own drift/upgrade agents exist at all |
 | `drift_correction_schedule_hour` | when the drift check runs |
 | `drift_correction_upgrade_schedule_hour` | when the unattended upgrade runs |
 | `git_user_name`, `git_user_email` | commit identity |
@@ -258,10 +258,18 @@ with a different path: `files/shell/*.zsh.j2` is rendered, `*.zsh` is copied,
 and both land at the same managed destination.
 
 The remaining roles (`homebrew`, `git`, `shell`, `extensions`, `capability_configs`,
-`macos`, `runtimes`, `repositories`, `upgrade`, `drift_correction`) are ordinary
-consumers of that interface. Before adding one, apply the litmus test: if
-configuring a tool is just placing a file, it is **data** — a capability
-`config:` entry — not a new role.
+`macos`, `runtimes`, `repositories`, `upgrade`, `drift_correction`,
+`scheduled_agents`) are ordinary consumers of that interface. Before adding one,
+apply the litmus test: if configuring a tool is just placing a file, it is
+**data** — a capability `config:` entry — not a new role.
+
+`scheduled_agents` is the one place that test needs a word of explanation. A
+LaunchAgent *is* just a plist file, so by the rule above it should be data — and
+its content is: layers declare agents in the `scheduled_agents` list, and the
+role names no tool. It exists as a role only because launchd needs
+`bootout`/`bootstrap` to notice a rewritten or deleted plist, and
+`capability_configs` has no handler to run them. The lifecycle is the role; the
+schedule is data.
 
 ## The engine names no tool
 
@@ -276,6 +284,7 @@ layer data, reached through one of these interfaces:
 | Which whole-file shell configs exist (`zshrc`, `p10k.zsh`, …) | `shell_config_files` |
 | Which capability gates nvm / tfenv | `runtimes_*_capability` |
 | Terraform version | layer var, empty by default |
+| Which recurring jobs run, and when | `scheduled_agents`; the engine schedules them and knows nothing of what they do |
 
 If you find yourself typing a tool's name into `roles/`, one of these interfaces
 is the right place instead.

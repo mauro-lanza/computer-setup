@@ -122,3 +122,13 @@ copy.
   to a tool's CLI when a file cannot express it.
 - New optional tools are **capabilities in a layer**, never in the orchestrator.
   See [examples/example-layer/capabilities.yml](examples/example-layer/capabilities.yml).
+- The litmus test has one documented exception: a role is also justified when a
+  file needs a **lifecycle command** run after it is written, which a `config:`
+  entry cannot express. `scheduled_agents` exists only because launchd must be
+  told to reload a changed plist. See "The engine names no tool" in
+  [docs/architecture.md](docs/architecture.md).
+- When you add a role, update the roster paragraph in `docs/architecture.md` —
+  it enumerates every role by name and nothing else will catch it going stale.
+- If the role exposes a variable a layer is meant to set, add a commented
+  example to [examples/example-layer/vars.yml](examples/example-layer/vars.yml).
+  That file is the only documentation of the public variable interface.

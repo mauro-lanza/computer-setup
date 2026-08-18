@@ -1,0 +1,35 @@
+---
+# Generic scheduled-job primitive: turns a DATA list of agent definitions into
+# user LaunchAgents, and owns the launchctl lifecycle that plain file
+# deployment cannot.
+#
+# WHY THIS IS A ROLE AND NOT A CAPABILITY `config:` ENTRY
+# A LaunchAgent is "just a plist file", which by the litmus test in
+# CONTRIBUTING.md would make it data, not a role. The exception is the
+# lifecycle: launchd does not notice a rewritten plist, and it keeps running an
+# orphaned job across reboots after the plist is deleted. Something has to run
+# `bootout`/`bootstrap`, and `capability_configs` has no handler. That — and
+# only that — is what this role adds.
+#
+# WHY LAYERS MAY WRITE THIS LIST
+# `drift_correction_` is a reserved prefix precisely so a layer cannot retask
+# the engine's own agents. This list is deliberately NOT reserved, because it
+# grants a layer no reach it did not already have: a layer can already ship an
+# executable to ~/.local/bin and a plist to ~/Library/LaunchAgents through an
+# ordinary capability `config:` entry. It just never got reloaded.
+#
+# Entry schema (label + program + hour + minute required):
+#   - label: com.example.job          # also names the plist and its logs
+#     program: /path/to/executable
+#     args: ["--flag"]                # optional
+#     hour: 8                         # 0-23
+#     minute: 30                      # 0-59
+#     enabled: true                   # optional, default true
+#     requires_capability: some-id    # optional; skipped unless that
+#                                     # capability is active on this machine
+scheduled_agents: []
+
+# Global kill switch, independent of the per-entry `enabled` flag.
+scheduled_agents_enabled: true
+
+scheduled_agents_log_dir: "{{ home_dir }}/Library/Logs"

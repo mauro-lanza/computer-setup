@@ -6,7 +6,9 @@
 # The knobs below are real: they have their own defaults, and the machine-tier
 # ones (enabled, schedule hours) are answerable via questions.
 #
-# Whether the two scheduled LaunchAgents are installed at all. The
+# Whether the engine's own two scheduled LaunchAgents are installed at all.
+# (Layer-declared agents are separate, and gated by `scheduled_agents_enabled`.)
+# The
 # `computer-setup` command is deployed either way, so turning this off keeps the
 # tooling and drops only the unattended jobs. Normally answered by the
 # `drift-agents` question; defaults to on so an existing machine keeps its.

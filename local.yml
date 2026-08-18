@@ -69,6 +69,11 @@
     # `never`: only `--tags upgrade` runs it, via the `computer-setup upgrade` helper.
     - { role: upgrade, tags: [upgrade, never] }
     - { role: drift_correction, tags: [drift_correction] }
+    # Last, and after drift_correction, for the same reason it runs late: the
+    # plists it writes are what keep unattended work happening, so nothing that
+    # can fail should stand between here and the end of the play. Its agents
+    # invoke programs deployed by capability_configs above, so it must follow it.
+    - { role: scheduled_agents, tags: [scheduled_agents] }
 
   post_tasks:
     # Reported HERE, not in the macos role, so every role runs first. osx_defaults

@@ -9,7 +9,7 @@
 # rendered rather than copied. The key is unchanged; see docs/architecture.md.
 #
 # Engine-recognized file keys (path relative to this files/ directory).
-# These three are the only keys the orchestrator looks up by name:
+# These two are the only keys the orchestrator looks up by name:
 #
 #   zshrc     → ~/.zshrc  (sources ~/.zsh/*.zsh, prompt, plugins)
 #   p10k.zsh  → Powerlevel10k prompt config
@@ -24,6 +24,11 @@
 # `zed/settings.json` and `opencode.json` purely because its own capabilities.yml
 # references those strings; there is no zed role and no opencode role.
 # See `example-tool` in ../capabilities.yml, which uses `example/config.toml`.
+#
+# A `config:` entry can just as well deploy an EXECUTABLE (set `mode: "0755"`,
+# dest somewhere on PATH such as ~/.local/bin). That is how a layer supplies the
+# `program` of a `scheduled_agents` entry in ../vars.yml — the script is layer
+# data, and so is the decision to run it on a schedule.
 #
 # Shell snippets — files/shell/*.zsh:
 #   Every *.zsh here is deployed into ~/.zsh/ (prefixed with this layer's

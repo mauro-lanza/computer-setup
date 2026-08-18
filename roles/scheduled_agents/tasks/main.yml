@@ -1,0 +1,95 @@
+---
+# Split the declared agents into those that should exist on this machine and
+# those that should not. Computed once so the deploy and the teardown below can
+# never disagree about which is which — a plist that fell out of the "wanted"
+# set must be actively booted out, not merely left unwritten.
+- name: Resolve which scheduled agents apply to this machine
+  ansible.builtin.set_fact:
+    _scheduled_agents_wanted: "{{ _wanted }}"
+    # Compared by label, not with the `difference` filter: these are dicts, and
+    # set-based difference on unhashable items is not something to rely on.
+    _scheduled_agents_unwanted: >-
+      {{ scheduled_agents
+         | rejectattr('label', 'in', _wanted | map(attribute='label') | list)
+         | list }}
+  vars:
+    _capability_ok: >-
+      {{ scheduled_agents
+         | rejectattr('requires_capability', 'defined')
+         | list
+         + (scheduled_agents
+            | selectattr('requires_capability', 'defined')
+            | selectattr('requires_capability', 'in',
+                         computer_setup_active_capabilities | default([]))
+            | list) }}
+    _wanted: >-
+      {{ (_capability_ok | selectattr('enabled', 'defined') | selectattr('enabled') | list
+          + (_capability_ok | rejectattr('enabled', 'defined') | list))
+         if (scheduled_agents_enabled | bool) else [] }}
+
+- name: Validate scheduled agent definitions
+  ansible.builtin.assert:
+    that:
+      - agent.label is defined and agent.label | length > 0
+      - agent.program is defined and agent.program | length > 0
+      - agent.hour is defined and (agent.hour | int) >= 0 and (agent.hour | int) <= 23
+      - agent.minute is defined and (agent.minute | int) >= 0 and (agent.minute | int) <= 59
+    fail_msg: >-
+      Invalid scheduled_agents entry: {{ agent }}. Requires `label`, `program`,
+      `hour` (0-23) and `minute` (0-59). A malformed plist is accepted silently
+      by launchd and simply never fires, so this is checked here instead.
+    quiet: true
+  loop: "{{ _scheduled_agents_wanted }}"
+  loop_control:
+    loop_var: agent
+    label: "{{ agent.label | default('<no label>') }}"
+
+# Match macOS default permissions for pre-existing system directories.
+- name: Ensure log directory exists
+  ansible.builtin.file:
+    path: "{{ scheduled_agents_log_dir }}"
+    state: directory
+    mode: "0700"
+  when: _scheduled_agents_wanted | length > 0
+
+- name: Ensure ~/Library/LaunchAgents exists
+  ansible.builtin.file:
+    path: "{{ home_dir }}/Library/LaunchAgents"
+    state: directory
+    mode: "0755"
+  when: _scheduled_agents_wanted | length > 0
+
+- name: Deploy scheduled LaunchAgent plists
+  ansible.builtin.template:
+    src: launchagent.plist.j2
+    dest: "{{ home_dir }}/Library/LaunchAgents/{{ agent.label }}.plist"
+    mode: "0644"
+  loop: "{{ _scheduled_agents_wanted }}"
+  loop_control:
+    loop_var: agent
+    label: "{{ agent.label }} (@ {{ agent.hour }}:{{ '%02d' | format(agent.minute | int) }})"
+  notify: Reload scheduled user agents
+
+# Turning an agent off must actually stop it, not just stop rewriting the plist.
+# An orphaned plist stays loaded across reboots, so the job would keep running
+# long after the machine said no.
+- name: Unload scheduled agents that no longer apply
+  ansible.builtin.command:
+    cmd: launchctl bootout gui/{{ ansible_facts['user_uid'] }} {{ home_dir }}/Library/LaunchAgents/{{ agent.label }}.plist
+  loop: "{{ _scheduled_agents_unwanted }}"
+  loop_control:
+    loop_var: agent
+    label: "{{ agent.label }}"
+  register: _scheduled_agents_bootout
+  changed_when: _scheduled_agents_bootout.rc == 0
+  # Not loaded (or never was) is the desired end state, not an error.
+  failed_when: false
+
+- name: Remove plists for scheduled agents that no longer apply
+  ansible.builtin.file:
+    path: "{{ home_dir }}/Library/LaunchAgents/{{ agent.label }}.plist"
+    state: absent
+  loop: "{{ _scheduled_agents_unwanted }}"
+  loop_control:
+    loop_var: agent
+    label: "{{ agent.label }}"

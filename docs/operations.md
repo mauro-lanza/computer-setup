@@ -70,7 +70,8 @@ alone tells you nothing.
 | NVM default alias | Mismatch is detected and `nvm alias default <declared>` re-run. |
 | tfenv active version | Reverted to `runtimes_tfenv_terraform_version` (and never auto-upgraded). |
 | Capability config files | Re-deployed from the providing layer whenever the capability is active. |
-| `computer-setup`, LaunchAgent plists | Regenerated, then the agents are reloaded. |
+| `computer-setup`, the engine's own LaunchAgent plists | Regenerated, then the agents are reloaded. |
+| Layer-declared scheduled agents | Plists regenerated and reloaded. An agent whose `requires_capability` is no longer active, or whose entry is removed, is booted out of launchd and its plist deleted — a stale plist would otherwise keep firing across reboots. |
 
 ### Additive — nothing of yours is removed
 
@@ -109,6 +110,32 @@ also owns and edits. A "remove what we no longer manage" pass over those paths
 would turn a renamed `dest`, a mistyped capability id, or a layer that briefly
 failed to load into silent deletion of real user config. An orphan is the cheaper
 failure. After renaming a bundle's `dest`, delete the old file yourself.
+
+Scheduled agents are the deliberate exception: `scheduled_agents` **does** remove
+plists it no longer wants. The reasoning above does not hold for them — an
+orphaned plist is not an inert stale file, it is a job that keeps running on
+schedule across reboots. Leaving one behind means the machine keeps doing work it
+was told to stop doing, which is worse than the deletion risk.
+
+## Where scheduled jobs log
+
+`computer-setup log` tails only the engine's own rolling log
+(`~/Library/Logs/computer-setup.log`) — the 09:00 upgrade and 10:00 drift check.
+It does **not** show layer-declared agents.
+
+Those write one pair of files per agent, named for the agent's label:
+
+    ~/Library/Logs/<label>.stdout.log
+    ~/Library/Logs/<label>.stderr.log
+
+These are not rotated. A job that is noisy on every run will grow them without
+bound, so prefer one that stays quiet when it has nothing to report.
+
+Check `stderr.log` first when an agent appears to do nothing. A LaunchAgent
+inherits no login-shell environment, so the usual cause is a `PATH` problem — the
+plist sets a fixed `PATH` covering Homebrew and the system, and a tool installed
+anywhere else will not be found. `launchctl list | grep <label>` shows whether
+the job is loaded and what it last exited with.
 
 ## Adopting manually-installed apps
 

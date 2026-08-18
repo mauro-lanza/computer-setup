@@ -30,6 +30,27 @@ repositories:
 #     settings_key: vscode/settings.json
 #     settings_dest: "{{ home_dir }}/Library/Application Support/Code/User/settings.json"
 
+# ─── Scheduled jobs (list — appends across layers) ───────────────────────────
+# Recurring work is layer data too: the engine schedules jobs, it does not know
+# what any of them do. Each entry becomes a macOS LaunchAgent.
+#
+# `program` is usually something this same layer deploys through a capability
+# `config:` entry, which is why `requires_capability` exists — it drops the
+# agent on machines where that capability is inactive, instead of leaving a
+# plist pointing at a script that was never installed.
+#
+# Remember an agent has no terminal: a job that prompts will hang or die on
+# EOF, so pass whatever flag makes yours run unattended.
+#
+# scheduled_agents:
+#   - label: com.example.nightly-tidy
+#     program: "{{ home_dir }}/.local/bin/example-tidy"
+#     args: [--quiet]
+#     hour: 8
+#     minute: 30
+#     enabled: true              # optional, default true
+#     requires_capability: example-tidy   # optional
+
 # ─── Layer-private vars (NOT an engine interface) ────────────────────────────
 # Anything the orchestrator doesn't consume is still merged into scope, so your
 # own templates/ can read it. These dbt values are a private convention between

@@ -4,9 +4,11 @@ Generalized macOS provisioning framework. An Ansible **orchestrator** (the
 engine) consumes pluggable **content layers** (your data), so the core stays
 public and shareable while personal and work data live in separate repos.
 
-Two LaunchAgents run each morning: at 09:00 managed tools are upgraded, at 10:00
-the playbook re-runs in check mode and notifies you when the machine has drifted
-from the declared state — across the orchestrator *and* every layer.
+Scheduled LaunchAgents run each morning: at 09:00 managed tools are upgraded, at
+10:00 the playbook re-runs in check mode and notifies you when the machine has
+drifted from the declared state — across the orchestrator *and* every layer.
+Layers can schedule jobs of their own on the same mechanism (see
+`scheduled_agents`).
 
 ## Why layers?
 
