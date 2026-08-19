@@ -50,7 +50,12 @@ BIN_DIR="{{ computer_setup_bin_dir }}"
 LAYER_SYNC="${BIN_DIR}/computer-setup-layers"
 MAX_LINES={{ drift_correction_log_max_lines }}
 CONNECTIVITY_TIMEOUT={{ drift_correction_connectivity_timeout }}
-REPOS_BASE_DIR="{{ repositories_base_dir }}"
+# `| expanduser` because this is the one path here a HUMAN answers, via the
+# repositories-dir question, and "~/Projects" is the natural answer. Ansible
+# expands `~` itself whenever a module consumes a path, so that answer is
+# correct everywhere else in the system — but baked into a shell string it
+# stays literal, and `~` does not expand inside a quoted assignment.
+REPOS_BASE_DIR="{{ repositories_base_dir | expanduser }}"
 
 # ─── The pull argument set — single source of truth ──────────────────────────
 ARGS=(-U "$REPO_URL" -C "$REPO_BRANCH")

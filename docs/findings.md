@@ -120,6 +120,26 @@ work right now", and all exit 0 silently.
 assignment would leave the layer sync and the pull itself free to hit an
 interactive host-key or passphrase prompt, which hangs forever with no TTY.
 
+### A `~` in a templated path is literal in shell, but not in Ansible
+
+`repositories_base_dir` is answered by a human, and `~/Projects` is the natural
+answer. Ansible expands `~` whenever a module consumes a path, so that answer is
+correct for the `repositories` role and reads fine in every YAML file.
+
+Baked into a shell script it is not. `~` does not expand inside a quoted
+assignment, so `REPOS_BASE_DIR="~/Projects"` is a literal directory name that
+cannot exist. This broke `computer-setup repos` silently for as long as the
+answer had a tilde, and would have made the branch-cleanup agent exit 1 every
+morning into a log nobody opens.
+
+Any path a HUMAN answers needs `| expanduser` when it is rendered into a shell
+template. Paths the engine builds itself (`home_dir` comes from
+`ansible_facts['env']['HOME']`) are already absolute and do not. `expanduser` is
+a no-op on an absolute path, so it is safe to apply either way.
+
+The wrong fix is to change the answer to an absolute path: it works, and it
+silently ties the machine's config to one username.
+
 ## Specific tools
 
 ### VS Code paths contain spaces
