@@ -25,4 +25,4 @@ upgrade_nvm_node: "{{ runtimes_nvm_default_node }}"
 # Records which ansible-core the Galaxy collections were last resolved against.
 # State, not config: it describes what this machine did, and deleting it costs
 # nothing but one extra `--upgrade` on the next run.
-upgrade_galaxy_core_marker: "{{ home_dir }}/.local/state/computer-setup/galaxy-core-version"
+upgrade_galaxy_core_marker: "{{ computer_setup_state_dir }}/galaxy-core-version"

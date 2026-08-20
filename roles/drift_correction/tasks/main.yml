@@ -9,15 +9,26 @@
     state: directory
     mode: "0755"
 
+# 0700: the run state records which files on this machine would change. Metadata
+# only by design (the callback plugin never writes file contents), but the task
+# and path list is still a description of this machine and not the world's.
+- name: Ensure state directory exists
+  ansible.builtin.file:
+    path: "{{ computer_setup_state_dir }}"
+    state: directory
+    mode: "0700"
+
 - name: Deploy layer sync helper
   ansible.builtin.copy:
     src: "{{ playbook_dir }}/scripts/computer-setup-layers"
     dest: "{{ computer_setup_bin_dir }}/computer-setup-layers"
     mode: "0755"
 
+# No handler notification: launchd re-reads the PROGRAM at each scheduled fire,
+# so a rewritten runner needs no reload. Only a changed plist does, and
+# scheduled_agents owns and notifies that itself.
 - name: Deploy the computer-setup command
   ansible.builtin.template:
     src: computer-setup.j2
     dest: "{{ computer_setup_command_path }}"
     mode: "0755"
-  notify: Reload scheduled user agents

@@ -79,6 +79,25 @@ for p in sorted(pathlib.Path("roles").glob("*/templates/*.j2")):
 sys.exit(rc)
 PY
 
+# The callback plugin is the only Python here, and it runs inside every single
+# ansible-pull — including the unattended ones. A syntax error in it would first
+# surface at 09:00 inside a LaunchAgent. Compiled with ANSIBLE's interpreter,
+# which is the one that will actually import it.
+echo "==> Callback plugin"
+"$CS_PY" -m py_compile callback_plugins/computer_setup_state.py
+"$CS_PY" - <<'PY'
+import sys
+sys.path.insert(0, "callback_plugins")
+import computer_setup_state as m
+
+cb = m.CallbackModule
+assert cb.CALLBACK_TYPE == "aggregate", "must not replace the stdout callback"
+assert cb.CALLBACK_NAME == "computer_setup_state", "name must match the filename"
+assert cb.CALLBACK_NEEDS_ENABLED is True, "must be opt-in via callbacks_enabled"
+assert isinstance(m.STATE_SCHEMA_VERSION, int)
+print("  ok  aggregate, opt-in, schema_version =", m.STATE_SCHEMA_VERSION)
+PY
+
 echo "==> Ansible syntax"
 ansible-playbook --syntax-check local.yml
 ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook --syntax-check tests/contract.yml
@@ -100,6 +119,49 @@ ansible-playbook --list-tasks --tags upgrade local.yml >/dev/null
 
 echo "==> Layer contract"
 ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook tests/contract.yml >/dev/null
+
+# The state file is a CONSUMED INTERFACE: `computer-setup status` reads it, and
+# a UI would too. Assert its shape, and — the point of the whole design — that
+# no file CONTENT reaches it. Ansible's diffs carry before/after payloads; the
+# plugin must record only task, action and dest.
+echo "==> Run state contract"
+cs_state="$(mktemp -d)/last-run.json"
+CS_STATE_FILE="$cs_state" CS_RUN_MODE=check \
+    ansible-playbook tests/state.yml --check --diff >/dev/null
+if [[ ! -f "$cs_state" ]]; then
+    echo "ERROR: the callback plugin wrote no state file" >&2
+    exit 1
+fi
+"$CS_PY" - "$cs_state" <<'PY'
+import json, sys, stat, os
+
+path = sys.argv[1]
+raw = open(path).read()
+d = json.loads(raw)
+
+# The canary from tests/state.yml. If this ever appears, the plugin started
+# recording diff payloads and is now leaking managed file contents to disk.
+assert "CANARY-DO-NOT-RECORD-a3f9" not in raw, "FILE CONTENT LEAKED INTO STATE FILE"
+for banned in ("before", "after", "before_header", "after_header", "stdout"):
+    assert banned not in raw, f"state file carries a {banned!r} payload"
+
+assert d["schema_version"] == 1, d["schema_version"]
+assert d["mode"] == "check", d["mode"]
+assert d["result"] == "ok", d["result"]
+assert d["totals"]["changed"] == 1, d["totals"]
+assert d["truncated"] is False
+assert d["partial"] is False, "a full run must not be marked partial"
+entry = d["changed"][0]
+assert entry["task"] == "A task that would change a file", entry
+assert entry["dest"].endswith("cs-state-contract.txt"), entry
+assert entry["action"] == "ansible.builtin.copy", entry
+
+# 0600: it describes this machine's files.
+mode = stat.S_IMODE(os.stat(path).st_mode)
+assert mode == 0o600, oct(mode)
+print("  ok  shape, 0600, and no file contents recorded")
+PY
+rm -rf "$(dirname "$cs_state")"
 
 # A guard whose expression always evaluates false looks exactly like a passing
 # suite. Assert the run FAILS, and for the right reason.

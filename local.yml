@@ -34,6 +34,11 @@
     # play var because three roles create and write into it; two independent
     # role defaults for the same directory could drift apart silently.
     computer_setup_bin_dir: "{{ home_dir }}/.local/bin"
+    # Machine-local state this system WRITES (as opposed to config it reads):
+    # the run-state file the callback plugin emits, and the marker recording
+    # which ansible-core the Galaxy collections were resolved against. One play
+    # var for the same reason as bin_dir — more than one role writes in here.
+    computer_setup_state_dir: "{{ home_dir }}/.local/state/computer-setup"
     # The single entry point for operating this machine: every ansible-pull goes
     # through it, and the scheduled agents invoke its internal modes. Play-scoped
     # because drift_correction deploys it and the agents reference it.

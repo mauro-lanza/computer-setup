@@ -6,13 +6,18 @@
 # The GUI domain target is resolved from Ansible facts, the same way the removal
 # task in tasks/main.yml does it — not from a `$(id -u)` subshell, so both paths
 # always name the identical launchd domain.
+#
+# `| default([])` because a handler can be notified by a run that never executed
+# this role's tasks (`--tags drift_correction` deploys the runner but skips
+# here), leaving the fact unset. An undefined loop fails the play at the very
+# end, after everything else succeeded.
 - name: Reload scheduled user agents
   ansible.builtin.shell: |
     launchctl bootout gui/{{ ansible_facts['user_uid'] }} "{{ home_dir }}/Library/LaunchAgents/{{ agent.label }}.plist" 2>/dev/null || true
     launchctl bootstrap gui/{{ ansible_facts['user_uid'] }} "{{ home_dir }}/Library/LaunchAgents/{{ agent.label }}.plist"
   args:
     executable: /bin/bash
-  loop: "{{ _scheduled_agents_wanted }}"
+  loop: "{{ _scheduled_agents_wanted | default([]) }}"
   loop_control:
     loop_var: agent
     label: "{{ agent.label }}"

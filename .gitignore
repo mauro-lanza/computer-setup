@@ -3,6 +3,10 @@
 fact_cache/
 .ansible/
 
+# Python — check.sh compiles the callback plugin on every run
+__pycache__/
+*.pyc
+
 # macOS
 .DS_Store
 

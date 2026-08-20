@@ -19,6 +19,30 @@ computer-setup check
 # A fully converged machine reports:  changed=0  failed=0
 ```
 
+Ask what the last run actually did, without re-running anything:
+
+```bash
+computer-setup status
+```
+
+```
+Last run:  check — ok at 2026-08-20T10:00:04+0200
+Drift:     2 task(s) would change:
+  - Deploy layer template: settings.json  →  /Users/you/.config/zed/settings.json
+  - Deploy the managed git config  →  /Users/you/.config/git/managed.gitconfig
+Sync:      ok — last successful scheduled run 0 day(s) ago
+```
+
+The `Sync:` line is the one to read first. The scheduled modes exit 0 when the
+repo is unreachable — a closed laptop is not a fault — which means a machine
+that quietly stopped syncing weeks ago otherwise looks exactly like a healthy
+one. Past `drift_correction_stale_after_days` (14 by default) it reports
+`STALE`.
+
+`computer-setup status --json` prints the same thing for machines. It is the
+interface a UI would consume; see "Run state" in
+[architecture.md](architecture.md) for the shape and its guarantees.
+
 Clone repositories that are listed but missing:
 
 ```bash

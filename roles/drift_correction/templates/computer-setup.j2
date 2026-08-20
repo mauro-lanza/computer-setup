@@ -23,6 +23,8 @@
 #   computer-setup upgrade        Upgrade managed tools INCLUDING casks, after
 #                                 confirming in your terminal.
 #   computer-setup log [n]        Tail the rolling log (default 100 lines).
+#   computer-setup status [--json] What the last run did, and how long since the
+#                                 last successful scheduled one.
 #   computer-setup repos          Print a repositories.yml scaffolded from the
 #                                 checkouts already on this machine.
 #   computer-setup capture [...]  Diff live macOS defaults against the declared
@@ -45,6 +47,19 @@ PREFS_FILE="{{ computer_setup_prefs_file }}"
 LAYER_CACHE="{{ computer_setup_layer_cache }}"
 LAYERS_FILE="{{ computer_setup_layers_manifest }}"
 LOG_FILE="{{ computer_setup_log_file }}"
+# Machine-readable run state, written by the computer_setup_state callback
+# plugin (see callback_plugins/). `status` reads it; a UI could too. The plugin
+# is inert unless CS_STATE_FILE is exported, which is why every mode that wants
+# state recorded sets it explicitly.
+STATE_FILE="{{ computer_setup_state_dir }}/last-run.json"
+# Plain ISO timestamp of the last SCHEDULED run that reached the repo and
+# finished cleanly. Deliberately a separate one-line file rather than a field in
+# the JSON: it must survive a run that failed, and merging JSON in bash to
+# preserve one field is how you end up with neither.
+LAST_SUCCESS_FILE="{{ computer_setup_state_dir }}/last-success"
+# Days without a successful scheduled run before `status` calls it stale. A
+# machine that quietly stopped syncing is the failure this makes visible.
+STALE_AFTER_DAYS={{ drift_correction_stale_after_days }}
 ANSIBLE_PULL="{{ homebrew_prefix }}/bin/ansible-pull"
 BIN_DIR="{{ computer_setup_bin_dir }}"
 LAYER_SYNC="${BIN_DIR}/computer-setup-layers"
@@ -77,6 +92,7 @@ computer-setup — operate this machine's configuration.
   check [args]     Drift detection (--check --diff). Never mutates.
   upgrade          Upgrade managed tools INCLUDING casks, after confirming.
   log [n]          Tail the rolling log (default 100 lines).
+  status [--json]  What the last run did, and whether syncing has gone stale.
   repos [dir]      Print a repositories.yml scaffolded from existing checkouts.
   capture [args]   Diff live macOS defaults against the declared values.
   layers sync      Refresh the content-layer cache.
@@ -101,15 +117,33 @@ sync_layers() {
         --schema-version {{ computer_setup_schema_version }}
 }
 
+# Any mode that runs the playbook records what it did. `partial` marks a run
+# that was narrowed with extra args (`--tags repositories`, `--limit`, …):
+# without it `status` would report "no drift" for the WHOLE machine on the
+# strength of a run that only ever looked at one role.
+#
+# The args themselves are deliberately NOT recorded — `-e secret=…` is a
+# legitimate invocation, and this file is a report, not a shell history.
+state_env() {
+    CS_STATE_FILE="$STATE_FILE"
+    CS_RUN_MODE="$1"
+    CS_RUN_PARTIAL="$2"
+    export CS_STATE_FILE CS_RUN_MODE CS_RUN_PARTIAL
+}
+
 # ─── Interactive reconcile: stream, don't capture ────────────────────────────
 cmd_apply() {
     sync_layers || printf '%s\n' "WARN: layer sync failed; continuing with cached content" >&2
+    # Exported through exec, so a hand-run apply updates `status` too — otherwise
+    # status would describe the 10:00 agent's world and not the one you just made.
+    state_env apply "$(( $# > 0 ))"
     exec "$ANSIBLE_PULL" "${ARGS[@]}" local.yml "$@"
 }
 
 # ─── Interactive drift check ─────────────────────────────────────────────────
 cmd_check() {
     sync_layers || printf '%s\n' "WARN: layer sync failed; continuing with cached content" >&2
+    state_env check "$(( $# > 0 ))"
     exec "$ANSIBLE_PULL" "${ARGS[@]}" -e homebrew_update=false --check --diff \
         local.yml "$@"
 }
@@ -163,11 +197,110 @@ cmd_upgrade() {
     unset sudo_pw
 
     sync_layers || printf '%s\n' "WARN: layer sync failed; continuing with cached content" >&2
+    # Always partial: this runs `--tags upgrade`, so it says nothing about
+    # whether the rest of the machine matches its configuration.
+    state_env upgrade 1
     "$ANSIBLE_PULL" "${ARGS[@]}" --tags upgrade \
         -e computer_setup_upgrade_assume_yes=true local.yml "$@"
     local rc=$?
     unset CS_SUDO_PASSWORD
     return $rc
+}
+
+# ─── Run state ───────────────────────────────────────────────────────────────
+# Read one field out of the state file. JSON is valid YAML and yq detects the
+# .json extension, so no -p flag; yq is a bootstrap prerequisite, so it is always
+# present. Missing file or missing key both yield empty, never an error: state is
+# a REPORT, and a machine with no report yet is not a broken machine.
+state_field() {
+    [[ -f "$STATE_FILE" ]] || return 0
+    yq -r "${1} // \"\"" "$STATE_FILE" 2>/dev/null | grep -v '^null$' || true
+}
+
+# Whole days since the last successful scheduled run; empty if there has never
+# been one. `date -j -f` is BSD date — macOS only, which this whole system is.
+days_since_success() {
+    [[ -f "$LAST_SUCCESS_FILE" ]] || return 0
+    local stamp then_ts now
+    stamp="$(tr -d '[:space:]' < "$LAST_SUCCESS_FILE")"
+    [[ -n "$stamp" ]] || return 0
+    then_ts=$(date -j -f '%Y-%m-%dT%H:%M:%S%z' "$stamp" '+%s' 2>/dev/null) || return 0
+    now=$(date '+%s')
+    echo $(( (now - then_ts) / 86400 ))
+}
+
+# Render the changed/failed task list. `dest` is optional (not every task acts
+# on a path), so it is emitted tab-separated and the tab collapsed away here —
+# yq is mikefarah's, which has no jq-style `if/then/else` to inline it.
+state_task_list() {
+    [[ -f "$STATE_FILE" ]] || return 0
+    yq -r "${1}[] | \"  - \" + .task + \"\t\" + (.dest // \"\")" "$STATE_FILE" 2>/dev/null \
+        | sed -e 's/\t$//' -e 's/\t/  →  /' || true
+}
+
+cmd_status() {
+    local days changed result mode finished
+    days="$(days_since_success)"
+
+    if [[ "${1:-}" == "--json" ]]; then
+        # Composed rather than echoed: staleness is derived, and a consumer
+        # should not have to reimplement the date maths to get it.
+        printf '{\n'
+        printf '  "last_success": "%s",\n' "$(cat "$LAST_SUCCESS_FILE" 2>/dev/null | tr -d '[:space:]')"
+        printf '  "days_since_success": %s,\n' "${days:-null}"
+        printf '  "stale": %s,\n' "$( [[ -n "$days" && "$days" -ge "$STALE_AFTER_DAYS" ]] && echo true || echo false )"
+        printf '  "last_run": '
+        if [[ -f "$STATE_FILE" ]]; then cat "$STATE_FILE"; else printf 'null\n'; fi
+        printf '}\n'
+        return 0
+    fi
+
+    if [[ ! -f "$STATE_FILE" ]]; then
+        echo "No run recorded yet. Run \`computer-setup check\` to populate it."
+        return 0
+    fi
+
+    mode="$(state_field '.mode')"
+    result="$(state_field '.result')"
+    finished="$(state_field '.finished')"
+    changed="$(state_field '.totals.changed')"
+
+    echo "Last run:  ${mode:-?} — ${result:-?} at ${finished:-?}"
+    # Without this line a tag-limited run reads as a verdict on the whole
+    # machine, which is the most misleading thing this file could say.
+    if [[ "$(state_field '.partial')" == "true" ]]; then
+        echo "           (partial run — only part of the configuration was evaluated)"
+    fi
+
+    if [[ "${changed:-0}" -gt 0 ]]; then
+        if [[ "$mode" == "check" ]]; then
+            echo "Drift:     ${changed} task(s) would change:"
+        else
+            echo "Changed:   ${changed} task(s):"
+        fi
+        state_task_list ".changed"
+        [[ "$(state_field '.truncated')" == "true" ]] && echo "  … list truncated"
+    else
+        echo "Drift:     none"
+    fi
+
+    local failed_n
+    failed_n="$(state_field '.totals.failed')"
+    if [[ "${failed_n:-0}" -gt 0 ]]; then
+        echo "Failed:    ${failed_n} task(s):"
+        state_task_list ".failed"
+        echo "           Run \`computer-setup log\` for the detail."
+    fi
+
+    # The point of the whole file: a machine that silently stopped syncing looks
+    # identical to a healthy one until someone asks.
+    if [[ -z "$days" ]]; then
+        echo "Sync:      no successful scheduled run recorded yet"
+    elif [[ "$days" -ge "$STALE_AFTER_DAYS" ]]; then
+        echo "Sync:      STALE — last successful scheduled run was ${days} day(s) ago"
+    else
+        echo "Sync:      ok — last successful scheduled run ${days} day(s) ago"
+    fi
 }
 
 cmd_log() {
@@ -247,7 +380,11 @@ run_scheduled() {
                    -e computer_setup_upgrade_include_casks=false)
     fi
 
-    local pull_out rc
+    local pull_out rc partial=0
+    # The scheduled upgrade is `--tags upgrade`, so like the interactive one it
+    # is never a statement about the whole machine. The scheduled CHECK is.
+    [[ "$mode" == "upgrade" || $# -gt 0 ]] && partial=1
+    state_env "$mode" "$partial"
     pull_out=$("$ANSIBLE_PULL" "${ARGS[@]}" "${mode_args[@]}" local.yml "$@" 2>&1)
     rc=$?
 
@@ -260,23 +397,24 @@ run_scheduled() {
         tail -n "$MAX_LINES" "$LOG_FILE" > "$tmp" && mv "$tmp" "$LOG_FILE"
     fi
 
-    # Count `changed=N` from the LAST recap only: ansible-pull emits two PLAY
-    # RECAP blocks and the first is its own repo checkout (always changed=1).
+    # Read the count from the state file the callback plugin wrote, NOT from the
+    # console output. ansible-pull emits its own checkout play alongside the real
+    # one, with [WARNING] lines interleaved between them, so every text-based
+    # count has to guess which recap is which. The plugin runs inside the play
+    # and simply knows.
     local changed_count
-    changed_count=$(echo "$pull_out" | awk '
-        /PLAY RECAP/ { in_recap = 1; total = 0; next }
-        in_recap && /changed=/ {
-            match($0, /changed=[0-9]+/)
-            total += substr($0, RSTART+8, RLENGTH-8)
-        }
-        END { print total+0 }
-    ')
+    changed_count=$(state_field '.totals.changed')
+    [[ "$changed_count" =~ ^[0-9]+$ ]] || changed_count=0
 
     if [[ $rc -ne 0 ]]; then
         notify "computer-setup ${mode} failed" "ansible-pull exited rc=$rc. Run \`computer-setup log\`."
         log "RESULT: ansible-pull failed (rc=$rc)"
         exit "$rc"
     fi
+
+    # Only a run that actually reached the repo and finished gets here, which is
+    # exactly what "still syncing" means.
+    date '+%Y-%m-%dT%H:%M:%S%z' > "$LAST_SUCCESS_FILE" 2>/dev/null || true
 
     if [[ "$mode" == "check" ]]; then
         if [[ "$changed_count" -gt 0 ]]; then
@@ -306,6 +444,7 @@ case "$COMMAND" in
     check)              cmd_check "$@" ;;
     upgrade)            cmd_upgrade "$@" ;;
     log)                cmd_log "$@" ;;
+    status)             cmd_status "$@" ;;
     repos)              cmd_repos "$@" ;;
     capture)            exec "${BIN_DIR}/macos-capture" "$@" ;;
     layers)             exec "$LAYER_SYNC" "$@" ;;

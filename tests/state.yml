@@ -1,0 +1,38 @@
+---
+# Drives the computer_setup_state callback plugin so its output can be asserted.
+#
+# Deliberately standalone: no layer machinery, no core role. This is a test of
+# the RUN-STATE CONTRACT — the JSON shape `computer-setup status` reads and any
+# UI would consume — not of the engine's layer merge, which contract.yml covers.
+#
+# The file content below is a canary. The plugin records metadata only, so this
+# string must never reach the state file; check.sh asserts exactly that. If
+# someone "improves" the plugin by recording diffs, this is what catches it
+# before a machine's gitconfig identity ends up in a world-readable report.
+- name: Exercise the run-state callback
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    state_scratch: /tmp/cs-state-contract
+  tasks:
+    - name: Ensure a stale destination exists
+      ansible.builtin.copy:
+        dest: "{{ state_scratch }}.txt"
+        content: "stale\n"
+        mode: "0600"
+      check_mode: false
+      # Scaffolding, not the subject. Without this it reports changed on the
+      # first run and not on later ones, making the assertion below depend on
+      # whether /tmp happened to be clean.
+      changed_when: false
+
+    - name: A task that would change a file
+      ansible.builtin.copy:
+        dest: "{{ state_scratch }}.txt"
+        content: "CANARY-DO-NOT-RECORD-a3f9\n"
+        mode: "0600"
+
+    - name: A task that changes nothing
+      ansible.builtin.debug:
+        msg: unchanged

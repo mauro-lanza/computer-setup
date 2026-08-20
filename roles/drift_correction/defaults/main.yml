@@ -24,6 +24,13 @@ drift_correction_upgrade_schedule_minute: 0
 # Maximum lines to retain in the rolling log file (per run, the wrapper trims).
 drift_correction_log_max_lines: 5000
 
+# Days without a successful scheduled run before `computer-setup status` reports
+# the machine as stale. The scheduled modes exit 0 when the repo is unreachable —
+# correct, since a closed laptop is not a fault — but that makes "stopped syncing
+# three weeks ago" look exactly like "healthy" until someone asks. This is the
+# threshold at which silence becomes a finding.
+drift_correction_stale_after_days: 14
+
 # Connectivity probe timeout (seconds). The runner probes the repo over SSH —
 # the same transport the pull uses — so a blocked port 22 or an unavailable key
 # is treated as "can't run now" (silent skip) rather than "config is broken".

@@ -222,6 +222,45 @@ which layers a machine wants.
 6. Thereafter the scheduled agents refresh the orchestrator and the layer cache
    before every check, so drift covers layer content too.
 
+## Run state
+
+Everything this system does is otherwise invisible unless you read Ansible's
+console output. `callback_plugins/computer_setup_state.py` writes a
+machine-readable summary of each run to `~/.local/state/computer-setup/last-run.json`
+(mode `0600`), which `computer-setup status` renders and a UI could consume
+directly.
+
+It is an **aggregate** callback, so it runs alongside the normal stdout callback
+and the human-readable log is unchanged. It is inert unless `CS_STATE_FILE` is
+exported, which the runner does for `apply`, `check` and both scheduled modes.
+
+```json
+{ "schema_version": 1, "mode": "check", "finished": "…", "result": "ok",
+  "totals": { "ok": 74, "changed": 2, "failed": 0, … },
+  "changed": [ { "task": "…", "action": "…", "dest": "…" } ],
+  "failed": [], "truncated": false }
+```
+
+Two properties are load-bearing:
+
+- **Metadata only.** Ansible's diffs carry full before/after file *contents* —
+  your gitconfig identity, and whatever else a managed file holds. The plugin
+  records a task name, its action and the destination path, and nothing else.
+  `check.sh` plants a canary string in `tests/state.yml` and fails if it ever
+  reaches the state file, so this cannot regress quietly.
+- **A callback, not a parser.** `ansible-pull` runs its own checkout play before
+  the real one and prints `[WARNING]` lines *between* the two, so every
+  text-based approach — including the `changed=N` scrape this replaced — has to
+  guess which recap belongs to which play. A callback runs inside the play and
+  simply knows. The last play to finish wins, which is the real one.
+
+`schema_version` is a consumed interface. Bump it on a breaking change and
+update the contract test, exactly as layers do.
+
+Staleness is tracked separately in `last-success`, a plain ISO timestamp written
+only by a scheduled run that reached the repo and finished cleanly. It is not a
+field in the JSON because it has to survive a run that failed.
+
 ## Orchestrator primitives
 
 `local.yml` delegates all layer handling to the `core` role. It is not a role in
