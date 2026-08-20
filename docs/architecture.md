@@ -65,7 +65,12 @@ so the engine hardcodes no package names or paths:
   tolerable because the prefs file is the machine's own declaration, but it
   means `requires` constrains what you are *asked*, not what can be *applied*.
 - **config deploys** (`computer_setup_config_deploys`) and **reminders**
-  (`computer_setup_reminders`) come from the *active* capabilities.
+  (`computer_setup_reminders`) come from the *active* capabilities. A `config:`
+  entry is `{src, dest, executable?}`. The deployed file's **mode is left
+  unmanaged** unless `executable: true` asks for `0755` — pinning a mode makes
+  any tool that chmods its own config file register as drift on every scheduled
+  check, forever. `executable` exists because a `templates/<src>.j2` cannot
+  inherit the source file's exec bit the way a `files/<src>` copy does.
 - Roles and shell snippets gate on membership in the active set; a snippet
   self-declares its gate with a `# cs:requires-capability: <id>` directive.
 
@@ -229,7 +234,7 @@ plus a library of primitives the real roles call via `tasks_from`.
 | `tasks/merge_layer_vars.yml` | Merge one layer's `vars.yml` into play scope: enforces `schema_version`, rejects reserved keys, appends lists, overrides scalars. |
 | `tasks/merge_layer_capabilities.yml` | Merge one layer's `capabilities.yml` into the capability registry. |
 | `tasks/merge_layer_questions.yml` | Merge one layer's `questions.yml` into the question registry, rejecting any `set:` payload that names a reserved key. |
-| `tasks/deploy_layer_file.yml` | Resolve **and** deploy one layer file/template: creates the parent dir, copies or templates, no-ops when no layer provides the key. The primitive behind every "a layer supplies this file" case — capability `config:` bundles, the prompt, editor settings, `~/.zshrc`. |
+| `tasks/deploy_layer_file.yml` | Resolve **and** deploy one layer file/template: creates the parent dir, copies or templates, no-ops when no layer provides the key. Leaves the destination's mode alone unless `computer_setup_deploy_executable` is set. The primitive behind every "a layer supplies this file" case — capability `config:` bundles, the prompt, editor settings, `~/.zshrc`. |
 | `scripts/computer-setup-layers` | Sync layer repos into the cache. Validates layer names and `schema_version`, and force-syncs to `origin` (fetch + hard reset), so a diverged or hand-edited cache can never silently persist. Repo URLs are used as written — an explicit `https://` is not rewritten to SSH, since that is a deliberate choice where port 22 is blocked. |
 
 ### File vs template resolution
@@ -265,11 +270,20 @@ apply the litmus test: if configuring a tool is just placing a file, it is
 
 `scheduled_agents` is the one place that test needs a word of explanation. A
 LaunchAgent *is* just a plist file, so by the rule above it should be data — and
-its content is: layers declare agents in the `scheduled_agents` list, and the
+its content is: agents are declared in the `scheduled_agents` list, and the
 role names no tool. It exists as a role only because launchd needs
 `bootout`/`bootstrap` to notice a rewritten or deleted plist, and
 `capability_configs` has no handler to run them. The lifecycle is the role; the
 schedule is data.
+
+The engine's **own** two jobs (the daily drift check and the unattended
+upgrade) are entries in that same list, `scheduled_agents_engine` — there is
+one LaunchAgent implementation, not a private second copy inside
+`drift_correction`. They are kept in a separate variable from `scheduled_agents`
+so a layer cannot retask, reschedule, or delete them by redeclaring the list,
+and they answer to their own kill switch (`drift_correction_enabled`) rather
+than the layer-facing `scheduled_agents_enabled`. `drift_correction` itself now
+only deploys the `computer-setup` command those jobs invoke.
 
 ## The engine names no tool
 

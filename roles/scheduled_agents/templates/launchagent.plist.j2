@@ -3,8 +3,9 @@
   "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <!--
   Managed by ansible — do not edit manually.
-  One plist per entry in `scheduled_agents`. Layers contribute those entries;
-  this template knows nothing about any specific tool.
+  One plist per wanted agent, from `scheduled_agents_engine` (the engine's own
+  drift/upgrade jobs) and `scheduled_agents` (layer-contributed). This template
+  knows nothing about any specific tool, including the engine's.
 -->
 <plist version="1.0">
 <dict>

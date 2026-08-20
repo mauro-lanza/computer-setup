@@ -298,6 +298,27 @@ lint_layers() {
             lint_err "[$name] capability '$ref' names a tapped package but declares no tap:"
         done <<< "$(lint_read "$d/capabilities.yml" '.capabilities[]? | select(.packages) | select(.packages | test("[^ /]+/[^ /]+/[^ /]+")) | select(has("tap") | not) | .id')"
 
+        # config: entries. `src`/`dest` are the whole contract; `executable`
+        # is the only optional key. `mode:` was the old spelling -- catch it,
+        # because an unknown key is silently ignored by the engine and the file
+        # would quietly deploy without its executable bit.
+        while IFS= read -r ref; do
+            [[ -z "$ref" ]] && continue
+            lint_err "[$name] capability '$ref' has a config: entry missing src: or dest:"
+        done <<< "$(lint_read "$d/capabilities.yml" '.capabilities[]? | select([.config[]? | select((has("src") and has("dest")) | not)] | length > 0) | .id')"
+
+        while IFS= read -r ref; do
+            [[ -z "$ref" ]] && continue
+            lint_err "[$name] capability '$ref' config: uses mode: -- replaced by 'executable: true'"
+        done <<< "$(lint_read "$d/capabilities.yml" '.capabilities[]? | select([.config[]? | select(has("mode"))] | length > 0) | .id')"
+
+        while IFS= read -r ref; do
+            [[ -z "$ref" ]] && continue
+            lint_err "[$name] capability '$ref' config: has a non-boolean executable:"
+        # yq v4 reports YAML tags, so a real boolean is "!!bool" -- NOT jq's
+        # "boolean", which would match nothing and pass everything.
+        done <<< "$(lint_read "$d/capabilities.yml" '.capabilities[]? | select([.config[]? | select(has("executable")) | select(.executable | type != "!!bool")] | length > 0) | .id')"
+
         # preset.capabilities -> a real capability
         while IFS= read -r ref; do
             [[ -z "$ref" ]] && continue

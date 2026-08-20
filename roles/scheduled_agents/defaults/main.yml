@@ -33,3 +33,25 @@ scheduled_agents: []
 scheduled_agents_enabled: true
 
 scheduled_agents_log_dir: "{{ home_dir }}/Library/Logs"
+
+# The engine's OWN agents, in the same shape as the list above — there is one
+# LaunchAgent implementation, not a second one inside `drift_correction`. Kept
+# separate from `scheduled_agents` (which layers write) so a layer cannot
+# retask, reschedule, or delete them by redeclaring the list; the knobs they
+# read carry the reserved `drift_correction_` prefix for the same reason.
+#
+# Staggered so the upgrade finishes before the check reports on its results —
+# otherwise a morning upgrade would look like drift for an hour. These are
+# gated by `drift_correction_enabled`, not `scheduled_agents_enabled`, so the
+# two kill switches stay independent.
+scheduled_agents_engine:
+  - label: com.computer-setup.upgrade
+    program: "{{ computer_setup_command_path }}"
+    args: [_scheduled-upgrade]
+    hour: "{{ drift_correction_upgrade_schedule_hour }}"
+    minute: "{{ drift_correction_upgrade_schedule_minute }}"
+  - label: com.computer-setup.check
+    program: "{{ computer_setup_command_path }}"
+    args: [_scheduled-check]
+    hour: "{{ drift_correction_schedule_hour }}"
+    minute: "{{ drift_correction_schedule_minute }}"

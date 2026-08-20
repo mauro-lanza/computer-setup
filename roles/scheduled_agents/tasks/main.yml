@@ -3,29 +3,37 @@
 # those that should not. Computed once so the deploy and the teardown below can
 # never disagree about which is which — a plist that fell out of the "wanted"
 # set must be actively booted out, not merely left unwritten.
+#
+# Two sources, two independent kill switches: the engine's own agents (gated by
+# `drift_correction_enabled`) and the layer-declared ones (gated by
+# `scheduled_agents_enabled`). `_declared` is the union regardless, so an agent
+# that either switch just turned off still gets torn down rather than orphaned.
 - name: Resolve which scheduled agents apply to this machine
   ansible.builtin.set_fact:
     _scheduled_agents_wanted: "{{ _wanted }}"
     # Compared by label, not with the `difference` filter: these are dicts, and
     # set-based difference on unhashable items is not something to rely on.
     _scheduled_agents_unwanted: >-
-      {{ scheduled_agents
+      {{ _declared
          | rejectattr('label', 'in', _wanted | map(attribute='label') | list)
          | list }}
   vars:
+    _declared: "{{ scheduled_agents_engine + scheduled_agents }}"
+    _eligible: >-
+      {{ (scheduled_agents_engine if (drift_correction_enabled | bool) else [])
+         + (scheduled_agents if (scheduled_agents_enabled | bool) else []) }}
     _capability_ok: >-
-      {{ scheduled_agents
+      {{ _eligible
          | rejectattr('requires_capability', 'defined')
          | list
-         + (scheduled_agents
+         + (_eligible
             | selectattr('requires_capability', 'defined')
             | selectattr('requires_capability', 'in',
                          computer_setup_active_capabilities | default([]))
             | list) }}
     _wanted: >-
-      {{ (_capability_ok | selectattr('enabled', 'defined') | selectattr('enabled') | list
-          + (_capability_ok | rejectattr('enabled', 'defined') | list))
-         if (scheduled_agents_enabled | bool) else [] }}
+      {{ _capability_ok | selectattr('enabled', 'defined') | selectattr('enabled') | list
+         + (_capability_ok | rejectattr('enabled', 'defined') | list) }}
 
 - name: Validate scheduled agent definitions
   ansible.builtin.assert:
@@ -45,12 +53,13 @@
     label: "{{ agent.label | default('<no label>') }}"
 
 # Match macOS default permissions for pre-existing system directories.
+# Unconditional: the `computer-setup` runner appends to a log in here on every
+# scheduled run, so the directory must exist even when no agent is installed.
 - name: Ensure log directory exists
   ansible.builtin.file:
     path: "{{ scheduled_agents_log_dir }}"
     state: directory
     mode: "0700"
-  when: _scheduled_agents_wanted | length > 0
 
 - name: Ensure ~/Library/LaunchAgents exists
   ansible.builtin.file:

@@ -50,6 +50,39 @@
         computer_setup_lookup_key: contract.out
         computer_setup_deploy_dest: "{{ contract_scratch.path }}/nested/contract.out"
 
+    - name: Deploy an executable
+      # `executable: true` is the ONLY way a template lands on PATH runnable:
+      # unlike copy, template cannot inherit the source file's exec bit.
+      ansible.builtin.include_role:
+        name: core
+        tasks_from: deploy_layer_file
+      vars:
+        computer_setup_lookup_key: contract.out
+        computer_setup_deploy_dest: "{{ contract_scratch.path }}/nested/contract.bin"
+        computer_setup_deploy_executable: true
+
+    # Mode is unmanaged by default, so a third party that chmods a deployed
+    # config file is not reported as drift on every scheduled check forever.
+    - name: Pre-create a destination with a non-default mode
+      ansible.builtin.copy:
+        dest: "{{ contract_scratch.path }}/nested/preserved.txt"
+        content: "stale\n"
+        mode: "0600"
+
+    - name: Redeploy over the pre-created destination
+      ansible.builtin.include_role:
+        name: core
+        tasks_from: deploy_layer_file
+      vars:
+        computer_setup_lookup_key: contract.txt
+        computer_setup_deploy_dest: "{{ contract_scratch.path }}/nested/preserved.txt"
+
+    - name: Stat the mode assertions
+      ansible.builtin.stat:
+        path: "{{ contract_scratch.path }}/nested/{{ item }}"
+      register: contract_modes
+      loop: [contract.bin, preserved.txt, contract.txt]
+
     # No layer provides this key. Must no-op: first_found(errors=ignore)
     # no-op: first_found(errors=ignore) returns None, and `default('') | length`
     # raises on it unless the primitive guards for that.
@@ -117,6 +150,12 @@
           - computer_setup_config_deploys[0].src == 'zed/settings.json'
           - computer_setup_config_deploys[0].dest == '/tmp/cs-contract/zed-settings.json'
           - computer_setup_config_deploys[1].src == 'profiles.yml'
+          # `executable: true` -> 0755. Without it the mode is UNMANAGED, so an
+          # existing destination keeps the mode it already had (0600 here) and
+          # content-identical redeploys never register as drift.
+          - contract_modes.results[0].stat.mode == '0755'
+          - contract_modes.results[1].stat.mode == '0600'
+          - contract_modes.results[2].stat.mode != '0755'
           # Reminders come from ACTIVE capabilities: 'vscode' is selected, and
           # 'adopted' contributes despite never being selected.
           - "'Sign into VS Code settings sync' in computer_setup_reminders"

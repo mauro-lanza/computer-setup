@@ -16,3 +16,24 @@ capabilities:
   # fresh-machine bootstrap: it resolves on a machine where the tap was added by
   # hand once, and nowhere else.
   - {id: notap, desc: "tapped package, no tap", type: formula, packages: owner/tap/thing}
+  # `mode:` was the old spelling of the executable flag. An unknown key in a
+  # config: entry is silently ignored, so the script would deploy without its
+  # executable bit and the scheduled agent invoking it would just never fire.
+  - id: oldmode
+    desc: "config entry still using mode:"
+    type: feature
+    config:
+      - {src: scripts/thing, dest: /tmp/thing, mode: "0755"}
+  # executable: as a string is truthy in Jinja whichever word it holds, so
+  # `executable: "false"` would silently deploy 0755.
+  - id: strexec
+    desc: "non-boolean executable"
+    type: feature
+    config:
+      - {src: scripts/thing2, dest: /tmp/thing2, executable: "true"}
+  # A config: entry with no dest has nowhere to go and is silently skipped.
+  - id: nodest
+    desc: "config entry missing dest"
+    type: feature
+    config:
+      - {src: scripts/thing3}

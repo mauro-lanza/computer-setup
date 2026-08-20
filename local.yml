@@ -68,22 +68,22 @@
     - { role: repositories, tags: [repositories, never] }
     # `never`: only `--tags upgrade` runs it, via the `computer-setup upgrade` helper.
     - { role: upgrade, tags: [upgrade, never] }
+    # Deploys the `computer-setup` command; the two agents that invoke it are
+    # ordinary `scheduled_agents` entries, so there is one LaunchAgent
+    # implementation rather than a private second copy here.
     - { role: drift_correction, tags: [drift_correction] }
-    # Last, and after drift_correction, for the same reason it runs late: the
-    # plists it writes are what keep unattended work happening, so nothing that
-    # can fail should stand between here and the end of the play. Its agents
-    # invoke programs deployed by capability_configs above, so it must follow it.
+    # Last, and after drift_correction, which deploys the program its own two
+    # agents invoke. It runs late for the same reason drift_correction does:
+    # the plists it writes are what keep unattended work happening, so nothing
+    # that can fail should stand between here and the end of the play. Layer
+    # agents invoke programs deployed by capability_configs above, so it must
+    # follow that too.
     - { role: scheduled_agents, tags: [scheduled_agents] }
 
   post_tasks:
-    # Reported HERE, not in the macos role, so every role runs first. osx_defaults
-    # refuses to change a key's type, so one wrong `type:` in layer data is a hard
-    # failure — and macos runs before runtimes and drift_correction. On the first
-    # real fresh-machine bootstrap that cost the machine its version managers and
-    # its scheduled agents over a tap-to-click preference.
-    # Reported here, after every role, for the same reason as the macOS defaults
-    # below: homebrew runs first, so a cask failure raised inside that role would
-    # deny the machine its version managers and scheduled agents.
+    # Reported HERE, not in the homebrew role, so every role runs first. Raising
+    # a cask failure inside homebrew — the first role — would deny the machine
+    # its version managers and its scheduled agents over one unavailable app.
     - name: Report casks that could not be installed
       ansible.builtin.fail:
         msg: |-
@@ -108,6 +108,11 @@
       when: _failed | length > 0
       tags: [homebrew]
 
+    # Same reason as the casks above: osx_defaults refuses to change a key's
+    # type, so one wrong `type:` in layer data is a hard failure — and macos
+    # runs before runtimes and scheduled_agents. On the first real fresh-machine
+    # bootstrap that cost the machine its version managers and its scheduled
+    # agents over a tap-to-click preference.
     - name: Report macOS defaults that could not be applied
       ansible.builtin.fail:
         msg: |-

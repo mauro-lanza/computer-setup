@@ -25,7 +25,7 @@
 # references those strings; there is no zed role and no opencode role.
 # See `example-tool` in ../capabilities.yml, which uses `example/config.toml`.
 #
-# A `config:` entry can just as well deploy an EXECUTABLE (set `mode: "0755"`,
+# A `config:` entry can just as well deploy an EXECUTABLE (set `executable: true`,
 # dest somewhere on PATH such as ~/.local/bin). That is how a layer supplies the
 # `program` of a `scheduled_agents` entry in ../vars.yml — the script is layer
 # data, and so is the decision to run it on a schedule.

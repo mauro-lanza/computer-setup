@@ -19,9 +19,12 @@
 #                     one is selected earlier in the run or already present
 #   config:           (optional) files/templates deployed when the capability is
 #                     active (highest-priority layer supplies the file):
-#                       - { src: <lookup key>, dest: <path>, mode: <octal> }
+#                       - { src: <lookup key>, dest: <path>, executable: bool }
 #                     `src` is written WITHOUT any .j2 suffix: templates/<src>.j2
 #                     wins if it exists, else files/<src> is copied verbatim.
+#                     `executable: true` deploys 0755 (for files on PATH). The
+#                     mode is otherwise left unmanaged, so a tool that chmods
+#                     its own config file is not reported as drift forever.
 #   adopt_if_present: (optional) a path; when it exists the capability is active
 #                     even if not selected (adopt an existing install).
 #                     Only `{{ home_dir }}` and `{{ homebrew_prefix }}` are

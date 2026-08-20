@@ -1,17 +1,8 @@
 ---
-# Match macOS default permissions for pre-existing system directories.
-- name: Ensure ~/Library/Logs exists
-  ansible.builtin.file:
-    path: "{{ drift_correction_log_dir }}"
-    state: directory
-    mode: "0700"
-
-- name: Ensure ~/Library/LaunchAgents exists
-  ansible.builtin.file:
-    path: "{{ home_dir }}/Library/LaunchAgents"
-    state: directory
-    mode: "0755"
-
+# Deploys the `computer-setup` command and its helper. The scheduled jobs that
+# invoke it are declared as `scheduled_agents_engine` and installed by the
+# `scheduled_agents` role, which runs next — there is one LaunchAgent
+# implementation, not two.
 - name: Ensure wrapper script directory exists
   ansible.builtin.file:
     path: "{{ computer_setup_bin_dir }}"
@@ -29,42 +20,4 @@
     src: computer-setup.j2
     dest: "{{ computer_setup_command_path }}"
     mode: "0755"
-  notify: Reload scheduled agents
-
-- name: Deploy scheduled LaunchAgent plists
-  ansible.builtin.template:
-    src: launchagent.plist.j2
-    dest: "{{ home_dir }}/Library/LaunchAgents/{{ agent.label }}.plist"
-    mode: "0644"
-  loop: "{{ drift_correction_agents }}"
-  loop_control:
-    loop_var: agent
-    label: "{{ agent.label }} ({{ agent.mode }} @ {{ agent.hour }}:{{ '%02d' | format(agent.minute | int) }})"
-  notify: Reload scheduled agents
-  when: drift_correction_enabled | bool
-
-# Turning the agents off must actually stop them, not just stop rewriting the
-# plists. An orphaned plist stays loaded across reboots, so the unattended job
-# would keep running long after the machine said no.
-- name: Unload scheduled agents when disabled
-  ansible.builtin.command:
-    cmd: launchctl bootout gui/{{ ansible_facts['user_uid'] }} {{ home_dir }}/Library/LaunchAgents/{{ agent.label }}.plist
-  loop: "{{ drift_correction_agents }}"
-  loop_control:
-    loop_var: agent
-    label: "{{ agent.label }}"
-  when: not (drift_correction_enabled | bool)
-  register: _drift_bootout
-  changed_when: _drift_bootout.rc == 0
-  # Not loaded (or never was) is the desired end state, not an error.
-  failed_when: false
-
-- name: Remove scheduled LaunchAgent plists when disabled
-  ansible.builtin.file:
-    path: "{{ home_dir }}/Library/LaunchAgents/{{ agent.label }}.plist"
-    state: absent
-  loop: "{{ drift_correction_agents }}"
-  loop_control:
-    loop_var: agent
-    label: "{{ agent.label }}"
-  when: not (drift_correction_enabled | bool)
+  notify: Reload scheduled user agents

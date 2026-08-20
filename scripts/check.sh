@@ -161,14 +161,17 @@ for expect in \
     "preset selects capability 'does-not-exist'" \
     "preset answers question 'no-such-question'" \
     "question implies capability 'ghost-capability'" \
-    "names a tapped package but declares no tap"
+    "names a tapped package but declares no tap" \
+    "has a config: entry missing src: or dest:" \
+    "config: uses mode:" \
+    "config: has a non-boolean executable:"
 do
     if ! grep -qF "$expect" <<<"$lint_out"; then
         echo "ERROR: linter did not report: $expect" >&2
         exit 1
     fi
 done
-echo "  ok  all 7 broken references rejected"
+echo "  ok  all 10 broken references rejected"
 
 # The highest supported layer schema_version is stated in three places that
 # cannot import from each other: bootstrap.sh runs before any checkout exists

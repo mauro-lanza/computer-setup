@@ -6,9 +6,11 @@
 # The knobs below are real: they have their own defaults, and the machine-tier
 # ones (enabled, schedule hours) are answerable via questions.
 #
-# Whether the engine's own two scheduled LaunchAgents are installed at all.
-# (Layer-declared agents are separate, and gated by `scheduled_agents_enabled`.)
-# The
+# The role itself only deploys the `computer-setup` command and its helper. The
+# two scheduled jobs that invoke it are ordinary `scheduled_agents` entries —
+# see `scheduled_agents_engine` in that role's defaults.
+#
+# Whether the engine's own two scheduled LaunchAgents are installed at all. The
 # `computer-setup` command is deployed either way, so turning this off keeps the
 # tooling and drops only the unattended jobs. Normally answered by the
 # `drift-agents` question; defaults to on so an existing machine keeps its.
@@ -18,20 +20,6 @@ drift_correction_schedule_minute: 0
 # Morning upgrade, ahead of the 10:00 drift check.
 drift_correction_upgrade_schedule_hour: 9
 drift_correction_upgrade_schedule_minute: 0
-drift_correction_log_dir: "{{ home_dir }}/Library/Logs"
-
-# Scheduled agents. Both run the same runner script with a different mode.
-# Staggered so the upgrade finishes before the check reports on its results —
-# otherwise a morning upgrade would look like drift for an hour.
-drift_correction_agents:
-  - label: com.computer-setup.upgrade
-    mode: upgrade
-    hour: "{{ drift_correction_upgrade_schedule_hour }}"
-    minute: "{{ drift_correction_upgrade_schedule_minute }}"
-  - label: com.computer-setup.check
-    mode: check
-    hour: "{{ drift_correction_schedule_hour }}"
-    minute: "{{ drift_correction_schedule_minute }}"
 
 # Maximum lines to retain in the rolling log file (per run, the wrapper trims).
 drift_correction_log_max_lines: 5000
