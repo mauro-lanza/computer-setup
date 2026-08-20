@@ -235,11 +235,24 @@ and the human-readable log is unchanged. It is inert unless `CS_STATE_FILE` is
 exported, which the runner does for `apply`, `check` and both scheduled modes.
 
 ```json
-{ "schema_version": 1, "mode": "check", "finished": "…", "result": "ok",
-  "totals": { "ok": 74, "changed": 2, "failed": 0, … },
-  "changed": [ { "task": "…", "action": "…", "dest": "…" } ],
+{ "schema_version": 1, "mode": "check", "partial": false, "finished": "…",
+  "duration_seconds": 57.8, "result": "ok",
+  "totals": { "ok": 156, "changed": 2, "failed": 0, … },
+  "changed": [ { "task": "…", "action": "…", "role": "…", "dest": "…" } ],
   "failed": [], "truncated": false }
 ```
+
+`partial` marks a run narrowed by `--tags`/`--limit`, which describes only what
+it looked at. Without it, `apply --tags repositories` would record "no drift"
+and read as a verdict on the whole machine. `upgrade` is always partial.
+
+**`schema_version` is not yet a contract.** It exists so that it can become one
+without a migration, but `computer-setup status` — which ships in this repo, in
+the same commit as any change to the plugin — is currently the only consumer.
+Reshape it freely while that is true. It becomes a contract the moment something
+*outside* this repo reads it: a UI, a Jamf extension attribute, a teammate's
+script. From then on, bump it on a breaking change and update the contract test,
+exactly as layers do.
 
 Two properties are load-bearing:
 
@@ -253,9 +266,6 @@ Two properties are load-bearing:
   text-based approach — including the `changed=N` scrape this replaced — has to
   guess which recap belongs to which play. A callback runs inside the play and
   simply knows. The last play to finish wins, which is the real one.
-
-`schema_version` is a consumed interface. Bump it on a breaking change and
-update the contract test, exactly as layers do.
 
 Staleness is tracked separately in `last-success`, a plain ISO timestamp written
 only by a scheduled run that reached the repo and finished cleanly. It is not a

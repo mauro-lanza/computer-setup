@@ -239,7 +239,7 @@ state_task_list() {
 }
 
 cmd_status() {
-    local days changed result mode finished
+    local days changed result mode finished dur
     days="$(days_since_success)"
 
     if [[ "${1:-}" == "--json" ]]; then
@@ -263,9 +263,10 @@ cmd_status() {
     mode="$(state_field '.mode')"
     result="$(state_field '.result')"
     finished="$(state_field '.finished')"
+    dur="$(state_field '.duration_seconds')"
     changed="$(state_field '.totals.changed')"
 
-    echo "Last run:  ${mode:-?} — ${result:-?} at ${finished:-?}"
+    echo "Last run:  ${mode:-?} — ${result:-?} at ${finished:-?}${dur:+ (${dur}s)}"
     # Without this line a tag-limited run reads as a verdict on the whole
     # machine, which is the most misleading thing this file could say.
     if [[ "$(state_field '.partial')" == "true" ]]; then

@@ -76,6 +76,11 @@ class CallbackModule(CallbackBase):
         self.changed = []
         self.failed = []
         self.truncated = False
+        # The plugin is constructed as the play starts, so this is the run's
+        # start within a second. Recorded because "the 10:00 check now takes
+        # four minutes" is a thing worth being able to see, and it cannot be
+        # reconstructed after the fact.
+        self.started = time.time()
 
     # ── helpers ──────────────────────────────────────────────────────────────
     def _dest_from_args(self, task):
@@ -141,7 +146,11 @@ class CallbackModule(CallbackBase):
         return None
 
     def _entry(self, task, dest):
-        entry = {"task": task.get_name(), "action": task.action}
+        # `.name`, not `get_name()`: the latter returns "git : Deploy the
+        # managed git config", duplicating the `role` field below and forcing
+        # every consumer to strip a prefix to display a task name. Unnamed tasks
+        # have an empty `.name`, so fall back to the module they run.
+        entry = {"task": (getattr(task, "name", "") or task.action), "action": task.action}
         try:
             role = task._role
             if role:
@@ -229,6 +238,7 @@ class CallbackModule(CallbackBase):
                 "mode": self.run_mode,
                 "partial": self.partial,
                 "finished": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                "duration_seconds": round(time.time() - self.started, 1),
                 "result": "failed" if (totals["failed"] or totals["unreachable"]) else "ok",
                 "totals": totals,
                 "changed": self.changed,

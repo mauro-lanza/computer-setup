@@ -172,6 +172,12 @@ assert d["totals"]["changed"] == 3, d["totals"]
 assert len(d["changed"]) == 4, "a looped task must contribute one entry per item"
 assert by_dest["/tmp/cs-state-contract.txt"]["action"] == "ansible.builtin.copy"
 
+# Bare task name: `get_name()` would return "role : name", duplicating `role`
+# and making every consumer strip a prefix to display one.
+for e in d["changed"]:
+    assert " : " not in e["task"], f"task name carries a role prefix: {e}"
+assert isinstance(d["duration_seconds"], float), d.get("duration_seconds")
+
 # 0600: it describes this machine's files.
 mode = stat.S_IMODE(os.stat(path).st_mode)
 assert mode == 0o600, oct(mode)
