@@ -110,9 +110,7 @@
 
     # Same reason as the casks above: osx_defaults refuses to change a key's
     # type, so one wrong `type:` in layer data is a hard failure — and macos
-    # runs before runtimes and scheduled_agents. On the first real fresh-machine
-    # bootstrap that cost the machine its version managers and its scheduled
-    # agents over a tap-to-click preference.
+    # runs before runtimes and scheduled_agents.
     - name: Report macOS defaults that could not be applied
       ansible.builtin.fail:
         msg: |-

@@ -87,48 +87,15 @@
     - computer_setup_upgrade_assume_yes | default(false) | bool
     - not ansible_check_mode
   block:
-    # FIRST, deliberately. Every other task in this block runs a
-    # community.general module, and a collection too stale for the installed
-    # ansible-core makes those fail at result deserialization
-    # ("Unknown profile name 'module_legacy_m2c'"). This task is the only one
-    # that can repair that — and it is a plain `ansible-galaxy` command, so it
-    # depends on no collection and always runs.
+    # KEEP THIS FIRST. Every other task in this block runs a community.general
+    # module, and a collection too stale for the installed ansible-core makes
+    # those fail before this repair can run — permanently, since the block
+    # aborts. This task depends on no collection, so it always runs.
     #
-    # It used to sit third. A stale collection therefore broke the formulae
-    # upgrade above it, the block aborted, and the repair never ran: every
-    # scheduled 09:00 upgrade then failed identically forever, with no way to
-    # self-heal. Observed on 2026-08-05. Keep this first.
-    #
-    # --upgrade is added only when the running ansible-core differs from the one
-    # these collections were last resolved against, recorded in
-    # upgrade_galaxy_core_marker. That is the only condition under which the
-    # pinned collection can actually be too stale to load, so it is the only
-    # condition worth a Galaxy round trip.
-    #
-    # Keyed on the RUNNING core rather than on "is Homebrew about to bump
-    # ansible?" — the obvious signal, and the wrong one. It sees only the bumps
-    # this playbook performs, so a core upgraded any other way (a manual `brew
-    # upgrade`, or ansible pulled in as another formula's dependency) would
-    # never trigger it, and the stale collection would stay stale forever. That
-    # is precisely the permanent-failure loop described above, re-entered
-    # through a side door. A recorded version catches every path, because it
-    # compares against what is actually running.
-    #
-    # Note this repairs on the run AFTER the core changes, which is soon enough:
-    # upgrading the `ansible` formula mid-play does not change the already-
-    # running interpreter, so the tasks below still execute under the old core.
-    # The next run then starts here, with the repair, before any
-    # community.general task can fail.
-    #
-    # Every other run is a plain `install`, satisfied from what is already on
-    # disk, with no Galaxy API round trip. The daily round trip bought nothing
-    # — community.general releases nowhere near daily — while exposing every
-    # run to galaxy_cache/api.json corruption: one bad cached response then
-    # fails every ansible-galaxy call for its full 24h TTL ("Missing expected
-    # 'results' in ansible-galaxy cache"). Observed 2026-08-16 and 2026-08-17.
-    # --clear-response-cache is what makes that self-healing — a run that does
-    # reach the network starts from a cold cache instead of trusting a
-    # possibly-poisoned one.
+    # `--upgrade` only when the running core differs from the one recorded in
+    # upgrade_galaxy_core_marker; `--clear-response-cache` always.
+    # See "The upgrade path" in docs/findings.md for why each of those is the
+    # way it is — all three were failure loops that could not self-heal.
     - name: Read the ansible-core version the collections were resolved against
       ansible.builtin.slurp:
         src: "{{ upgrade_galaxy_core_marker }}"

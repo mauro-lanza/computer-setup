@@ -1,8 +1,12 @@
 # Findings
 
 Failures with known causes, and the reasoning behind choices that look wrong
-until you know what went wrong. Append-only: each entry exists because something
-broke or was tried and rejected, and re-deriving it costs an afternoon.
+until you know what went wrong. Each entry exists because something broke or was
+tried and rejected, and re-deriving it costs an afternoon.
+
+Not append-only: an entry whose cause no longer exists — the code path is gone,
+the upstream bug is fixed — should be deleted, not left to imply a hazard that
+is no longer there. Rewriting an entry to be shorter is always fair.
 
 This is not the runbook — see [operations.md](operations.md) for what a run does.
 
@@ -95,6 +99,81 @@ nothing was checked. Without distinguishing the two, empty stdout renders as
 
 Related: the `homebrew` and `homebrew_cask` modules **skip entirely under
 `--check`**, so a dry run reporting "up to date" can mean "never checked".
+
+This is why the `brew outdated` tasks are NOT given `check_mode: false`, even
+though read-only tasks elsewhere (tfenv's `version-name`, the extension list) do
+get it so the drift check can see them. `brew outdated` needs a refreshed index,
+which only a mutating `brew update` provides — so under `--check` it reports
+"(not checked)" rather than pretending to know.
+
+## Partial failures are reported at the end of the play, not where they happen
+
+`osx_defaults` refuses to change a key's type, so a single wrong `type:` in
+layer data is a hard failure — and `macos` runs before `runtimes` and
+`scheduled_agents`. Raised in-role, it aborted the play: the first real
+fresh-machine bootstrap lost its version managers and its scheduled agents over
+a tap-to-click preference. Homebrew casks have the same shape and run even
+earlier.
+
+Both are collected with `failed_when: false` / `ignore_errors` and reported from
+`post_tasks` in `local.yml` instead. A machine that got 95% configured and says
+so is worth more than one that got 20% and stopped. Any new task that can fail
+on one item of layer data belongs in that pattern.
+
+Reading the type of a key on a machine this playbook already configured reports
+what *this playbook* wrote, not what macOS uses natively — trust a fresh machine:
+
+```bash
+defaults read-type <domain> <key>
+```
+
+## The upgrade path
+
+Three separate failures here shared one shape: the repair was reachable only by
+the code path that was already broken, so the machine could not self-heal and
+every scheduled 09:00 upgrade failed identically until someone intervened by
+hand. That is why the Galaxy tasks in `roles/upgrade/tasks/main.yml` look
+over-engineered for "install some collections".
+
+### The Galaxy install must be the first task in the block
+
+A `community.general` collection too stale for the installed `ansible-core`
+fails at result deserialization (*"Unknown profile name 'module_legacy_m2c'"*).
+Every task in the upgrade block uses that collection except the
+`ansible-galaxy` call that repairs it.
+
+That call used to sit third. A stale collection broke the formulae upgrade above
+it, the block aborted, and the repair never ran — permanently. Observed
+2026-08-05. It is a plain command with no collection dependency, so first is the
+only position where it always executes.
+
+### `--upgrade` is keyed on the running core, not on "is brew about to bump ansible?"
+
+The obvious signal is the wrong one. It sees only the bumps this playbook
+performs, so a core upgraded any other way — a manual `brew upgrade`, or ansible
+pulled in as another formula's dependency — never triggers it, and the stale
+collection stays stale forever. The same permanent-failure loop, re-entered
+through a side door.
+
+Comparing against the recorded `upgrade_galaxy_core_marker` catches every path,
+because it compares against what is actually running. The marker is written only
+after a successful install, so a failed run retries with `--upgrade` instead of
+assuming the repair happened.
+
+This repairs on the run *after* the core changes, which is soon enough: upgrading
+the `ansible` formula mid-play does not change the already-running interpreter,
+so the rest of the play still executes under the old core.
+
+### `--clear-response-cache` on every run
+
+Galaxy's `galaxy_cache/api.json` can be poisoned by one bad response, after which
+every `ansible-galaxy` call fails for the full 24h TTL (*"Missing expected
+'results' in ansible-galaxy cache"*). Observed 2026-08-16 and 2026-08-17.
+Starting from a cold cache is what makes that self-healing.
+
+Note this is cheap: without `--upgrade` the install is satisfied from disk with
+no API round trip at all. The daily round trip it replaced bought nothing —
+`community.general` releases nowhere near daily.
 
 ## The scheduled agents
 

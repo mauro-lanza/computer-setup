@@ -58,17 +58,11 @@
   register: runtimes_tfenv_current_version
   changed_when: false
   failed_when: false
-  # Read-only, so it must run under --check too. Without this the `command`
-  # module reports "would have run", the register is left without stdout, and
-  # the install task below then skips on an undefined rc — meaning the 10:00
-  # drift check could never see a Terraform version change. `tfenv use 1.5.0`
-  # by hand reported "no drift" indefinitely.
-  #
-  # Same reasoning as "[{{ manager }}] List installed extensions" in the
-  # extensions role. The upgrade role's `brew outdated` tasks have the identical
-  # constraint but are deliberately NOT given this, because `brew outdated`
-  # needs a refreshed index that only a mutating `brew update` provides — it
-  # reports "(not checked)" instead of pretending.
+  # Read-only, so it must run under --check too: otherwise the register has no
+  # stdout and the install task below skips on an undefined rc, hiding a version
+  # change from the drift check. Same as "[{{ manager }}] List installed
+  # extensions" in the extensions role. The upgrade role's `brew outdated` tasks
+  # deliberately do NOT get this — see "brew outdated" in docs/findings.md.
   check_mode: false
   when:
     - runtimes_tfenv_stat.stat.exists | default(false)
