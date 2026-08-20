@@ -36,3 +36,26 @@
     - name: A task that changes nothing
       ansible.builtin.debug:
         msg: unchanged
+
+    # A TEMPLATE, not a copy. Its diff's `after_header` is Ansible's temporary
+    # rendered source (…/ansible-local-*/tmp*/x.j2), so a plugin that trusts
+    # `after_header` records a path in a temp dir that no longer exists. This is
+    # the regression that shipped once; `dest` here must be the real file.
+    - name: Render a template that would change
+      ansible.builtin.template:
+        src: state_probe.j2
+        dest: "{{ state_scratch }}-template.txt"
+        mode: "0600"
+
+    # A LOOPED task. Its task-level `dest` is still the unrendered
+    # "{{ item.dest }}", and the real paths live in per-item sub-results. Both
+    # items must appear separately — a single entry naming neither file is
+    # most of the information lost.
+    - name: Render templates in a loop
+      ansible.builtin.template:
+        src: state_probe.j2
+        dest: "{{ item.dest }}"
+        mode: "0600"
+      loop:
+        - { dest: "{{ state_scratch }}-loop-a.txt" }
+        - { dest: "{{ state_scratch }}-loop-b.txt" }

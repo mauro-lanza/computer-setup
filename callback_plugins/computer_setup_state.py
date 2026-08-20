@@ -78,50 +78,113 @@ class CallbackModule(CallbackBase):
         self.truncated = False
 
     # ── helpers ──────────────────────────────────────────────────────────────
-    def _dest_of(self, result):
-        """Destination path only — never the diff payload.
+    def _dest_from_args(self, task):
+        """The task's declared destination.
 
-        Prefers the diff header, which is the path Ansible actually acted on,
-        and falls back to the task's own dest/path argument.
+        Authoritative and checked FIRST, because it is the only source that
+        works for a file being created: a new file's diff carries no
+        `before_header` at all.
+
+        Only these two keys are ever read. A module's args also carry every
+        `_ansible_*` internal, and `name` on a package module is a long list —
+        none of which is a path, and none of which belongs in a report.
         """
-        try:
-            diff = result._result.get("diff")
-            if isinstance(diff, list):
-                for entry in diff:
-                    if isinstance(entry, dict):
-                        header = entry.get("after_header") or entry.get("before_header")
-                        if header:
-                            return str(header)
-            args = getattr(result._task, "args", {}) or {}
-            for key in ("dest", "path", "name"):
-                value = args.get(key)
-                # Only ever a string: `name` on a package module can be a long
-                # list, and an unrendered template is not a path.
-                if isinstance(value, str) and value and "{{" not in value:
-                    return value
-        except Exception:
-            pass
+        args = getattr(task, "args", {}) or {}
+        for key in ("dest", "path"):
+            value = args.get(key)
+            # A looped task's dest is still "{{ item.x }}" here; the per-item
+            # results below carry the rendered one.
+            if isinstance(value, str) and value and "{{" not in value:
+                return value
         return None
 
-    def _record(self, bucket, result):
-        if not self.state_file:
-            return
+    def _dest_from_diff(self, diff):
+        """The path a diff refers to.
+
+        `before_header` ONLY. For a template task `after_header` is Ansible's
+        temporary rendered source (…/ansible-local-*/tmp*/foo.j2), not the
+        destination — recording it produced entries pointing at a temp dir that
+        no longer exists.
+
+        The `file` module returns a dict rather than a list, and carries no
+        headers; it is normalised here and simply yields nothing.
+        """
+        if isinstance(diff, dict):
+            diff = [diff]
+        if not isinstance(diff, list):
+            return None
+        for entry in diff:
+            if isinstance(entry, dict):
+                header = entry.get("before_header")
+                if isinstance(header, str) and header:
+                    return header
+        return None
+
+    def _dest_from_item(self, item):
+        """The path a loop item refers to.
+
+        Needed because a loop CREATING files has neither a usable task-level
+        `dest` (it is still "{{ item.dest }}") nor a `before_header` (nothing
+        exists to diff against). The rendered item is the only place left that
+        names the file.
+
+        Narrow on purpose: a bare path string, or the two conventional keys.
+        Never the whole item, which is arbitrary layer data.
+        """
+        if isinstance(item, str) and item.startswith("/"):
+            return item
+        if isinstance(item, dict):
+            for key in ("dest", "path"):
+                value = item.get(key)
+                if isinstance(value, str) and value.startswith("/"):
+                    return value
+        return None
+
+    def _entry(self, task, dest):
+        entry = {"task": task.get_name(), "action": task.action}
         try:
-            if len(bucket) >= MAX_RECORDED:
-                self.truncated = True
-                return
-            task = result._task
-            entry = {
-                "task": task.get_name(),
-                "action": task.action,
-            }
             role = task._role
             if role:
                 entry["role"] = role.get_name()
-            dest = self._dest_of(result)
-            if dest:
-                entry["dest"] = dest
-            bucket.append(entry)
+        except Exception:
+            pass
+        if dest:
+            entry["dest"] = dest
+        return entry
+
+    def _record(self, bucket, result):
+        """Append one entry per changed thing — per ITEM for a looped task.
+
+        A loop reports once at task level with a `results` list, and its
+        task-level `dest` is the unrendered template. Recording the task alone
+        would say "Deploy per-directory identity files" and never say which
+        files, which is most of the value.
+        """
+        if not self.state_file:
+            return
+        try:
+            task = result._task
+            payload = result._result
+            sub_results = payload.get("results")
+
+            if isinstance(sub_results, list) and sub_results:
+                for sub in sub_results:
+                    if not isinstance(sub, dict) or not sub.get("changed"):
+                        continue
+                    if len(bucket) >= MAX_RECORDED:
+                        self.truncated = True
+                        return
+                    dest = self._dest_from_diff(sub.get("diff"))
+                    if not dest:
+                        dest = self._dest_from_item(sub.get("item"))
+                    bucket.append(self._entry(task, dest))
+                return
+
+            if len(bucket) >= MAX_RECORDED:
+                self.truncated = True
+                return
+            dest = self._dest_from_args(task) or self._dest_from_diff(payload.get("diff"))
+            bucket.append(self._entry(task, dest))
         except Exception:
             pass
 

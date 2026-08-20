@@ -125,6 +125,7 @@ ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook tests/contract.yml >/dev/null
 # no file CONTENT reaches it. Ansible's diffs carry before/after payloads; the
 # plugin must record only task, action and dest.
 echo "==> Run state contract"
+rm -f /tmp/cs-state-contract-template.txt /tmp/cs-state-contract-loop-a.txt /tmp/cs-state-contract-loop-b.txt
 cs_state="$(mktemp -d)/last-run.json"
 CS_STATE_FILE="$cs_state" CS_RUN_MODE=check \
     ansible-playbook tests/state.yml --check --diff >/dev/null
@@ -148,13 +149,28 @@ for banned in ("before", "after", "before_header", "after_header", "stdout"):
 assert d["schema_version"] == 1, d["schema_version"]
 assert d["mode"] == "check", d["mode"]
 assert d["result"] == "ok", d["result"]
-assert d["totals"]["changed"] == 1, d["totals"]
 assert d["truncated"] is False
 assert d["partial"] is False, "a full run must not be marked partial"
-entry = d["changed"][0]
-assert entry["task"] == "A task that would change a file", entry
-assert entry["dest"].endswith("cs-state-contract.txt"), entry
-assert entry["action"] == "ansible.builtin.copy", entry
+
+# Ansible's temp render dir. A template's diff `after_header` points here, so
+# recording it yields a path that does not survive the run. Shipped once.
+assert "ansible-local-" not in raw, "a temporary render path was recorded as dest"
+
+# Every changed entry resolves to the REAL destination: a plain copy, a
+# template (dest must not be the temp .j2), and a loop CREATING files, whose
+# paths exist neither in the task args (unrendered) nor in a diff header
+# (nothing to diff against). One entry per item, not one per task.
+by_dest = {e.get("dest"): e for e in d["changed"]}
+for expected in (
+    "/tmp/cs-state-contract.txt",
+    "/tmp/cs-state-contract-template.txt",
+    "/tmp/cs-state-contract-loop-a.txt",
+    "/tmp/cs-state-contract-loop-b.txt",
+):
+    assert expected in by_dest, f"{expected} missing from {sorted(by_dest)}"
+assert d["totals"]["changed"] == 3, d["totals"]
+assert len(d["changed"]) == 4, "a looped task must contribute one entry per item"
+assert by_dest["/tmp/cs-state-contract.txt"]["action"] == "ansible.builtin.copy"
 
 # 0600: it describes this machine's files.
 mode = stat.S_IMODE(os.stat(path).st_mode)
