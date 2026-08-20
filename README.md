@@ -106,6 +106,12 @@ so the scheduled agents and everything you type by hand can never drift apart.
   so it is instant. `--json` for machines. The scheduled modes exit 0 when the
   repo is unreachable — a closed laptop is not a fault — so this is what makes a
   machine that quietly stopped syncing distinguishable from a healthy one.
+- `computer-setup prefs <init|push|list|pull>` — back up this machine's
+  `prefs.yml` to a **private** repo, one file per machine, and restore another
+  machine's. `prefs.yml` is the machine's whole declaration (answers +
+  selections), and `bootstrap.sh --answers` replays one non-interactively, so a
+  backup *is* a restorable machine. `pull` writes a file for you to review and
+  pass to `--answers`; it never overwrites the live prefs.
 - `computer-setup repos` — scaffold a `repositories.yml` from this machine's
   checkouts. To clone the ones that are *missing*, run
   `computer-setup apply --tags repositories`.

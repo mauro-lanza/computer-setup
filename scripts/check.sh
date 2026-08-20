@@ -124,6 +124,69 @@ ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook tests/contract.yml >/dev/null
 # a UI would too. Assert its shape, and — the point of the whole design — that
 # no file CONTENT reaches it. Ansible's diffs carry before/after payloads; the
 # plugin must record only task, action and dest.
+# `computer-setup prefs` is git plumbing that only ever runs by hand, which is
+# where bit-rot hides. Driven against a LOCAL bare repo — no network, no gh, no
+# GitHub account — so the gate works on a fresh machine and in CI. `init` is the
+# only subcommand not covered: it is the one that needs an authenticated gh.
+echo "==> Prefs backup round-trip"
+cs_prefs_tmp="$(mktemp -d)"
+mkdir -p "$cs_prefs_tmp/cfg"
+git init -q --bare "$cs_prefs_tmp/remote.git"
+git init -q "$cs_prefs_tmp/seed"
+(
+    cd "$cs_prefs_tmp/seed"
+    echo "# state" > README.md
+    git add -A
+    git -c user.email=t@t -c user.name=t commit -qm init
+    git push -q "$cs_prefs_tmp/remote.git" HEAD:main
+)
+sed -e "s|{{ computer_setup_config_dir }}|$cs_prefs_tmp/cfg|g" \
+    -e "s|{{ computer_setup_state_repo_dir }}|$cs_prefs_tmp/clone|g" \
+    -e "s|{{ computer_setup_prefs_file }}|$cs_prefs_tmp/cfg/prefs.yml|g" \
+    -e 's/{{[^}]*}}/PLACEHOLDER/g' -e '/{%.*%}/d' \
+    roles/drift_correction/templates/computer-setup.j2 > "$cs_prefs_tmp/cs"
+chmod +x "$cs_prefs_tmp/cs"
+cp tests/fixtures/prefs.yml "$cs_prefs_tmp/cfg/prefs.yml"
+printf -- '---\nrepo: "%s"\nmachine: "alpha"\n' "$cs_prefs_tmp/remote.git" > "$cs_prefs_tmp/cfg/state.yml"
+
+# An unconfigured machine must say so, not traceback.
+if "$cs_prefs_tmp/cs" prefs list >/dev/null 2>&1 && [[ ! -f "$cs_prefs_tmp/cfg/state.yml" ]]; then
+    echo "ERROR: prefs list succeeded without configuration" >&2
+    exit 1
+fi
+
+# Captured into variables rather than piped into `grep -q`. `grep -q` exits the
+# moment it matches, SIGPIPE-ing the still-writing producer (141), and this
+# script runs `set -o pipefail` — so a PASSING assertion fails the build,
+# racily. Cost an afternoon; do not reintroduce the pipe.
+"$cs_prefs_tmp/cs" prefs push >/dev/null
+cs_prefs_out="$("$cs_prefs_tmp/cs" prefs push)"
+[[ "$cs_prefs_out" == *"Already up to date"* ]] || {
+    echo "ERROR: a second push was not a no-op: $cs_prefs_out" >&2; exit 1; }
+cs_prefs_out="$("$cs_prefs_tmp/cs" prefs list)"
+[[ "$cs_prefs_out" == *"alpha"* ]] || {
+    echo "ERROR: pushed machine missing from list: $cs_prefs_out" >&2; exit 1; }
+"$cs_prefs_tmp/cs" prefs pull alpha "$cs_prefs_tmp/out.yml" >/dev/null
+
+# The whole premise: a pulled backup is a valid `--answers` file. If this stops
+# being true, restoring a machine silently produces a DIFFERENT machine.
+diff -q tests/fixtures/prefs.yml "$cs_prefs_tmp/out.yml" >/dev/null || {
+    echo "ERROR: pulled backup does not match the pushed prefs" >&2; exit 1; }
+yq -r '.selected_capabilities[]?' "$cs_prefs_tmp/out.yml" >/dev/null || {
+    echo "ERROR: pulled backup does not parse as an answers file" >&2; exit 1; }
+
+# Never clobber: a bad restore must always be recoverable.
+if "$cs_prefs_tmp/cs" prefs pull alpha "$cs_prefs_tmp/out.yml" >/dev/null 2>&1; then
+    echo "ERROR: pull overwrote an existing file" >&2
+    exit 1
+fi
+if "$cs_prefs_tmp/cs" prefs pull nonexistent "$cs_prefs_tmp/x.yml" >/dev/null 2>&1; then
+    echo "ERROR: pull accepted an unknown machine name" >&2
+    exit 1
+fi
+rm -rf "$cs_prefs_tmp"
+echo "  ok  push, idempotent re-push, list, pull, and both refusals"
+
 echo "==> Run state contract"
 rm -f /tmp/cs-state-contract-template.txt /tmp/cs-state-contract-loop-a.txt /tmp/cs-state-contract-loop-b.txt
 cs_state="$(mktemp -d)/last-run.json"

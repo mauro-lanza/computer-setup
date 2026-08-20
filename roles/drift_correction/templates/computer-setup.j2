@@ -25,6 +25,8 @@
 #   computer-setup log [n]        Tail the rolling log (default 100 lines).
 #   computer-setup status [--json] What the last run did, and how long since the
 #                                 last successful scheduled one.
+#   computer-setup prefs <sub>    Back up this machine's prefs.yml to a private
+#                                 repo, and restore another machine's.
 #   computer-setup repos          Print a repositories.yml scaffolded from the
 #                                 checkouts already on this machine.
 #   computer-setup capture [...]  Diff live macOS defaults against the declared
@@ -57,6 +59,12 @@ STATE_FILE="{{ computer_setup_state_dir }}/last-run.json"
 # the JSON: it must survive a run that failed, and merging JSON in bash to
 # preserve one field is how you end up with neither.
 LAST_SUCCESS_FILE="{{ computer_setup_state_dir }}/last-success"
+# Where this machine's prefs.yml is backed up, and under what name. A file of
+# its own rather than a key in layers.yml, because `manage_layers` in
+# bootstrap.sh rewrites that manifest wholesale on every reconfigure — a key
+# added there would vanish the first time someone changed a layer.
+STATE_CONFIG="{{ computer_setup_config_dir }}/state.yml"
+STATE_REPO_DIR="{{ computer_setup_state_repo_dir }}"
 # Days without a successful scheduled run before `status` calls it stale. A
 # machine that quietly stopped syncing is the failure this makes visible.
 STALE_AFTER_DAYS={{ drift_correction_stale_after_days }}
@@ -93,6 +101,7 @@ computer-setup — operate this machine's configuration.
   upgrade          Upgrade managed tools INCLUDING casks, after confirming.
   log [n]          Tail the rolling log (default 100 lines).
   status [--json]  What the last run did, and whether syncing has gone stale.
+  prefs <sub>      Back up / restore this machine's prefs.yml (init|push|list|pull).
   repos [dir]      Print a repositories.yml scaffolded from existing checkouts.
   capture [args]   Diff live macOS defaults against the declared values.
   layers sync      Refresh the content-layer cache.
@@ -304,6 +313,207 @@ cmd_status() {
     fi
 }
 
+# ─── Machine prefs backup ────────────────────────────────────────────────────
+# prefs.yml is this machine's entire declaration: the answers to every layer
+# question, plus the capability selections. `bootstrap.sh --answers <file>`
+# replays one non-interactively — and check.sh asserts a written prefs.yml is a
+# valid answers file — so a backed-up copy IS a restorable machine.
+#
+# Kept in a private repo, one file per machine under machines/<name>.yml, so
+# "set the loaner up like my laptop" is a fetch plus the answers path that
+# already exists, and every change to a machine's declaration has history.
+#
+# NOT a content layer, deliberately. Layers are force-synced (fetch + hard
+# reset) by computer-setup-layers so a hand-edited cache can never persist. This
+# repo holds local commits waiting to be pushed; the same treatment would
+# silently destroy them.
+prefs_repo=""
+prefs_machine=""
+
+state_cfg() {
+    [[ -f "$STATE_CONFIG" ]] || return 0
+    yq -r "${1} // \"\"" "$STATE_CONFIG" 2>/dev/null | grep -v '^null$' || true
+}
+
+prefs_load_config() {
+    prefs_repo="$(state_cfg '.repo')"
+    prefs_machine="$(state_cfg '.machine')"
+    if [[ -z "$prefs_repo" || -z "$prefs_machine" ]]; then
+        printf '%s\n' "No prefs backup configured on this machine." >&2
+        printf '%s\n' "Run:  computer-setup prefs init" >&2
+        return 1
+    fi
+}
+
+# Clone on first use, refresh otherwise. --ff-only because this repo is only
+# ever appended to by machines: a divergence means something needs a human, not
+# an automatic merge commit nobody asked for.
+prefs_sync_clone() {
+    if [[ -d "$STATE_REPO_DIR/.git" ]]; then
+        git -C "$STATE_REPO_DIR" pull --ff-only --quiet 2>/dev/null \
+            || printf '%s\n' "WARN: could not refresh the state repo (offline, or it has diverged)" >&2
+        return 0
+    fi
+    mkdir -p "$(dirname "$STATE_REPO_DIR")"
+    if ! git clone --quiet "$prefs_repo" "$STATE_REPO_DIR"; then
+        printf '%s\n' "Could not clone ${prefs_repo}" >&2
+        return 1
+    fi
+}
+
+cmd_prefs_init() {
+    if [[ ! -t 0 ]]; then
+        printf '%s\n' "prefs init needs a terminal to confirm on." >&2
+        return 1
+    fi
+    local user slug machine reply
+    user="$(gh api user -q .login 2>/dev/null)"
+    if [[ -z "$user" ]]; then
+        printf '%s\n' "Not authenticated to GitHub. Run:  gh auth login" >&2
+        return 1
+    fi
+
+    printf "Repository for machine prefs [%s/computer-setup-state]: " "$user"
+    read -r slug
+    [[ -z "$slug" ]] && slug="${user}/computer-setup-state"
+
+    # The hostname is a serial number on a corporate Mac ("On-F0Q9D3QH7K-..."),
+    # which is exactly why this is a prompt and not a default nobody sees.
+    printf "Name for THIS machine [%s]: " "$(hostname -s)"
+    read -r machine
+    [[ -z "$machine" ]] && machine="$(hostname -s)"
+
+    if ! gh repo view "$slug" >/dev/null 2>&1; then
+        echo
+        echo "${slug} does not exist yet."
+        printf "Create it as a PRIVATE repository? [y/N]: "
+        read -r reply
+        if [[ "$reply" != [Yy]* ]]; then
+            echo "Aborted — nothing created."
+            return 0
+        fi
+        # --add-readme so the repo has a branch: cloning and pushing to a
+        # completely empty repo needs special cases this then never hits.
+        if ! gh repo create "$slug" --private --add-readme \
+                --description "computer-setup: per-machine prefs backups"; then
+            printf '%s\n' "Could not create ${slug}" >&2
+            return 1
+        fi
+    fi
+
+    mkdir -p "$(dirname "$STATE_CONFIG")"
+    {
+        echo "---"
+        echo "# Where this machine's prefs.yml is backed up, and under what name."
+        echo "# Managed by \`computer-setup prefs init\`."
+        echo "repo: \"git@github.com:${slug}.git\""
+        echo "machine: \"${machine}\""
+    } > "$STATE_CONFIG"
+    chmod 600 "$STATE_CONFIG"
+
+    prefs_load_config || return 1
+    prefs_sync_clone || return 1
+    echo
+    echo "Configured. This machine backs up as '${machine}' to ${slug}."
+    echo "Push the current prefs with:  computer-setup prefs push"
+}
+
+cmd_prefs_push() {
+    prefs_load_config || return 1
+    if [[ ! -f "$PREFS_FILE" ]]; then
+        printf '%s\n' "No prefs file at ${PREFS_FILE} — run bootstrap.sh first." >&2
+        return 1
+    fi
+    prefs_sync_clone || return 1
+
+    local rel="machines/${prefs_machine}.yml"
+    mkdir -p "$STATE_REPO_DIR/machines"
+    cp "$PREFS_FILE" "$STATE_REPO_DIR/$rel"
+
+    if [[ -z "$(git -C "$STATE_REPO_DIR" status --porcelain -- "$rel")" ]]; then
+        echo "Already up to date: ${rel}"
+        return 0
+    fi
+    git -C "$STATE_REPO_DIR" add "$rel"
+    if ! git -C "$STATE_REPO_DIR" commit -q -m "Update ${prefs_machine} prefs ($(date +%Y-%m-%d))"; then
+        printf '%s\n' "WARN: commit failed — is git user.name/user.email configured?" >&2
+        return 1
+    fi
+    # A failed push is not a failed machine: the commit is safe locally and the
+    # next push carries it. Warn rather than exit non-zero.
+    if ! git -C "$STATE_REPO_DIR" push -q; then
+        printf '%s\n' "WARN: committed locally but could not push (offline?). Retry later." >&2
+        return 0
+    fi
+    echo "Pushed ${rel} to ${prefs_repo}"
+}
+
+cmd_prefs_list() {
+    prefs_load_config || return 1
+    prefs_sync_clone || return 1
+    local found=0 f name caps when
+    while IFS= read -r f; do
+        [[ -z "$f" ]] && continue
+        found=1
+        name="$(basename "$f" .yml)"
+        caps="$(yq -r '.selected_capabilities | length' "$f" 2>/dev/null)"
+        when="$(git -C "$STATE_REPO_DIR" log -1 --format=%ad --date=short -- "machines/${name}.yml" 2>/dev/null)"
+        printf '  %-24s %s capability selections%s\n' \
+            "$name" "${caps:-?}" "${when:+, updated $when}"
+        [[ "$name" == "$prefs_machine" ]] && printf '  %-24s (this machine)\n' ""
+    done <<< "$(find "$STATE_REPO_DIR/machines" -maxdepth 1 -name '*.yml' 2>/dev/null | sort)"
+    [[ $found -eq 0 ]] && echo "No machines backed up yet. Run:  computer-setup prefs push"
+    return 0
+}
+
+# Writes a FILE, never the live prefs.yml. Restoring is then the ordinary
+# `--answers` path, which is reviewable before it is applied and leaves the
+# current machine untouched if the fetched config turns out to be wrong.
+cmd_prefs_pull() {
+    local name="${1:-}" out="${2:-}"
+    if [[ -z "$name" ]]; then
+        printf '%s\n' "Usage: computer-setup prefs pull <machine> [output-file]" >&2
+        printf '%s\n' "       computer-setup prefs list   # to see the names" >&2
+        return 1
+    fi
+    prefs_load_config || return 1
+    prefs_sync_clone || return 1
+
+    local src="$STATE_REPO_DIR/machines/${name}.yml"
+    if [[ ! -f "$src" ]]; then
+        printf '%s\n' "No backup named '${name}'. Run: computer-setup prefs list" >&2
+        return 1
+    fi
+    [[ -z "$out" ]] && out="${PWD}/${name}-prefs.yml"
+    if [[ -e "$out" ]]; then
+        printf '%s\n' "Refusing to overwrite ${out}" >&2
+        return 1
+    fi
+    cp "$src" "$out"
+    chmod 600 "$out"
+    echo "Wrote ${out}"
+    echo "Apply it with:  bootstrap.sh --answers ${out}"
+}
+
+cmd_prefs() {
+    local sub="${1:-}"
+    shift 2>/dev/null || true
+    case "$sub" in
+        init) cmd_prefs_init "$@" ;;
+        push) cmd_prefs_push "$@" ;;
+        list) cmd_prefs_list "$@" ;;
+        pull) cmd_prefs_pull "$@" ;;
+        *)
+            printf '%s\n' "computer-setup prefs <init|push|list|pull>" >&2
+            printf '%s\n' "  init          configure the backup repo and this machine's name" >&2
+            printf '%s\n' "  push          back up this machine's prefs.yml" >&2
+            printf '%s\n' "  list          machines backed up in the repo" >&2
+            printf '%s\n' "  pull <name>   fetch one as a file for bootstrap.sh --answers" >&2
+            return 64
+            ;;
+    esac
+}
+
 cmd_log() {
     if [[ -f "$LOG_FILE" ]]; then
         tail -n "${1:-100}" "$LOG_FILE"
@@ -445,6 +655,7 @@ case "$COMMAND" in
     check)              cmd_check "$@" ;;
     upgrade)            cmd_upgrade "$@" ;;
     log)                cmd_log "$@" ;;
+    prefs)              cmd_prefs "$@" ;;
     status)             cmd_status "$@" ;;
     repos)              cmd_repos "$@" ;;
     capture)            exec "${BIN_DIR}/macos-capture" "$@" ;;

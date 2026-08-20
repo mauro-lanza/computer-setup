@@ -185,3 +185,39 @@ Layers own PATH (typically a `files/shell/*.zsh` snippet), not the orchestrator.
 If a layer puts `~/.local/bin` ahead of `/opt/homebrew/bin`, a manually-installed
 binary there will **shadow** the Homebrew-managed one. After bringing such a tool
 under management, remove the manual copy so the brew version wins.
+
+## Backing up and restoring a machine
+
+`prefs.yml` is this machine's entire declaration — every answer, every
+capability selection. `bootstrap.sh --answers <file>` replays one
+non-interactively, and `check.sh` asserts a written `prefs.yml` is a valid
+answers file, so **a backup is a restorable machine**.
+
+```bash
+computer-setup prefs init     # choose the private repo and name this machine
+computer-setup prefs push     # back up the current prefs.yml
+computer-setup prefs list     # machines backed up in the repo
+computer-setup prefs pull work-macbook
+```
+
+One file per machine under `machines/<name>.yml`, so a laptop and a desktop keep
+separate declarations instead of fighting over one. The machine name is prompted
+at `init` — the hostname is a serial number on a corporate Mac, which is exactly
+why it is not silently used as the default.
+
+`pull` writes a **file**; it never touches the live `prefs.yml`. Review it, then:
+
+```bash
+bootstrap.sh --answers ./work-macbook-prefs.yml
+```
+
+so a restore from the wrong machine is a deleted file rather than a reconfigured
+laptop.
+
+The repo is **private** and holds git identity and a per-machine software
+inventory. Do not make it public, and do not use a secret gist for it — a secret
+gist is unlisted, not access-controlled, and anyone with the URL can read it.
+
+It is also **not a content layer**. Layers are force-synced (fetch + hard reset)
+by `computer-setup-layers`, which would destroy commits here waiting to push. It
+is cloned separately to `~/.local/share/computer-setup/state`.
