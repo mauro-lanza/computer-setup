@@ -28,10 +28,10 @@ ansible-galaxy collection install -r requirements.yml
 ```
 
 This runs everything: bash and Jinja syntax, `shellcheck`, the bootstrap prompt
-tests, the layer contract and its negative paths, and `ansible-lint`. Both
-linters are **required** — the script fails if either is absent rather than
-skipping it, because a fresh machine is exactly where a tool is missing and
-where "passed" has to mean it.
+tests, the callback plugin, the layer contract and the run-state contract with
+their negative paths, and `ansible-lint`. Both linters are **required** — the
+script fails if either is absent rather than skipping it, because a fresh
+machine is exactly where a tool is missing and where "passed" has to mean it.
 
 `ansible-lint` rules waived on architectural grounds are documented in
 [.ansible-lint](.ansible-lint). `shellcheck` findings are waived **inline, at the
@@ -68,10 +68,21 @@ since presets are curated on purpose.
 
 ## Changing the contract
 
-The **variable interface** plus `schema_version` is the public API — see
-[docs/architecture.md](docs/architecture.md). Bump `schema_version`, and the
-orchestrator's supported maximum in `local.yml` and `bootstrap.sh`, when making a
-breaking change to it.
+There are two `schema_version`s, and only one of them is public.
+
+The **layer contract** — the variable interface plus the `schema_version` in a
+layer's `layer.yml` — is the public API; see
+[docs/architecture.md](docs/architecture.md). Layers are separate repos owned by
+other people, so a breaking change here strands them. Bump it, along with the
+orchestrator's supported maximum in `local.yml`, `bootstrap.sh` and
+`scripts/computer-setup-layers` — `check.sh` asserts all three agree.
+
+The **run-state file** (`~/.local/state/computer-setup/last-run.json`) carries
+its own `schema_version`, and it is **not a contract yet**. `computer-setup
+status` ships in this repo and changes in the same commit, so it is currently
+the only consumer — reshape it freely. It becomes a contract the moment
+something outside this repo reads it: a UI, an MDM extension attribute, a
+teammate's script.
 
 ## Gotchas that bite engine code
 
@@ -87,6 +98,14 @@ breaking change to it.
 - **Jinja reads `{#` as a comment-open, even inside a shell `#` comment.** Bash
   array-length syntax is therefore hazardous in a `.j2`; wrap it in `{% raw %}`
   or keep the file out of `templates/`.
+- **`callback_plugins/` is the only Python here, and it runs inside every
+  `ansible-pull`** — including the unattended ones, where a traceback surfaces
+  at 09:00 in a LaunchAgent log nobody opens. Every hook is wrapped in
+  `try/except` on purpose: reporting is strictly less important than converging,
+  and a bug there must never fail a machine's provisioning. Reach for a plugin
+  only when the alternative is parsing Ansible's console output — that was the
+  justification for this one, and `ansible-pull` interleaving two JSON documents
+  with `[WARNING]` lines is why.
 
 More of these, with the failures that produced them, are in
 [docs/findings.md](docs/findings.md).

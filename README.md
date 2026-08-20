@@ -101,6 +101,11 @@ so the scheduled agents and everything you type by hand can never drift apart.
   and Node; casks are left to this command because they can raise a `sudo`
   prompt that an unattended agent has no TTY to answer.
 - `computer-setup log [n]` — tail the rolling log.
+- `computer-setup status` — what the last run did, and how long since the last
+  successful scheduled one. Reads a state file rather than re-running anything,
+  so it is instant. `--json` for machines. The scheduled modes exit 0 when the
+  repo is unreachable — a closed laptop is not a fault — so this is what makes a
+  machine that quietly stopped syncing distinguishable from a healthy one.
 - `computer-setup repos` — scaffold a `repositories.yml` from this machine's
   checkouts. To clone the ones that are *missing*, run
   `computer-setup apply --tags repositories`.
