@@ -73,6 +73,12 @@
     - { role: capability_configs, tags: [capability_configs] }
     - { role: macos, tags: [macos] }
     - { role: runtimes, tags: [runtimes] }
+    # Merges cliPluginsExtraDirs into ~/.docker/config.json so `docker compose`
+    # finds Homebrew's plugin — the file otherwise holds auths/credsStore/
+    # currentContext this orchestrator must not own outright. See the docker
+    # role's tasks/main.yml and "path_helper can defeat the PATH snippet's own
+    # prepend logic" in docs/findings.md.
+    - { role: docker, tags: [docker] }
     # `never`: the daily drift check must not clone repos, and bootstrap must not
     # try before SSH auth exists. Run with `computer-setup apply --tags repositories`.
     - { role: repositories, tags: [repositories, never] }

@@ -1,0 +1,47 @@
+---
+# Wire Homebrew's docker-compose/buildx plugins into the docker CLI's config —
+# see defaults/main.yml and "path_helper can defeat the PATH snippet's own
+# prepend logic" in docs/findings.md for why `docker compose` fails without
+# this even when both formulae are installed.
+#
+# ~/.docker/config.json also holds auths, credsStore, credHelpers and
+# currentContext, so this task MERGES one key rather than templating the whole
+# file — the same "included, not imposed" shape as the git role's
+# include.path. A missing file is fine: Docker itself creates it as {} on
+# first run, and slurp below just yields no content to merge over.
+
+- name: Ensure ~/.docker exists
+  ansible.builtin.file:
+    path: "{{ docker_config_path | dirname }}"
+    state: directory
+    mode: "0700"
+  when: docker_cli_capability in (computer_setup_active_capabilities | default([]))
+
+- name: Check for an existing Docker CLI config
+  ansible.builtin.stat:
+    path: "{{ docker_config_path }}"
+  register: docker_config_stat
+  when: docker_cli_capability in (computer_setup_active_capabilities | default([]))
+
+- name: Read the existing Docker CLI config
+  ansible.builtin.slurp:
+    src: "{{ docker_config_path }}"
+  register: docker_config_raw
+  when:
+    - docker_cli_capability in (computer_setup_active_capabilities | default([]))
+    - docker_config_stat.stat.exists | default(false)
+
+- name: Merge cliPluginsExtraDirs into the Docker CLI config
+  # list_merge='replace': this key is engine-declared, not something a user adds
+  # entries to by hand, so the declared list always wins outright rather than
+  # accumulating stale entries across runs.
+  ansible.builtin.copy:
+    content: >-
+      {{
+        ((docker_config_raw.content | default('e30=')) | b64decode | from_json)
+        | combine({'cliPluginsExtraDirs': docker_cli_plugins_extra_dirs}, list_merge='replace')
+        | to_nice_json
+      }}
+    dest: "{{ docker_config_path }}"
+    mode: "0600"
+  when: docker_cli_capability in (computer_setup_active_capabilities | default([]))

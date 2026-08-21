@@ -1,0 +1,20 @@
+---
+# Capability that gates this role. Named as a var, not a literal in task code,
+# so a layer may register the Docker CLI under a different capability id.
+docker_cli_capability: docker-cli
+
+# ~/.docker/config.json is NOT owned by this role: it also carries auths,
+# credsStore, credHelpers and currentContext — user/session state this
+# orchestrator has no business overwriting. Only the one key below is merged
+# in, the same "included, not imposed" shape as the git role and
+# ~/.gitconfig. See "path_helper can defeat the PATH snippet's own prepend
+# logic" in docs/findings.md for why this key matters.
+docker_config_path: "{{ home_dir }}/.docker/config.json"
+
+# Homebrew's docker-compose (and buildx) formula installs its plugin under
+# {{ homebrew_prefix }}/lib/docker/cli-plugins, but the `docker` CLI only looks
+# there if told to. Without this, `docker compose` fails with
+# "docker: unknown command: docker compose" even though both formulae are
+# installed and linked.
+docker_cli_plugins_extra_dirs:
+  - "{{ homebrew_prefix }}/lib/docker/cli-plugins"
