@@ -646,6 +646,32 @@ run_scheduled() {
     exit 0
 }
 
+# `layers sync`/`layers lint` default to the manifest/cache this orchestrator
+# already uses everywhere else (see sync_layers() above) — without this, the
+# interactive command contradicts its own usage text, which promises "layers
+# sync" refreshes the cache with no further arguments. An explicit
+# --manifest/--cache on the command line still wins, so overriding for a one-off
+# invocation (e.g. linting a manifest that isn't deployed yet) keeps working.
+cmd_layers() {
+    local sub="${1:-}"
+    [[ $# -gt 0 ]] && shift
+    local -a args=("$@")
+
+    if [[ "$sub" == "sync" || "$sub" == "lint" ]]; then
+        local has_manifest=0 has_cache=0 a
+        for a in "${args[@]+"${args[@]}"}"; do
+            [[ "$a" == "--manifest" ]] && has_manifest=1
+            [[ "$a" == "--cache" ]] && has_cache=1
+        done
+        [[ $has_cache -eq 0 && -n "$LAYER_CACHE" ]] \
+            && args=(--cache "$LAYER_CACHE" "${args[@]+"${args[@]}"}")
+        [[ $has_manifest -eq 0 && -f "$LAYERS_FILE" ]] \
+            && args=(--manifest "$LAYERS_FILE" "${args[@]+"${args[@]}"}")
+    fi
+
+    exec "$LAYER_SYNC" "$sub" "${args[@]+"${args[@]}"}"
+}
+
 # ─── Dispatch ────────────────────────────────────────────────────────────────
 COMMAND="${1:-}"
 shift 2>/dev/null || true
@@ -659,7 +685,7 @@ case "$COMMAND" in
     status)             cmd_status "$@" ;;
     repos)              cmd_repos "$@" ;;
     capture)            exec "${BIN_DIR}/macos-capture" "$@" ;;
-    layers)             exec "$LAYER_SYNC" "$@" ;;
+    layers)             cmd_layers "$@" ;;
     _scheduled-check)   run_scheduled check "$@" ;;
     _scheduled-upgrade) run_scheduled upgrade "$@" ;;
     -h|--help|help|"")  usage ;;
