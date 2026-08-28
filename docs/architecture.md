@@ -459,3 +459,36 @@ entitled to delete from underneath a running job.
 
 `~/.local/state` means one thing here: a record of what this machine did. It is
 never read to decide what to do.
+
+### What this system puts in `$HOME`
+
+Managed files go in a directory a tool already owns, not loose in `$HOME`.
+Anything loose is there because the tool gives no choice:
+
+| Path | Why there |
+|---|---|
+| `~/.zshrc` | zsh reads only this, unless `ZDOTDIR` is set in `~/.zshenv` — a bigger change than it looks |
+| `~/.gitconfig` | git prefers it over the XDG path, and it is user-authored: the engine only **appends an include** |
+| `~/.gitignore_global` | loose today; `~/.config/git/ignore` is git's own XDG location and would be the natural next move |
+| `~/.zsh/*.zsh` | snippets, auto-sourced by glob, garbage-collected via the manifest |
+| `~/.zsh/configs/*` | whole-file configs, sourced by name, **not** garbage-collected |
+| `~/.config/<tool>/` | anything that honours XDG: `git`, `zed`, `opencode`, `computer-setup` |
+| `~/.local/bin/` | the runner and its helpers |
+| `~/.dbt/`, `~/.docker/` | the tool insists |
+
+The distinction inside `~/.zsh` is the one that catches people. A snippet is
+sourced because it matched a glob and is deleted when it leaves the manifest; a
+config is sourced because something names it and survives forever once written.
+Putting a config where the glob can see it would source it at the wrong moment;
+putting a snippet in `configs/` would silently stop it loading.
+
+Two rules follow, and both have already been learned the hard way:
+
+- **Tell the tool where you moved its file.** Relocating a config that a tool
+  looks for by a fixed path only works if the tool has an override and you set
+  it. p10k reads `POWERLEVEL9K_CONFIG_FILE`; without it `p10k configure` writes
+  to `~/.p10k.zsh` and the prompt silently never changes.
+- **Moving a managed file leaves the old one behind.** Config deploys are not
+  garbage-collected, so the previous path stays on every machine that already
+  had it — usually shadowing nothing, occasionally shadowing everything. Remove
+  it deliberately, in the same change.

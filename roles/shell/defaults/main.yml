@@ -27,4 +27,18 @@ shell_config_files:
     # A file the user may have authored themselves.
     backup: true
   - key: p10k.zsh
-    dest: "{{ home_dir }}/.p10k.zsh"
+    # Under the managed shell dir rather than loose in $HOME, but in a
+    # `configs/` SUBFOLDER — ~/.zsh holds two different kinds of file:
+    #
+    #   ~/.zsh/*.zsh          snippets: auto-sourced by the layer's zshrc glob,
+    #                         and garbage-collected via the snippet manifest
+    #   ~/.zsh/configs/*      whole-file configs: sourced explicitly by name,
+    #                         and NOT garbage-collected (config deploys never
+    #                         are — see "Asymmetry" in docs/operations.md)
+    #
+    # The glob is `"$HOME"/.zsh/*.zsh(N)`, non-recursive, so a file here is
+    # neither auto-sourced nor removed by the stale-snippet reaper. Both
+    # properties are wanted: sourcing p10k.zsh at glob time would run it before
+    # the theme loads, and reaping it would delete a file no snippet manifest
+    # ever listed.
+    dest: "{{ shell_zsh_config_dir }}/configs/p10k.zsh"

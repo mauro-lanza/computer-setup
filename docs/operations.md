@@ -89,7 +89,7 @@ alone tells you nothing.
 | `~/.zsh/*.zsh` managed snippets | Regenerated from the layers' `files/shell/*.zsh`. |
 | `~/.config/git/computer-setup.gitconfig` | Re-rendered whole. Anything not declared in a layer is dropped. `~/.gitconfig` itself is only appended to. |
 | `~/.gitignore_global` | Replaced entirely from `git_global_gitignore_entries`. |
-| `~/.p10k.zsh` | Replaced from the layer-provided `p10k.zsh`. |
+| `~/.zsh/configs/p10k.zsh` | Replaced from the layer-provided `p10k.zsh`. Sourced by name via `POWERLEVEL9K_CONFIG_FILE`, not by the snippet glob, and never garbage-collected. |
 | macOS defaults | `osx_defaults` enforces the layer-declared value; System Settings changes are reverted. |
 | NVM default alias | Mismatch is detected and `nvm alias default <declared>` re-run. |
 | tfenv active version | Reverted to `runtimes_tfenv_terraform_version` (and never auto-upgraded). |
