@@ -32,11 +32,12 @@
     # Each layer is <cache>/<name>/ with layer.yml + vars.yml + capabilities.yml
     # + files/.
     computer_setup_layer_cache: "{{ home_dir }}/.local/share/computer-setup/layers"
-    # This machine's prefs.yml, backed up to a private repo — one file per
-    # machine, so a new or borrowed Mac can be restored from it. Beside the layer
-    # cache but emphatically NOT a layer: `computer-setup-layers sync` force-syncs
-    # layers with a hard reset, which would destroy commits waiting to be pushed.
-    computer_setup_state_repo_dir: "{{ home_dir }}/.local/share/computer-setup/state"
+    # Clone of the private repo holding each machine's declaration. In
+    # `share`, not `cache`, for a concrete reason: a push that fails leaves a
+    # local commit here, so deleting it can lose work. Beside the layer cache
+    # but emphatically NOT a layer — `computer-setup-layers sync` force-syncs
+    # layers with a hard reset, which would destroy exactly those commits.
+    computer_setup_backup_repo_dir: "{{ home_dir }}/.local/share/computer-setup/backups"
     # Where this system installs the executables it owns (the runner, the layer
     # sync helper, macos-capture, and any capability shipping a script). One
     # play var because three roles create and write into it; two independent

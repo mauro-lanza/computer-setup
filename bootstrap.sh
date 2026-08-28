@@ -101,8 +101,8 @@ MACHINE_SCRIPT="$SCRIPT_DIR/scripts/computer-setup-machine"
 # Where a restored/backed-up declaration is kept. Same paths the deployed runner
 # uses, so `bootstrap.sh` and `computer-setup machine` are the same two callers
 # of one repo rather than two conventions.
-STATE_CONFIG="$CONFIG_DIR/state.yml"
-STATE_REPO_DIR="$HOME/.local/share/computer-setup/state"
+BACKUP_CONFIG="$CONFIG_DIR/backup.yml"
+BACKUP_REPO_DIR="$HOME/.local/share/computer-setup/backups"
 
 # ─── Colors ───────────────────────────────────────────────────────────────────
 RED='\033[0;31m'
@@ -366,8 +366,8 @@ ensure_machine_script() {
 machine_helper() {
     ensure_machine_script || return 1
     "$MACHINE_SCRIPT" "$@" \
-        --config "$STATE_CONFIG" \
-        --repo-dir "$STATE_REPO_DIR" \
+        --config "$BACKUP_CONFIG" \
+        --repo-dir "$BACKUP_REPO_DIR" \
         --machine-file "$MACHINE_FILE"
 }
 
@@ -382,7 +382,7 @@ machine_helper() {
 offer_restore() {
     [[ -n "$ANSWERS_FILE" ]] && return 0
     [[ -f "$MACHINE_FILE" ]] && return 0
-    [[ -f "$STATE_CONFIG" ]] || return 0
+    [[ -f "$BACKUP_CONFIG" ]] || return 0
     [[ $INTERACTIVE -eq 1 ]] || return 0
 
     local names
@@ -434,7 +434,7 @@ offer_backup() {
     [[ $INTERACTIVE -eq 1 ]] || return 0
     [[ -f "$MACHINE_FILE" ]] || return 0
 
-    if [[ ! -f "$STATE_CONFIG" ]]; then
+    if [[ ! -f "$BACKUP_CONFIG" ]]; then
         echo
         ask_yn "Back up this machine's declaration to a private repo?" "n" || return 0
         machine_helper init || { warn "Backup setup failed — skipping."; return 0; }

@@ -62,12 +62,13 @@ STATE_FILE="{{ computer_setup_state_dir }}/last-run.json"
 # the JSON: it must survive a run that failed, and merging JSON in bash to
 # preserve one field is how you end up with neither.
 LAST_SUCCESS_FILE="{{ computer_setup_state_dir }}/last-success"
-# Where this machine's declaration is backed up, and under what name. A file of
-# its own rather than a key in machine.yml: machine.yml is the thing being
-# backed up, and bootstrap rewrites it, so a machine cannot also be the place
-# that records where its own backups go.
-STATE_CONFIG="{{ computer_setup_config_dir }}/state.yml"
-STATE_REPO_DIR="{{ computer_setup_state_repo_dir }}"
+# Where this machine's declaration is backed up, and under what name. CONFIG,
+# not state: you choose it, it is hand-editable, and losing it means deciding
+# again. A file of its own rather than a key in machine.yml, because machine.yml
+# is the thing being backed up — a machine cannot be the place that records
+# where its own backups go.
+BACKUP_CONFIG="{{ computer_setup_config_dir }}/backup.yml"
+BACKUP_REPO_DIR="{{ computer_setup_backup_repo_dir }}"
 # Days without a successful scheduled run before `status` calls it stale. A
 # machine that quietly stopped syncing is the failure this makes visible.
 STALE_AFTER_DAYS={{ drift_correction_stale_after_days }}
@@ -331,8 +332,8 @@ cmd_machine() {
     local sub="${1:-}"
     [[ $# -gt 0 ]] && shift
     exec "$MACHINE_SYNC" "$sub" \
-        --config "$STATE_CONFIG" \
-        --repo-dir "$STATE_REPO_DIR" \
+        --config "$BACKUP_CONFIG" \
+        --repo-dir "$BACKUP_REPO_DIR" \
         --machine-file "$MACHINE_FILE" \
         "$@"
 }

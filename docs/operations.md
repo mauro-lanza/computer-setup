@@ -221,7 +221,7 @@ gist is unlisted, not access-controlled, and anyone with the URL can read it.
 
 It is also **not a content layer**. Layers are force-synced (fetch + hard reset)
 by `computer-setup-layers`, which would destroy commits here waiting to push. It
-is cloned separately to `~/.local/share/computer-setup/state`.
+is cloned separately to `~/.local/share/computer-setup/backups`.
 
 ### Restoring onto a fresh Mac
 

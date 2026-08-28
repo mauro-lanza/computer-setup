@@ -431,3 +431,31 @@ container recursively templates every value inside it — during `pre_tasks`,
 before any layer key has been published as a fact. This is why
 `repositories_base_dir` is a play var in `local.yml` rather than layer content.
 Use a play var, or repeat the literal.
+
+## Where files live
+
+Split by the XDG question — who owns it, and what does losing it cost:
+
+| Path | Holds | Losing it |
+|---|---|---|
+| `~/.config/computer-setup/machine.yml` | the machine declaration | you re-answer every question |
+| `~/.config/computer-setup/backup.yml` | which repo backs this machine up, under what name | you re-run `machine init` |
+| `~/.local/share/computer-setup/layers/` | the layer cache | re-cloned on the next run |
+| `~/.local/share/computer-setup/backups/` | clone of the backup repo | **possibly a commit** — see below |
+| `~/.local/state/computer-setup/` | `last-run.json`, `last-success`, the galaxy marker | nothing; regenerated |
+| `~/Library/Logs/computer-setup.log` | the rolling log | nothing |
+
+Both `~/.config` entries are configuration because a HUMAN decided them and no
+run can reconstruct them. `backup.yml` is config despite describing where state
+goes, and is deliberately not a key in `machine.yml`: machine.yml is the thing
+being backed up, so it cannot also be the record of where its backups live.
+
+The backup clone is in `share` rather than `cache` for a concrete reason: a push
+that fails leaves a **local commit** there (`machine push` warns and returns 0),
+so deleting it can lose work. The layer cache has no such property and is
+arguably cache by a strict reading — it stays in `share` because it is the
+working set every apply reads, and `~/.cache` is somewhere cleaners feel
+entitled to delete from underneath a running job.
+
+`~/.local/state` means one thing here: a record of what this machine did. It is
+never read to decide what to do.

@@ -561,26 +561,26 @@ echo "==> bootstrap machine restore"
 
 # A real bare repo with one backup in it, so `names` and `pull` are exercised
 # for real rather than stubbed.
-RSTATE="$WORK/restore"; mkdir -p "$RSTATE/cfg"
-git init -q --bare "$RSTATE/remote.git"
-git init -q "$RSTATE/seed"
+RBACKUP="$WORK/restore"; mkdir -p "$RBACKUP/cfg"
+git init -q --bare "$RBACKUP/remote.git"
+git init -q "$RBACKUP/seed"
 (
-    cd "$RSTATE/seed"
+    cd "$RBACKUP/seed"
     mkdir -p machines
     cp "$REPO_ROOT/tests/fixtures/machine.yml" machines/beta.yml
     git add -A
     git -c user.email=t@t -c user.name=t commit -qm init
-    git push -q "$RSTATE/remote.git" HEAD:main
+    git push -q "$RBACKUP/remote.git" HEAD:main
 )
-printf -- '---\nrepo: "%s"\nmachine: "here"\n' "$RSTATE/remote.git" > "$RSTATE/cfg/state.yml"
+printf -- '---\nrepo: "%s"\nmachine: "here"\n' "$RBACKUP/remote.git" > "$RBACKUP/cfg/backup.yml"
 
 run_restore() {
     (
         INTERACTIVE="${2:-1}"
         ANSWERS_FILE="${3:-}"
-        CONFIG_DIR="$RSTATE/cfg"
-        STATE_CONFIG="$RSTATE/cfg/state.yml"
-        STATE_REPO_DIR="$RSTATE/clone-$RANDOM"
+        CONFIG_DIR="$RBACKUP/cfg"
+        BACKUP_CONFIG="$RBACKUP/cfg/backup.yml"
+        BACKUP_REPO_DIR="$RBACKUP/clone-$RANDOM"
         MACHINE_FILE="${4:-$WORK/restored-$RANDOM.yml}"
         MACHINE_SCRIPT="$REPO_ROOT/scripts/computer-setup-machine"
         offer_restore < "$1" >/dev/null 2>&1

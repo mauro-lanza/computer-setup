@@ -178,9 +178,9 @@ git init -q "$cs_m_tmp/seed"
     git push -q "$cs_m_tmp/remote.git" HEAD:main
 )
 cp tests/fixtures/machine.yml "$cs_m_tmp/cfg/machine.yml"
-printf -- '---\nrepo: "%s"\nmachine: "alpha"\n' "$cs_m_tmp/remote.git" > "$cs_m_tmp/cfg/state.yml"
+printf -- '---\nrepo: "%s"\nmachine: "alpha"\n' "$cs_m_tmp/remote.git" > "$cs_m_tmp/cfg/backup.yml"
 # Flags only — the SUBCOMMAND has to come first on the real command line.
-cs_m_flags=(--config "$cs_m_tmp/cfg/state.yml"
+cs_m_flags=(--config "$cs_m_tmp/cfg/backup.yml"
             --repo-dir "$cs_m_tmp/clone"
             --machine-file "$cs_m_tmp/cfg/machine.yml")
 cs_m() { scripts/computer-setup-machine "$@" "${cs_m_flags[@]}"; }
