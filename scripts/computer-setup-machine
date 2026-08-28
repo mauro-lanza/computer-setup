@@ -1,0 +1,224 @@
+#!/bin/bash
+set -euo pipefail
+
+# Back up and restore a machine's declaration (machine.yml) to a private repo.
+#
+# A STANDALONE script, not logic inside the `computer-setup` runner, for the
+# same reason computer-setup-layers is: bootstrap.sh needs it on a machine where
+# the runner does not exist yet. The runner is an Ansible template deployed by
+# the first playbook run; restore has to happen BEFORE that, or there is nothing
+# to restore from. Two callers, one implementation.
+
+PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
+
+usage() {
+    cat <<'EOF'
+Usage:
+  computer-setup-machine init --config PATH --repo-dir DIR
+  computer-setup-machine push --config PATH --repo-dir DIR --machine-file PATH
+  computer-setup-machine list --config PATH --repo-dir DIR
+  computer-setup-machine pull NAME [OUTFILE] --config PATH --repo-dir DIR
+
+machine.yml is a machine's entire declaration: its layers, the answers to their
+questions, and the capability selections. `bootstrap.sh --answers <file>` replays
+one non-interactively, so a backed-up copy IS a restorable machine.
+
+init  Choose the private repo and this machine's name; write --config and clone.
+push  Copy this machine's machine.yml into the repo and push it.
+list  Machines backed up in the repo.
+pull  Fetch one as a FILE for `bootstrap.sh --answers`. Never writes over the
+      live machine.yml, so restoring the wrong machine costs a deleted file.
+EOF
+}
+
+log()  { printf '%s\n' "$*"; }
+warn() { printf 'WARN: %s\n' "$*" >&2; }
+die()  { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
+
+CONFIG=""
+REPO_DIR=""
+MACHINE_FILE=""
+REPO=""
+MACHINE_NAME=""
+
+# Strip the flags every subcommand shares, leaving positionals in REST.
+REST=()
+parse_common() {
+    REST=()
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --config)       CONFIG="$2"; shift 2 ;;
+            --repo-dir)     REPO_DIR="$2"; shift 2 ;;
+            --machine-file) MACHINE_FILE="$2"; shift 2 ;;
+            -h|--help)      usage; exit 0 ;;
+            --*)            die "Unknown argument: $1" ;;
+            *)              REST+=("$1"); shift ;;
+        esac
+    done
+}
+
+require_config_path() { [[ -n "$CONFIG" ]] || die "--config is required"; }
+require_repo_dir()    { [[ -n "$REPO_DIR" ]] || die "--repo-dir is required"; }
+
+# Read repo + machine name out of the config file written by `init`.
+load_config() {
+    require_config_path
+    require_repo_dir
+    if [[ ! -f "$CONFIG" ]]; then
+        die "No backup configured on this machine. Run: computer-setup machine init"
+    fi
+    REPO="$(yq -r '.repo // ""' "$CONFIG" 2>/dev/null || true)"
+    MACHINE_NAME="$(yq -r '.machine // ""' "$CONFIG" 2>/dev/null || true)"
+    [[ -n "$REPO" && -n "$MACHINE_NAME" ]] \
+        || die "$CONFIG is missing repo: or machine:. Re-run: computer-setup machine init"
+}
+
+# Clone on first use, refresh otherwise. --ff-only because this repo is only
+# appended to by machines: a divergence needs a human, not an automatic merge.
+# A refresh failure is a WARNING — being offline must not stop a push whose
+# commit is perfectly safe locally.
+sync_clone() {
+    if [[ -d "$REPO_DIR/.git" ]]; then
+        git -C "$REPO_DIR" pull --ff-only --quiet 2>/dev/null \
+            || warn "could not refresh $REPO_DIR (offline, or it has diverged)"
+        return 0
+    fi
+    mkdir -p "$(dirname "$REPO_DIR")"
+    git clone --quiet "$REPO" "$REPO_DIR" || die "Could not clone $REPO"
+}
+
+cmd_init() {
+    require_config_path
+    require_repo_dir
+    [[ -t 0 ]] || die "init needs a terminal to confirm on."
+    command -v gh >/dev/null 2>&1 || die "gh is not installed."
+
+    local user slug machine reply
+    user="$(gh api user -q .login 2>/dev/null || true)"
+    [[ -n "$user" ]] || die "Not authenticated to GitHub. Run: gh auth login"
+
+    printf "Repository for machine backups [%s/computer-setup-state]: " "$user"
+    read -r slug
+    [[ -z "$slug" ]] && slug="${user}/computer-setup-state"
+
+    # The hostname is a serial number on a corporate Mac
+    # ("On-F0Q9D3QH7K-MacBookAir"), which is why this is asked and not assumed.
+    local default_name; default_name="$(hostname -s)"
+    printf "Name for THIS machine [%s]: " "$default_name"
+    read -r machine
+    [[ -z "$machine" ]] && machine="$default_name"
+
+    if ! gh repo view "$slug" >/dev/null 2>&1; then
+        log ""
+        log "${slug} does not exist yet."
+        printf "Create it as a PRIVATE repository? [y/N]: "
+        read -r reply
+        [[ "$reply" == [Yy]* ]] || { log "Aborted — nothing created."; return 0; }
+        # --add-readme so the repo has a branch. Cloning and pushing to a
+        # completely empty repo needs special cases this then never hits.
+        gh repo create "$slug" --private --add-readme \
+            --description "computer-setup: per-machine declarations" \
+            || die "Could not create $slug"
+    fi
+
+    mkdir -p "$(dirname "$CONFIG")"
+    {
+        echo "---"
+        echo "# Where this machine's machine.yml is backed up, and under what name."
+        echo "# Managed by \`computer-setup machine init\`."
+        echo "repo: \"git@github.com:${slug}.git\""
+        echo "machine: \"${machine}\""
+    } > "$CONFIG"
+    chmod 600 "$CONFIG"
+
+    load_config
+    sync_clone
+    log ""
+    log "Configured. This machine backs up as '${machine}' to ${slug}."
+    log "Push it with:  computer-setup machine push"
+}
+
+cmd_push() {
+    load_config
+    [[ -n "$MACHINE_FILE" ]] || die "--machine-file is required"
+    [[ -f "$MACHINE_FILE" ]] || die "No machine declaration at $MACHINE_FILE — run bootstrap.sh first."
+    sync_clone
+
+    local rel="machines/${MACHINE_NAME}.yml"
+    mkdir -p "$REPO_DIR/machines"
+    cp "$MACHINE_FILE" "$REPO_DIR/$rel"
+
+    if [[ -z "$(git -C "$REPO_DIR" status --porcelain -- "$rel")" ]]; then
+        log "Already up to date: ${rel}"
+        return 0
+    fi
+    git -C "$REPO_DIR" add "$rel"
+    git -C "$REPO_DIR" commit -q -m "Update ${MACHINE_NAME} ($(date +%Y-%m-%d))" \
+        || die "commit failed — is git user.name/user.email configured?"
+    # A failed push is not a failed machine: the commit is safe locally and the
+    # next push carries it.
+    if ! git -C "$REPO_DIR" push -q; then
+        warn "committed locally but could not push (offline?). Retry later."
+        return 0
+    fi
+    log "Pushed ${rel} to ${REPO}"
+}
+
+cmd_list() {
+    load_config
+    sync_clone
+    local found=0 f name caps when
+    while IFS= read -r f; do
+        [[ -z "$f" ]] && continue
+        found=1
+        name="$(basename "$f" .yml)"
+        caps="$(yq -r '.selected_capabilities | length' "$f" 2>/dev/null || echo "?")"
+        when="$(git -C "$REPO_DIR" log -1 --format=%ad --date=short -- "machines/${name}.yml" 2>/dev/null || true)"
+        printf '  %-24s %s selections%s%s\n' "$name" "${caps:-?}" \
+            "${when:+, updated $when}" \
+            "$([[ "$name" == "$MACHINE_NAME" ]] && printf '  (this machine)')"
+    done <<< "$(find "$REPO_DIR/machines" -maxdepth 1 -name '*.yml' 2>/dev/null | sort)"
+    [[ $found -eq 0 ]] && log "No machines backed up yet. Run: computer-setup machine push"
+    return 0
+}
+
+# Machine names only, one per line — for a caller building a menu.
+cmd_names() {
+    load_config
+    sync_clone
+    find "$REPO_DIR/machines" -maxdepth 1 -name '*.yml' 2>/dev/null \
+        | sort | while IFS= read -r f; do basename "$f" .yml; done
+}
+
+cmd_pull() {
+    local name="${1:-}" out="${2:-}"
+    [[ -n "$name" ]] || die "Usage: computer-setup machine pull <name> [outfile]"
+    load_config
+    sync_clone
+
+    local src="$REPO_DIR/machines/${name}.yml"
+    [[ -f "$src" ]] || die "No backup named '${name}'. Run: computer-setup machine list"
+    [[ -z "$out" ]] && out="${PWD}/${name}-machine.yml"
+    [[ -e "$out" ]] && die "Refusing to overwrite $out"
+
+    cp "$src" "$out"
+    chmod 600 "$out"
+    log "Wrote ${out}"
+    log "Apply it with:  bootstrap.sh --answers ${out}"
+}
+
+main() {
+    local sub="${1:-}"
+    [[ $# -gt 0 ]] && shift
+    case "$sub" in
+        init)  parse_common "$@"; cmd_init ;;
+        push)  parse_common "$@"; cmd_push ;;
+        list)  parse_common "$@"; cmd_list ;;
+        names) parse_common "$@"; cmd_names ;;
+        pull)  parse_common "$@"; cmd_pull "${REST[@]+"${REST[@]}"}" ;;
+        -h|--help|help|"") usage ;;
+        *) die "Unknown command: $sub" ;;
+    esac
+}
+
+main "$@"

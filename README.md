@@ -106,9 +106,10 @@ so the scheduled agents and everything you type by hand can never drift apart.
   so it is instant. `--json` for machines. The scheduled modes exit 0 when the
   repo is unreachable — a closed laptop is not a fault — so this is what makes a
   machine that quietly stopped syncing distinguishable from a healthy one.
-- `computer-setup prefs <init|push|list|pull>` — back up this machine's
+- `computer-setup machine <init|push|list|pull>` — back up this machine's
   `machine.yml` to a **private** repo, one file per machine, and restore
-  another machine's. `machine.yml` is the whole declaration — layers, answers
+  another machine's. `bootstrap.sh` offers the same restore on a fresh Mac,
+  before layers are configured — a restored declaration names its own. `machine.yml` is the whole declaration — layers, answers
   and selections — and `bootstrap.sh --answers` replays one non-interactively,
   so a backup *is* a restorable machine. `pull` writes a file for you to review and
   pass to `--answers`; it never overwrites the live `machine.yml`.

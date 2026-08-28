@@ -97,6 +97,12 @@ require_tty() {
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)"
 SCRIPT_DIR="${SCRIPT_DIR:-$PWD}"
 LAYER_SYNC_SCRIPT="$SCRIPT_DIR/scripts/computer-setup-layers"
+MACHINE_SCRIPT="$SCRIPT_DIR/scripts/computer-setup-machine"
+# Where a restored/backed-up declaration is kept. Same paths the deployed runner
+# uses, so `bootstrap.sh` and `computer-setup machine` are the same two callers
+# of one repo rather than two conventions.
+STATE_CONFIG="$CONFIG_DIR/state.yml"
+STATE_REPO_DIR="$HOME/.local/share/computer-setup/state"
 
 # ─── Colors ───────────────────────────────────────────────────────────────────
 RED='\033[0;31m'
@@ -340,6 +346,100 @@ manage_layers() {
     echo
     info "Active layers:"
     show_layers
+}
+
+# ── Machine backup / restore ─────────────────────────────────────────────────
+# Under `curl | bash` there is no checkout, so the helper is fetched the same way
+# the layer script is. Returns non-zero when it cannot be obtained, and every
+# caller treats that as "skip", never as "fail": a backup repo being unreachable
+# must not stop a machine being set up.
+ensure_machine_script() {
+    [[ -x "$MACHINE_SCRIPT" ]] && return 0
+    MACHINE_SCRIPT="$(mktemp)"
+    if ! curl -fsSL "$RAW_BASE/scripts/computer-setup-machine" -o "$MACHINE_SCRIPT"; then
+        rm -f "$MACHINE_SCRIPT"
+        return 1
+    fi
+    chmod +x "$MACHINE_SCRIPT"
+}
+
+machine_helper() {
+    ensure_machine_script || return 1
+    "$MACHINE_SCRIPT" "$@" \
+        --config "$STATE_CONFIG" \
+        --repo-dir "$STATE_REPO_DIR" \
+        --machine-file "$MACHINE_FILE"
+}
+
+# Offer to rebuild this machine from a backup. Runs BEFORE manage_layers,
+# because a restored declaration names its own layers — that is the whole reason
+# layers live in machine.yml. Restoring writes machine.yml, so manage_layers then
+# finds a manifest and does not have to ask.
+#
+# Skipped entirely when: not interactive, --answers was passed (the caller
+# already said where the answers come from), a declaration already exists (this
+# is a re-run, not an onboarding), or no backup repo is configured.
+offer_restore() {
+    [[ -n "$ANSWERS_FILE" ]] && return 0
+    [[ -f "$MACHINE_FILE" ]] && return 0
+    [[ -f "$STATE_CONFIG" ]] || return 0
+    [[ $INTERACTIVE -eq 1 ]] || return 0
+
+    local names
+    names="$(machine_helper names 2>/dev/null)" || {
+        warn "Could not read the machine backup repo — continuing without it."
+        return 0
+    }
+    [[ -n "$names" ]] || return 0
+
+    echo
+    info "This machine has no declaration yet, and backups exist:"
+    local -a list=()
+    while IFS= read -r n; do [[ -n "$n" ]] && list+=("$n"); done <<< "$names"
+    local i
+    for i in $(seq 0 $((${#list[@]} - 1))); do
+        echo "    $((i + 1))) ${list[$i]}"
+    done
+    echo "    0) start fresh"
+    echo
+
+    local choice=""
+    while true; do
+        read -rp "  Restore from which backup? [0]: " choice
+        choice="${choice:-0}"
+        [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 0 && choice <= ${#list[@]} )) && break
+        warn "  Enter a number between 0 and ${#list[@]}"
+    done
+    [[ "$choice" -eq 0 ]] && { info "Starting fresh."; return 0; }
+
+    local picked="${list[$((choice - 1))]}" tmp
+    tmp="$(mktemp -d)/${picked}.yml"
+    if ! machine_helper pull "$picked" "$tmp" >/dev/null; then
+        warn "Could not fetch '${picked}' — continuing without it."
+        return 0
+    fi
+    # Routed through --answers rather than copied over machine.yml: the restored
+    # file is then validated against the layers' merged registry like any other
+    # answers file, and a stale id in it is reported instead of silently applied.
+    ANSWERS_FILE="$tmp"
+    mkdir -p "$(dirname "$MACHINE_FILE")"
+    cp "$tmp" "$MACHINE_FILE"
+    chmod 600 "$MACHINE_FILE"
+    ok "Restored '${picked}' — its layers will be used below."
+}
+
+# Offer to back up what was just written. Never fatal: a machine that is set up
+# but not backed up is fine; the reverse is not.
+offer_backup() {
+    [[ $INTERACTIVE -eq 1 ]] || return 0
+    [[ -f "$MACHINE_FILE" ]] || return 0
+
+    if [[ ! -f "$STATE_CONFIG" ]]; then
+        echo
+        ask_yn "Back up this machine's declaration to a private repo?" "n" || return 0
+        machine_helper init || { warn "Backup setup failed — skipping."; return 0; }
+    fi
+    machine_helper push || warn "Could not back up the declaration — run \`computer-setup machine push\` later."
 }
 
 # Clone/update each layer into the stable layer cache.
@@ -1140,6 +1240,8 @@ main() {
     ensure_gh_auth
 
     # ── Phase 1 ──────────────────────────────────────────────────────────────
+    # Before manage_layers: a restored declaration brings its own layers.
+    offer_restore
     manage_layers
     clone_layers
 
@@ -1160,6 +1262,7 @@ main() {
         gather_optional_tools
     fi
     write_machine
+    offer_backup
 
     # ── Phase 3 ──────────────────────────────────────────────────────────────
     run_playbook

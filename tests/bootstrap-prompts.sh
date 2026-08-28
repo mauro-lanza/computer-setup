@@ -552,6 +552,68 @@ result="$(
 assert_eq "a written machine file is a valid --answers file" \
     "rt@example.com|zed|alpha zzz-last" "$result"
 
+# ── 17. offer_restore / offer_backup ─────────────────────────────────────────
+# The ONLY path that runs on a genuinely fresh machine, where nobody is watching
+# it fail. Each guard below is a way it could wrongly fire: prompting during a
+# non-interactive --answers run, or offering to restore over a machine that is
+# already configured, would both hijack a working setup.
+echo "==> bootstrap machine restore"
+
+# A real bare repo with one backup in it, so `names` and `pull` are exercised
+# for real rather than stubbed.
+RSTATE="$WORK/restore"; mkdir -p "$RSTATE/cfg"
+git init -q --bare "$RSTATE/remote.git"
+git init -q "$RSTATE/seed"
+(
+    cd "$RSTATE/seed"
+    mkdir -p machines
+    cp "$REPO_ROOT/tests/fixtures/machine.yml" machines/beta.yml
+    git add -A
+    git -c user.email=t@t -c user.name=t commit -qm init
+    git push -q "$RSTATE/remote.git" HEAD:main
+)
+printf -- '---\nrepo: "%s"\nmachine: "here"\n' "$RSTATE/remote.git" > "$RSTATE/cfg/state.yml"
+
+run_restore() {
+    (
+        INTERACTIVE="${2:-1}"
+        ANSWERS_FILE="${3:-}"
+        CONFIG_DIR="$RSTATE/cfg"
+        STATE_CONFIG="$RSTATE/cfg/state.yml"
+        STATE_REPO_DIR="$RSTATE/clone-$RANDOM"
+        MACHINE_FILE="${4:-$WORK/restored-$RANDOM.yml}"
+        MACHINE_SCRIPT="$REPO_ROOT/scripts/computer-setup-machine"
+        offer_restore < "$1" >/dev/null 2>&1
+        printf '%s' "$ANSWERS_FILE"
+    )
+}
+
+printf '1\n' > "$WORK/pick-1"
+printf '0\n' > "$WORK/pick-0"
+
+got="$(run_restore "$WORK/pick-1")"
+if [[ -n "$got" && -f "$got" ]]; then
+    pass "choosing a backup sets ANSWERS_FILE to the fetched declaration"
+    assert_eq "  the restored file carries the layers" "2" \
+        "$(yq -r '.layers | length' "$got" 2>/dev/null)"
+else
+    fail "choosing a backup sets ANSWERS_FILE to the fetched declaration" "got [$got]"
+fi
+
+assert_eq "choosing 0 starts fresh and sets no answers file" "" \
+    "$(run_restore "$WORK/pick-0")"
+
+# Guards. Each must return WITHOUT consuming the answer file, so a stray prompt
+# here would show up as a restore that should never have been offered.
+assert_eq "a non-interactive run is never offered a restore" "" \
+    "$(run_restore "$WORK/pick-1" 0)"
+assert_eq "--answers wins over a restore prompt" "supplied.yml" \
+    "$(run_restore "$WORK/pick-1" 1 "supplied.yml")"
+
+printf -- '---\nlayers: []\n' > "$WORK/already.yml"
+assert_eq "an already-declared machine is not offered a restore" "" \
+    "$(run_restore "$WORK/pick-1" 1 "" "$WORK/already.yml")"
+
 echo
 if [[ "$FAILURES" -gt 0 ]]; then
     echo "bootstrap prompt tests: ${FAILURES} failure(s)" >&2

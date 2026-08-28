@@ -18,11 +18,16 @@
     state: directory
     mode: "0700"
 
-- name: Deploy layer sync helper
+# Both helpers exist as standalone scripts because bootstrap.sh needs them on a
+# machine where the runner has not been deployed yet.
+- name: Deploy the standalone helpers
   ansible.builtin.copy:
-    src: "{{ playbook_dir }}/scripts/computer-setup-layers"
-    dest: "{{ computer_setup_bin_dir }}/computer-setup-layers"
+    src: "{{ playbook_dir }}/scripts/{{ item }}"
+    dest: "{{ computer_setup_bin_dir }}/{{ item }}"
     mode: "0755"
+  loop:
+    - computer-setup-layers
+    - computer-setup-machine
 
 # No handler notification: launchd re-reads the PROGRAM at each scheduled fire,
 # so a rewritten runner needs no reload. Only a changed plist does, and

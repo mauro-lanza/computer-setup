@@ -195,10 +195,10 @@ non-interactively, and `check.sh` asserts a written `machine.yml` is a valid
 answers file, so **a backup is a restorable machine**.
 
 ```bash
-computer-setup prefs init     # choose the private repo and name this machine
-computer-setup prefs push     # back up the current machine.yml
-computer-setup prefs list     # machines backed up in the repo
-computer-setup prefs pull work-macbook
+computer-setup machine init   # choose the private repo and name this machine
+computer-setup machine push   # back up the current machine.yml
+computer-setup machine list   # machines backed up in the repo
+computer-setup machine pull work-macbook
 ```
 
 One file per machine under `machines/<name>.yml`, so a laptop and a desktop keep
@@ -222,3 +222,25 @@ gist is unlisted, not access-controlled, and anyone with the URL can read it.
 It is also **not a content layer**. Layers are force-synced (fetch + hard reset)
 by `computer-setup-layers`, which would destroy commits here waiting to push. It
 is cloned separately to `~/.local/share/computer-setup/state`.
+
+### Restoring onto a fresh Mac
+
+`bootstrap.sh` offers this before it asks about layers. If the machine has no
+declaration yet and a backup repo is configured, it lists the backed-up machines
+and lets you pick one:
+
+```
+This machine has no declaration yet, and backups exist:
+    1) work-macbook
+    2) home-desktop
+    0) start fresh
+```
+
+The chosen declaration is fetched and fed through the ordinary `--answers` path,
+so it is validated against the layers' merged registry like any other answers
+file — a capability id that no longer exists is reported rather than silently
+applied.
+
+The prompt is skipped when it would be wrong: a non-interactive run, an explicit
+`--answers`, an already-declared machine, or no backup repo configured. It is
+also never fatal — an unreachable backup repo warns and setup continues.

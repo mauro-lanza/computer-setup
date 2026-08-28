@@ -161,30 +161,35 @@ if rc:
 print("  ok  %d managed directories, no conflicting modes" % len(decls))
 CSPY
 
-echo "==> Prefs backup round-trip"
-cs_prefs_tmp="$(mktemp -d)"
-mkdir -p "$cs_prefs_tmp/cfg"
-git init -q --bare "$cs_prefs_tmp/remote.git"
-git init -q "$cs_prefs_tmp/seed"
+# `computer-setup-machine` is git plumbing that only runs by hand or on a fresh
+# machine, which is where bit-rot hides. Driven against a LOCAL bare repo — no
+# network, no gh, no GitHub account — so the gate works on a fresh machine and
+# in CI. `init` is the only subcommand not covered: it needs an authenticated gh.
+echo "==> Machine backup round-trip"
+cs_m_tmp="$(mktemp -d)"
+mkdir -p "$cs_m_tmp/cfg"
+git init -q --bare "$cs_m_tmp/remote.git"
+git init -q "$cs_m_tmp/seed"
 (
-    cd "$cs_prefs_tmp/seed"
+    cd "$cs_m_tmp/seed"
     echo "# state" > README.md
     git add -A
     git -c user.email=t@t -c user.name=t commit -qm init
-    git push -q "$cs_prefs_tmp/remote.git" HEAD:main
+    git push -q "$cs_m_tmp/remote.git" HEAD:main
 )
-sed -e "s|{{ computer_setup_config_dir }}|$cs_prefs_tmp/cfg|g" \
-    -e "s|{{ computer_setup_state_repo_dir }}|$cs_prefs_tmp/clone|g" \
-    -e "s|{{ computer_setup_machine_file }}|$cs_prefs_tmp/cfg/machine.yml|g" \
-    -e 's/{{[^}]*}}/PLACEHOLDER/g' -e '/{%.*%}/d' \
-    roles/drift_correction/templates/computer-setup.j2 > "$cs_prefs_tmp/cs"
-chmod +x "$cs_prefs_tmp/cs"
-cp tests/fixtures/machine.yml "$cs_prefs_tmp/cfg/machine.yml"
-printf -- '---\nrepo: "%s"\nmachine: "alpha"\n' "$cs_prefs_tmp/remote.git" > "$cs_prefs_tmp/cfg/state.yml"
+cp tests/fixtures/machine.yml "$cs_m_tmp/cfg/machine.yml"
+printf -- '---\nrepo: "%s"\nmachine: "alpha"\n' "$cs_m_tmp/remote.git" > "$cs_m_tmp/cfg/state.yml"
+# Flags only — the SUBCOMMAND has to come first on the real command line.
+cs_m_flags=(--config "$cs_m_tmp/cfg/state.yml"
+            --repo-dir "$cs_m_tmp/clone"
+            --machine-file "$cs_m_tmp/cfg/machine.yml")
+cs_m() { scripts/computer-setup-machine "$@" "${cs_m_flags[@]}"; }
 
 # An unconfigured machine must say so, not traceback.
-if "$cs_prefs_tmp/cs" prefs list >/dev/null 2>&1 && [[ ! -f "$cs_prefs_tmp/cfg/state.yml" ]]; then
-    echo "ERROR: prefs list succeeded without configuration" >&2
+if scripts/computer-setup-machine push --config "$cs_m_tmp/nope.yml" \
+        --repo-dir "$cs_m_tmp/clone" \
+        --machine-file "$cs_m_tmp/cfg/machine.yml" >/dev/null 2>&1; then
+    echo "ERROR: push succeeded without configuration" >&2
     exit 1
 fi
 
@@ -192,33 +197,45 @@ fi
 # moment it matches, SIGPIPE-ing the still-writing producer (141), and this
 # script runs `set -o pipefail` — so a PASSING assertion fails the build,
 # racily. Cost an afternoon; do not reintroduce the pipe.
-"$cs_prefs_tmp/cs" prefs push >/dev/null
-cs_prefs_out="$("$cs_prefs_tmp/cs" prefs push)"
-[[ "$cs_prefs_out" == *"Already up to date"* ]] || {
-    echo "ERROR: a second push was not a no-op: $cs_prefs_out" >&2; exit 1; }
-cs_prefs_out="$("$cs_prefs_tmp/cs" prefs list)"
-[[ "$cs_prefs_out" == *"alpha"* ]] || {
-    echo "ERROR: pushed machine missing from list: $cs_prefs_out" >&2; exit 1; }
-"$cs_prefs_tmp/cs" prefs pull alpha "$cs_prefs_tmp/out.yml" >/dev/null
+cs_m push >/dev/null
+cs_m_out="$(cs_m push)"
+[[ "$cs_m_out" == *"Already up to date"* ]] || {
+    echo "ERROR: a second push was not a no-op: $cs_m_out" >&2; exit 1; }
+cs_m_out="$(cs_m list)"
+[[ "$cs_m_out" == *"alpha"* ]] || {
+    echo "ERROR: pushed machine missing from list: $cs_m_out" >&2; exit 1; }
 
-# The whole premise: a pulled backup is a valid `--answers` file. If this stops
-# being true, restoring a machine silently produces a DIFFERENT machine.
-diff -q tests/fixtures/machine.yml "$cs_prefs_tmp/out.yml" >/dev/null || {
-    echo "ERROR: pulled backup does not match the pushed prefs" >&2; exit 1; }
-yq -r '.selected_capabilities[]?' "$cs_prefs_tmp/out.yml" >/dev/null || {
-    echo "ERROR: pulled backup does not parse as an answers file" >&2; exit 1; }
+# `names` is what bootstrap builds its restore menu from: one bare name per
+# line, nothing else. A stray log line here becomes a menu entry there.
+cs_m_out="$(cs_m names)"
+[[ "$cs_m_out" == "alpha" ]] || {
+    echo "ERROR: names emitted more than the bare name: [$cs_m_out]" >&2; exit 1; }
+
+cs_m pull alpha "$cs_m_tmp/out.yml" >/dev/null
+
+# The whole premise: a pulled backup is a valid `--answers` file, layers and
+# all. If this stops being true, restoring a machine silently produces a
+# DIFFERENT machine.
+diff -q tests/fixtures/machine.yml "$cs_m_tmp/out.yml" >/dev/null || {
+    echo "ERROR: pulled backup does not match the pushed declaration" >&2; exit 1; }
+for cs_m_key in '.layers[]?' '.selected_capabilities[]?' '.answers'; do
+    yq -r "$cs_m_key" "$cs_m_tmp/out.yml" >/dev/null || {
+        echo "ERROR: pulled backup does not parse ($cs_m_key)" >&2; exit 1; }
+done
+[[ "$(yq -r '.layers | length' "$cs_m_tmp/out.yml")" -gt 0 ]] || {
+    echo "ERROR: restored declaration carries no layers" >&2; exit 1; }
 
 # Never clobber: a bad restore must always be recoverable.
-if "$cs_prefs_tmp/cs" prefs pull alpha "$cs_prefs_tmp/out.yml" >/dev/null 2>&1; then
+if cs_m pull alpha "$cs_m_tmp/out.yml" >/dev/null 2>&1; then
     echo "ERROR: pull overwrote an existing file" >&2
     exit 1
 fi
-if "$cs_prefs_tmp/cs" prefs pull nonexistent "$cs_prefs_tmp/x.yml" >/dev/null 2>&1; then
+if cs_m pull nonexistent "$cs_m_tmp/x.yml" >/dev/null 2>&1; then
     echo "ERROR: pull accepted an unknown machine name" >&2
     exit 1
 fi
-rm -rf "$cs_prefs_tmp"
-echo "  ok  push, idempotent re-push, list, pull, and both refusals"
+rm -rf "$cs_m_tmp"
+echo "  ok  push, idempotent re-push, list, names, pull, and both refusals"
 
 echo "==> Run state contract"
 rm -f /tmp/cs-state-contract-template.txt /tmp/cs-state-contract-loop-a.txt /tmp/cs-state-contract-loop-b.txt
