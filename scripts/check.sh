@@ -128,6 +128,39 @@ ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook tests/contract.yml >/dev/null
 # where bit-rot hides. Driven against a LOCAL bare repo — no network, no gh, no
 # GitHub account — so the gate works on a fresh machine and in CI. `init` is the
 # only subcommand not covered: it is the one that needs an authenticated gh.
+# Two roles declaring the SAME directory with DIFFERENT modes is invisible until
+# it ships: one role sets the mode, the other reports drift on it, forever. That
+# is exactly what happened to ~/.local/state/computer-setup -- 0755 from the
+# 09:00 upgrade, 0700 from the 10:00 check, drifting daily for a week before
+# `computer-setup status` named the task and made it obvious.
+#
+# Textual, so it only catches divergence when both spell the path the same way.
+# That is the point: writing one directory as two expressions (the original bug
+# aliased it through `| dirname`) is itself the thing to avoid.
+echo "==> Directory mode agreement"
+"$CS_PY" - <<'CSPY'
+import re, pathlib, collections, sys
+
+decls = collections.defaultdict(set)
+for f in sorted(pathlib.Path("roles").glob("*/tasks/*.yml")):
+    for m in re.finditer(
+        r'path:\s*"([^"]+)"\s*\n\s*state:\s*directory\s*\n\s*mode:\s*"([0-7]{4})"',
+        f.read_text(),
+    ):
+        decls[m.group(1)].add((m.group(2), str(f)))
+
+rc = 0
+for path, entries in sorted(decls.items()):
+    if len({mode for mode, _ in entries}) > 1:
+        rc = 1
+        print("ERROR: %s is declared with conflicting modes:" % path, file=sys.stderr)
+        for mode, f in sorted(entries):
+            print("         %s  %s" % (mode, f), file=sys.stderr)
+if rc:
+    sys.exit(rc)
+print("  ok  %d managed directories, no conflicting modes" % len(decls))
+CSPY
+
 echo "==> Prefs backup round-trip"
 cs_prefs_tmp="$(mktemp -d)"
 mkdir -p "$cs_prefs_tmp/cfg"

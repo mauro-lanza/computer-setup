@@ -120,9 +120,15 @@
 
     - name: Ensure the state directory exists
       ansible.builtin.file:
-        path: "{{ upgrade_galaxy_core_marker | dirname }}"
+        # The canonical var, NOT `upgrade_galaxy_core_marker | dirname`, even
+        # though they resolve identically. Two roles declaring one directory
+        # through two different expressions is how this ended up declared 0755
+        # here and 0700 in drift_correction: the 09:00 upgrade set one mode and
+        # the 10:00 check reported drift on it, every day, invisibly.
+        # Same expression everywhere means a divergence is greppable.
+        path: "{{ computer_setup_state_dir }}"
         state: directory
-        mode: "0755"
+        mode: "0700"
 
     # Written unconditionally, and only after the install above succeeded: if it
     # failed, the marker keeps the old value so the next run retries with
