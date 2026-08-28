@@ -4,7 +4,7 @@
 #
 #   ansible-playbook tests/negative.yml \
 #     -e computer_setup_layer_cache=tests/fixtures/negative/reserved/layers_cache \
-#     -e computer_setup_layers_manifest=tests/fixtures/negative/reserved/layers.yml
+#     -e computer_setup_machine_file=tests/fixtures/negative/reserved/machine.yml
 #
 # scripts/check.sh asserts these FAIL. Reserved-key enforcement and
 # schema_version rejection are both documented as guarantees and both had zero
@@ -19,7 +19,7 @@
     # Mirrors local.yml — layer `repositories:` entries template against it.
     repositories_base_dir: "{{ ansible_facts['env']['HOME'] }}/Projects"
     homebrew_prefix: /opt/homebrew
-    computer_setup_prefs_file: "{{ playbook_dir }}/fixtures/prefs.yml"
+    computer_setup_machine_file: "{{ playbook_dir }}/fixtures/machine.yml"
     computer_setup_schema_version: 1
   tasks:
     - name: Initialize computer-setup orchestration

@@ -1,0 +1,45 @@
+---
+# Example MACHINE DECLARATION.
+#
+# Copy to ~/.config/computer-setup/machine.yml (bootstrap.sh writes this for you
+# interactively). One file, because it is one decision: the capability ids under
+# `selected_capabilities` are meaningless without the layers that define them,
+# so half of this file restores nothing.
+#
+# ── layers ───────────────────────────────────────────────────────────────────
+# Cloned into ~/.local/share/computer-setup/layers/<name>/ and merged in
+# ascending priority order — higher priority wins on scalar conflicts; lists
+# append.
+#   name:     unique layer name; also the layer-cache directory name
+#   repo:     git URL. Bootstrap authenticates GitHub over SSH, so prefer
+#             git@github.com:owner/repo.git — a bare `github.com:owner/repo`
+#             is completed to that form.
+#   priority: merge order (higher wins scalars)
+layers:
+  - name: public
+    repo: git@github.com:mauro-lanza/computer-setup-layer-public.git
+    priority: 10
+
+  - name: personal
+    repo: git@github.com:mauro-lanza/computer-setup-layer-personal.git
+    priority: 20
+
+  - name: work
+    repo: git@github.com:mauro-lanza/computer-setup-layer-work.git
+    priority: 30
+
+# ── answers ──────────────────────────────────────────────────────────────────
+# Keyed by QUESTION ID, flat — not grouped by layer. Question ids merge into one
+# registry across layers and a higher-priority layer can win the same id, so an
+# answer belongs to the machine, not to whichever layer happened to declare it.
+answers:
+  git-name: "your-name"
+  git-email: "you@example.com"
+  editor: "zed"
+
+# ── selections ───────────────────────────────────────────────────────────────
+# Capability ids, resolved against the merged registry at apply time. Flat for
+# the same reason as answers: which layer provides an id can change.
+selected_capabilities:
+  - nvm
+  - uv

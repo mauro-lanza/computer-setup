@@ -37,7 +37,7 @@
       Layer '{{ _layer.name }}' defines reserved key(s):
       {{ ((_incoming_layer_vars.keys() | intersect(computer_setup_reserved_layer_keys | default([])))
           + (_incoming_layer_vars.keys() | select('match', _reserved_prefix_re) | list)) | unique | join(', ') }}.
-      These are machine-local prefs (use {{ computer_setup_prefs_file }}) or
+      These are machine-local prefs (use {{ computer_setup_machine_file }}) or
       engine-owned vars (the
       {{ computer_setup_reserved_layer_prefixes | default([]) | join('*, ') }}*
       namespaces) — not layer content.

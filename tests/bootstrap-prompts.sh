@@ -19,7 +19,7 @@
 #   2. The loop body ended in `[[ "$id" == "vscode" ]] && ...`, so when the last
 #      capability was selected and wasn't literally `vscode`, the while loop —
 #      and therefore the function — returned 1. Under `set -e` that aborts
-#      bootstrap AFTER the final prompt but BEFORE write_prefs, leaving no
+#      bootstrap AFTER the final prompt but BEFORE write_machine, leaving no
 #      preferences file at all.
 #
 # Both are invisible to a human running bootstrap (it looks like it worked) and
@@ -130,7 +130,7 @@ assert_eq "  selections are the capability ids, in capability order" \
 
 # ── 2. The function must return success ──────────────────────────────────────
 # Bug 2: a trailing failed test made the loop return 1, which `set -e` turns
-# into "bootstrap exits before write_prefs" — no prefs file, no error message.
+# into "bootstrap exits before write_machine" — no machine file, no error message.
 assert_eq "returns 0 after selecting a non-vscode capability last" "0" "$rc"
 
 # ── 3. Answering no must select nothing (and still return success) ───────────
@@ -247,44 +247,44 @@ make_caps > "$WORK/caps.tsv"
 result="$(run_prompts "$WORK/all-yes")"
 assert_eq "empty capability list selects nothing and returns 0" "0|" "$result"
 
-# ── 8. write_prefs must be reachable and emit parseable YAML ─────────────────
+# ── 8. write_machine must be reachable and emit parseable YAML ─────────────────
 # Ties the two bugs together: the point of selecting capabilities is that they
-# reach the prefs file the playbook actually consumes.
-echo "==> bootstrap prefs file"
+# reach the machine file the playbook actually consumes.
+echo "==> bootstrap machine file"
 make_caps > "$WORK/caps.tsv"
 (
     PRIOR_SELECTED_IDS=" "
     HAS_PRIOR_PREFS=false
     INTERACTIVE=1
     MERGED_CAPABILITIES_FILE="$WORK/caps.tsv"
-    PREFS_FILE="$WORK/prefs.yml"
+    MACHINE_FILE="$WORK/machine.yml"
     gather_optional_tools < "$WORK/all-yes" >/dev/null 2>&1 \
-        && write_prefs >/dev/null 2>&1
-) || fail "write_prefs is reachable after the prompt loop" "the chain aborted"
+        && write_machine >/dev/null 2>&1
+) || fail "write_machine is reachable after the prompt loop" "the chain aborted"
 
-if [[ -f "$WORK/prefs.yml" ]]; then
-    pass "write_prefs is reachable after the prompt loop"
-    got="$(yq -r '.selected_capabilities | join(" ")' "$WORK/prefs.yml" 2>/dev/null)"
-    assert_eq "  prefs file records every selection" "alpha vscode ext-pack zzz-last feat-gated" "$got"
-    # Identity is an ordinary answer now, so the prefs file must NOT carry a
+if [[ -f "$WORK/machine.yml" ]]; then
+    pass "write_machine is reachable after the prompt loop"
+    got="$(yq -r '.selected_capabilities | join(" ")' "$WORK/machine.yml" 2>/dev/null)"
+    assert_eq "  machine file records every selection" "alpha vscode ext-pack zzz-last feat-gated" "$got"
+    # Identity is an ordinary answer now, so the machine file must NOT carry a
     # top-level git_user_* key — that shape was the old special case.
-    assert_eq "  prefs file has no top-level git identity keys" "false false" \
-        "$(yq -r '[has("git_user_name"), has("git_user_email")] | join(" ")' "$WORK/prefs.yml" 2>/dev/null)"
-    mode="$(stat -f '%OLp' "$WORK/prefs.yml" 2>/dev/null)"
-    assert_eq "  prefs file is created 0600" "600" "$mode"
+    assert_eq "  machine file has no top-level git identity keys" "false false" \
+        "$(yq -r '[has("git_user_name"), has("git_user_email")] | join(" ")' "$WORK/machine.yml" 2>/dev/null)"
+    mode="$(stat -f '%OLp' "$WORK/machine.yml" 2>/dev/null)"
+    assert_eq "  machine file is created 0600" "600" "$mode"
 else
-    fail "write_prefs is reachable after the prompt loop" "no prefs file was written"
+    fail "write_machine is reachable after the prompt loop" "no machine file was written"
 fi
 
-# ── 9. An empty selection set must still produce a valid prefs file ──────────
+# ── 9. An empty selection set must still produce a valid machine file ──────────
 (
     PRIOR_SELECTED_IDS=" "; HAS_PRIOR_PREFS=false; INTERACTIVE=1
     MERGED_CAPABILITIES_FILE="$WORK/caps.tsv"
-    PREFS_FILE="$WORK/prefs-empty.yml"
-    gather_optional_tools < "$WORK/all-no" >/dev/null 2>&1 && write_prefs >/dev/null 2>&1
+    MACHINE_FILE="$WORK/machine-empty.yml"
+    gather_optional_tools < "$WORK/all-no" >/dev/null 2>&1 && write_machine >/dev/null 2>&1
 )
 assert_eq "empty selection still writes a valid selected_capabilities list" \
-    "0" "$(yq -r '.selected_capabilities | length' "$WORK/prefs-empty.yml" 2>/dev/null)"
+    "0" "$(yq -r '.selected_capabilities | length' "$WORK/machine-empty.yml" 2>/dev/null)"
 
 # ── 10. load_capabilities merges layers by descending priority, dedup by id ──
 # Reuses the contract fixtures: `nvm` is defined in both layers and the
@@ -293,7 +293,7 @@ assert_eq "empty selection still writes a valid selected_capabilities list" \
 echo "==> bootstrap capability merge"
 (
     LAYER_CACHE="$REPO_ROOT/tests/fixtures/layers_cache"
-    LAYERS_FILE="$REPO_ROOT/tests/fixtures/layers.yml"
+    MACHINE_FILE="$REPO_ROOT/tests/fixtures/machine.yml"
     load_capabilities >/dev/null 2>&1
     cp "$MERGED_CAPABILITIES_FILE" "$WORK/merged.tsv"
 )
@@ -331,7 +331,7 @@ run_questions() {
     (
         INTERACTIVE=1
         MERGED_QUESTIONS_FILE="$WORK/questions.tsv"
-        PREFS_FILE="$WORK/no-such-prefs.yml"
+        MACHINE_FILE="$WORK/no-such-machine.yml"
         ANSWER_IDS=(); ANSWER_VALUES=()
         gather_answers < "$answers" >/dev/null 2>&1
         local rc=$? out="" i
@@ -366,13 +366,13 @@ assert_eq "an invalid choice re-prompts instead of being accepted" \
 # ── validate: a text answer must match the pattern its layer declares ───────
 # Without this, a mistyped git address is written straight into the managed
 # gitconfig and every commit carries it. The engine re-checks on apply, because
-# the prefs file is editable by hand.
+# the machine file is editable by hand.
 make_validated_question > "$WORK/questions-validated.tsv"
 run_validated() {
     (
         INTERACTIVE=1
         MERGED_QUESTIONS_FILE="$WORK/questions-validated.tsv"
-        PREFS_FILE="$WORK/no-such-prefs.yml"
+        MACHINE_FILE="$WORK/no-such-machine.yml"
         ANSWER_IDS=(); ANSWER_VALUES=()
         gather_answers < "$1" >/dev/null 2>&1
         printf '%s' "${ANSWER_VALUES[0]}"
@@ -407,20 +407,20 @@ printf 'has space\nok-value\n' > "$WORK/tmpl-real"
 result="$(ask_text "Where repos go" '/tmp/x' '^[^ ]+$' < "$WORK/tmpl-real" 2>/dev/null)"
 assert_eq "  a non-templated answer is still validated" "ok-value" "$result"
 
-# Answers must survive write_prefs and come BACK as the defaults on a re-run.
+# Answers must survive write_machine and come BACK as the defaults on a re-run.
 # A one-way write would silently reset every decision on the next bootstrap.
 (
-    PREFS_FILE="$WORK/prefs-answers.yml"
+    MACHINE_FILE="$WORK/machine-answers.yml"
     SELECTED_CAPABILITIES=(alpha)
     ANSWER_IDS=(editor scratch); ANSWER_VALUES=(zed "/tmp/mine")
-    write_prefs >/dev/null 2>&1
+    write_machine >/dev/null 2>&1
 )
-assert_eq "prefs file records the answers" "zed" \
-    "$(yq -r '.answers.editor' "$WORK/prefs-answers.yml" 2>/dev/null)"
+assert_eq "machine file records the answers" "zed" \
+    "$(yq -r '.answers.editor' "$WORK/machine-answers.yml" 2>/dev/null)"
 assert_eq "  answers survive a yq round-trip as valid YAML" "/tmp/mine" \
-    "$(yq -r '.answers.scratch' "$WORK/prefs-answers.yml" 2>/dev/null)"
+    "$(yq -r '.answers.scratch' "$WORK/machine-answers.yml" 2>/dev/null)"
 assert_eq "  a stored answer is read back as the next run's default" "zed" \
-    "$(PREFS_FILE="$WORK/prefs-answers.yml" prior_answer editor)"
+    "$(MACHINE_FILE="$WORK/machine-answers.yml" prior_answer editor)"
 
 # With prior answers present, bare Enter must keep them rather than revert to
 # the layer's declared default.
@@ -428,7 +428,7 @@ printf '\n\n' > "$WORK/q-enter2"
 result="$(
     INTERACTIVE=1
     MERGED_QUESTIONS_FILE="$WORK/questions.tsv"
-    PREFS_FILE="$WORK/prefs-answers.yml"
+    MACHINE_FILE="$WORK/machine-answers.yml"
     ANSWER_IDS=(); ANSWER_VALUES=()
     gather_answers < "$WORK/q-enter2" >/dev/null 2>&1
     printf '%s=%s' "${ANSWER_IDS[0]}" "${ANSWER_VALUES[0]}"
@@ -439,7 +439,7 @@ assert_eq "Enter keeps the prior answer instead of the declared default" \
 # ── 12. load_questions merges layers by descending priority, dedup by id ─────
 (
     LAYER_CACHE="$REPO_ROOT/tests/fixtures/layers_cache"
-    LAYERS_FILE="$REPO_ROOT/tests/fixtures/layers.yml"
+    MACHINE_FILE="$REPO_ROOT/tests/fixtures/machine.yml"
     load_questions >/dev/null 2>&1
     cp "$MERGED_QUESTIONS_FILE" "$WORK/merged-q.tsv"
 )
@@ -457,7 +457,7 @@ assert_eq "  the higher-priority layer's question wins" \
 echo "==> bootstrap presets"
 (
     LAYER_CACHE="$REPO_ROOT/tests/fixtures/layers_cache"
-    LAYERS_FILE="$REPO_ROOT/tests/fixtures/layers.yml"
+    MACHINE_FILE="$REPO_ROOT/tests/fixtures/machine.yml"
     load_presets >/dev/null 2>&1
     cp "$MERGED_PRESETS_FILE" "$WORK/presets.tsv"
 )
@@ -475,7 +475,7 @@ assert_eq "  preset_answer is empty for an unset question" "" \
 result="$(
     MERGED_QUESTIONS_FILE="$WORK/questions.tsv"
     MERGED_PRESETS_FILE="$WORK/presets.tsv"
-    PREFS_FILE="$WORK/no-such-prefs.yml"
+    MACHINE_FILE="$WORK/no-such-machine.yml"
     PRESET_ID=everything
     REVIEW_ANSWERS=false
     ANSWER_IDS=(); ANSWER_VALUES=()
@@ -540,16 +540,16 @@ assert_eq "  a YAML bool answer is preserved as a string" "false" "$result"
 # The file bootstrap WRITES must be usable as the file it READS — that
 # round-trip is the whole point of "rebuild this machine in one command".
 (
-    PREFS_FILE="$WORK/prefs-roundtrip.yml"
+    MACHINE_FILE="$WORK/machine-roundtrip.yml"
     SELECTED_CAPABILITIES=(alpha zzz-last)
     ANSWER_IDS=(git-email editor); ANSWER_VALUES=(rt@example.com zed)
-    write_prefs >/dev/null 2>&1
+    write_machine >/dev/null 2>&1
 )
 result="$(
-    load_answers_file "$WORK/prefs-roundtrip.yml" >/dev/null 2>&1
+    load_answers_file "$WORK/machine-roundtrip.yml" >/dev/null 2>&1
     printf '%s|%s|%s' "${ANSWER_VALUES[0]}" "${ANSWER_VALUES[1]}" "${SELECTED_CAPABILITIES[*]}"
 )"
-assert_eq "a written prefs file is a valid --answers file" \
+assert_eq "a written machine file is a valid --answers file" \
     "rt@example.com|zed|alpha zzz-last" "$result"
 
 echo

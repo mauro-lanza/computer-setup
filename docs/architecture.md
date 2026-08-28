@@ -19,7 +19,8 @@ templates/        # optional templates resolved by roles
 ```
 
 Merge `priority` is declared in the *manifest*
-(`~/.config/computer-setup/layers.yml`), not in `layer.yml` — one source of
+(the `layers:` block of `~/.config/computer-setup/machine.yml`), not in
+`layer.yml` — one source of
 truth, so a layer cannot disagree with the machine about its own ordering.
 
 The public API is the role variable interface plus this `schema_version`. Bump
@@ -50,7 +51,7 @@ merging, so the consuming role's own default applies.
 ## The capability model
 
 Selecting a tool records its capability `id` in `selected_capabilities` — the
-only selection state in `~/.config/computer-setup/prefs.yml`. The engine merges every layer's
+only selection state in `~/.config/computer-setup/machine.yml`. The engine merges every layer's
 `capabilities.yml` into a registry and derives the whole role interface from it,
 so the engine hardcodes no package names or paths:
 
@@ -67,7 +68,7 @@ so the engine hardcodes no package names or paths:
   against the merged registry. The engine does not re-check it, so a
   `selected_capabilities` list that names a gated id — hand-edited, or carried
   in via `--answers` from an older machine — still installs it. That is
-  tolerable because the prefs file is the machine's own declaration, but it
+  tolerable because machine.yml is the machine's own declaration, but it
   means `requires` constrains what you are *asked*, not what can be *applied*.
 - **config deploys** (`computer_setup_config_deploys`) and **reminders**
   (`computer_setup_reminders`) come from the *active* capabilities. A `config:`
@@ -96,13 +97,13 @@ mechanism exists to prevent.
 
 A layer declares questions in `questions.yml`; they merge union-by-id in
 descending priority exactly like capabilities. The **answer** is machine-local
-and lives under `answers:` in `~/.config/computer-setup/prefs.yml`.
+and lives under `answers:` in `~/.config/computer-setup/machine.yml`.
 
 | Field | Meaning |
 |---|---|
 | `id` | Stable token; keys the stored answer. Never rename. |
 | `type` | `select` \| `bool` \| `text` \| `path` |
-| `default` | Used when unanswered — a fresh machine, or a question added after this machine's prefs were written |
+| `default` | Used when unanswered — a fresh machine, or a question added after this machine's declaration was written |
 | `set_var` | Optional: assign the raw answer to this variable |
 | `validate` | Optional (`text`/`path`): regex the answer must match |
 | `options[].set` | Optional: literal vars applied when that option is chosen |
@@ -112,7 +113,7 @@ and lives under `answers:` in `~/.config/computer-setup/prefs.yml`.
 capability that installs it.
 
 `validate` is checked in two places by two different regex engines — bash ERE at
-the bootstrap prompt, Python `re` on apply, because the prefs file is editable by
+the bootstrap prompt, Python `re` on apply, because machine.yml is editable by
 hand and an `--answers` file can come from anywhere. Patterns must therefore use
 the subset both understand: `[^ @]`, `+`, `*`, `?`, `^`, `$`, `\.` are safe;
 POSIX names like `[[:space:]]` are bash-only and `\s`/`\d`/`\w` are Python-only.
@@ -160,7 +161,7 @@ every rebuild is how a real address ends up in a public commit, and that cannot
 be retracted. But it must stay *proposed*: a layer supplies the `default:`, the
 prompt shows it, and the machine's answer wins. Unreserving the keys outright
 would invert that, because a layer's `vars.yml` is merged by `set_fact` and
-would silently beat the machine's own prefs.
+would silently beat the machine's own declaration.
 Everything that decides *what code runs* stays unreachable from every
 direction: `computer_setup_repo_url`, `computer_setup_repo_branch`, the upgrade
 auto-approval switches and the `ansible_*` controls are not in the tier and must
@@ -192,7 +193,7 @@ that survivable: bootstrap offers the layers' `presets.yml` entries, and
 declining "review every individual answer?" accepts the bundle wholesale.
 
 A preset is a **pure prefill**. It supplies the defaults the prompts start from
-and is never recorded in the prefs file, so a machine set up from a preset is
+and is never recorded in machine.yml, so a machine set up from a preset is
 indistinguishable from one answered by hand. That means presets can be edited
 later without silently reconfiguring machines that once used them — the reason
 not to store a live binding.
@@ -211,19 +212,20 @@ same union-by-id result as the engine's `merge_layer_*.yml`, which walks
 ascending and lets the last write win.
 
 `bootstrap.sh --answers <file>` skips every prompt and takes the whole
-preference set from a file with the same shape `write_prefs` emits — so a
-previous machine's `~/.config/computer-setup/prefs.yml` works directly, and "rebuild this machine"
-is one command. It requires an existing layer manifest, since nothing can guess
+preference set from a file with the same shape `write_machine` emits — so a
+previous machine's `~/.config/computer-setup/machine.yml` works directly, and
+"rebuild this machine" is one command — the file names its own layers, so
+nothing has to guess
 which layers a machine wants.
 
 ## Runtime flow
 
 1. `bootstrap.sh` installs prerequisites and authenticates GitHub over SSH.
-2. The user defines a layer manifest at `~/.config/computer-setup/layers.yml`.
+2. The user defines the layers in `~/.config/computer-setup/machine.yml`.
 3. Layers are cloned to `~/.local/share/computer-setup/layers/<name>/`.
 4. `capabilities.yml` files are merged into the bootstrap menu; selections are
-   written to `~/.config/computer-setup/prefs.yml`.
-5. `ansible-pull` applies the orchestrator with the layer manifest/cache paths.
+   written to the same `machine.yml`.
+5. `ansible-pull` applies the orchestrator with that file and the cache path.
 6. Thereafter the scheduled agents refresh the orchestrator and the layer cache
    before every check, so drift covers layer content too.
 
@@ -284,7 +286,7 @@ plus a library of primitives the real roles call via `tasks_from`.
 
 | Primitive | Purpose |
 |---|---|
-| `tasks/main.yml` | Platform check, prefs loading, layer var merge, capability registry + adoption probe, and the derived interface (packages, config deploys, reminders). |
+| `tasks/main.yml` | Platform check, machine-declaration loading, layer var merge, capability registry + adoption probe, and the derived interface (packages, config deploys, reminders). |
 | `tasks/merge_layer_vars.yml` | Merge one layer's `vars.yml` into play scope: enforces `schema_version`, rejects reserved keys, appends lists, overrides scalars. |
 | `tasks/merge_layer_capabilities.yml` | Merge one layer's `capabilities.yml` into the capability registry. |
 | `tasks/merge_layer_questions.yml` | Merge one layer's `questions.yml` into the question registry, rejecting any `set:` payload that names a reserved key. |
@@ -385,7 +387,7 @@ The split between them is an invariant, not a judgement call:
 > facts, e.g. `_cs_deploy_src`).
 >
 > **Reserved by name** — only names that are *public interface* and therefore
-> cannot be prefixed away: the prefs-file keys (`selected_capabilities`,
+> cannot be prefixed away: the machine-file keys (`layers`, `selected_capabilities`,
 > `answers`), the machine tier (`git_user_name`, `git_user_email`), and the play
 > vars layers legitimately template against (`home_dir`, `homebrew_prefix`,
 > `repositories_base_dir`).

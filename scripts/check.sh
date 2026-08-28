@@ -175,11 +175,11 @@ git init -q "$cs_prefs_tmp/seed"
 )
 sed -e "s|{{ computer_setup_config_dir }}|$cs_prefs_tmp/cfg|g" \
     -e "s|{{ computer_setup_state_repo_dir }}|$cs_prefs_tmp/clone|g" \
-    -e "s|{{ computer_setup_prefs_file }}|$cs_prefs_tmp/cfg/prefs.yml|g" \
+    -e "s|{{ computer_setup_machine_file }}|$cs_prefs_tmp/cfg/machine.yml|g" \
     -e 's/{{[^}]*}}/PLACEHOLDER/g' -e '/{%.*%}/d' \
     roles/drift_correction/templates/computer-setup.j2 > "$cs_prefs_tmp/cs"
 chmod +x "$cs_prefs_tmp/cs"
-cp tests/fixtures/prefs.yml "$cs_prefs_tmp/cfg/prefs.yml"
+cp tests/fixtures/machine.yml "$cs_prefs_tmp/cfg/machine.yml"
 printf -- '---\nrepo: "%s"\nmachine: "alpha"\n' "$cs_prefs_tmp/remote.git" > "$cs_prefs_tmp/cfg/state.yml"
 
 # An unconfigured machine must say so, not traceback.
@@ -203,7 +203,7 @@ cs_prefs_out="$("$cs_prefs_tmp/cs" prefs list)"
 
 # The whole premise: a pulled backup is a valid `--answers` file. If this stops
 # being true, restoring a machine silently produces a DIFFERENT machine.
-diff -q tests/fixtures/prefs.yml "$cs_prefs_tmp/out.yml" >/dev/null || {
+diff -q tests/fixtures/machine.yml "$cs_prefs_tmp/out.yml" >/dev/null || {
     echo "ERROR: pulled backup does not match the pushed prefs" >&2; exit 1; }
 yq -r '.selected_capabilities[]?' "$cs_prefs_tmp/out.yml" >/dev/null || {
     echo "ERROR: pulled backup does not parse as an answers file" >&2; exit 1; }
@@ -288,7 +288,7 @@ expect_layer_failure() {
     local case="$1" expect="$2" out
     out="$(ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook tests/negative.yml \
         -e computer_setup_layer_cache="$PWD/tests/fixtures/negative/$case/layers_cache" \
-        -e computer_setup_layers_manifest="$PWD/tests/fixtures/negative/$case/layers.yml" 2>&1)" && {
+        -e computer_setup_machine_file="$PWD/tests/fixtures/negative/$case/machine.yml" 2>&1)" && {
         echo "ERROR: negative case '$case' was ACCEPTED — the guard is not enforcing" >&2
         return 1
     }

@@ -9,22 +9,25 @@
       Detected: {{ ansible_facts['system'] }} / {{ ansible_facts['architecture'] }}.
     success_msg: "Platform check passed: macOS arm64"
 
-- name: Check if preferences file exists
+- name: Check if the machine declaration exists
   ansible.builtin.stat:
-    path: "{{ computer_setup_prefs_file }}"
-  register: prefs_file
+    path: "{{ computer_setup_machine_file }}"
+  register: machine_file
 
-- name: Load user preferences
-  when: prefs_file.stat.exists
+- name: Load the machine declaration
+  when: machine_file.stat.exists
   block:
-    - name: Read user preferences file
+    # Unnamed, so `answers` and `selected_capabilities` land in play scope.
+    # Redundant when the runner passes `-e @machine.yml`, and NOT redundant when
+    # the playbook is run directly — which is what every test entry point does.
+    - name: Read the machine declaration
       ansible.builtin.include_vars:
-        file: "{{ computer_setup_prefs_file }}"
+        file: "{{ computer_setup_machine_file }}"
   rescue:
-    - name: Warn about malformed preferences file
+    - name: Warn about a malformed machine declaration
       ansible.builtin.debug:
         msg: >-
-          WARNING: ~/.config/computer-setup/prefs.yml is malformed or unreadable.
+          WARNING: {{ computer_setup_machine_file }} is malformed or unreadable.
           Re-run bootstrap.sh to regenerate. Continuing with defaults.
 
 - name: Seed the accumulated layer vars
@@ -67,9 +70,13 @@
     # template against. Everything engine-owned is covered by a prefix above,
     # so adding an engine var never requires editing this list.
     computer_setup_reserved_layer_keys:
-      # Machine-local prefs — belong in computer_setup_prefs_file.
+      # Machine-local declaration — belong in computer_setup_machine_file.
       - selected_capabilities
       - answers
+      # Same file, same reason: this machine's layer list is not layer data.
+      # Reserved explicitly because it has no engine prefix to hide behind, and
+      # `-e @machine.yml` puts it in play scope where a layer could shadow it.
+      - layers
       # Machine tier — proposable by a question, never by a layer var.
       - git_user_name
       - git_user_email
@@ -78,23 +85,27 @@
       - homebrew_prefix
       - repositories_base_dir
 
-- name: Check for a layers manifest
+- name: Check for a machine declaration
   ansible.builtin.stat:
-    path: "{{ computer_setup_layers_manifest }}"
-  register: layers_manifest_stat
+    path: "{{ computer_setup_machine_file }}"
+  register: machine_file_stat
 
 - name: Load and merge content layers
-  when: layers_manifest_stat.stat.exists
+  when: machine_file_stat.stat.exists
   block:
-    - name: Read the layers manifest
+    # Read into a NAMED var, not play scope. The file is also passed as
+    # `-e @machine.yml`, so `answers` and `selected_capabilities` already arrive
+    # as extra-vars; re-reading them here unnamed would shadow that with a lower
+    # precedence copy. Only `.layers` is wanted at this point.
+    - name: Read the machine declaration
       ansible.builtin.include_vars:
-        file: "{{ computer_setup_layers_manifest }}"
-        name: _layers_manifest
+        file: "{{ computer_setup_machine_file }}"
+        name: _machine
 
     - name: Resolve active layers (ascending priority — highest wins last)
       ansible.builtin.set_fact:
         computer_setup_active_layers: >-
-          {{ (_layers_manifest.layers | default([], true))
+          {{ (_machine.layers | default([], true))
              | sort(attribute='priority') }}
 
     # ─── Questions and answers ────────────────────────────────────────────────
@@ -110,7 +121,7 @@
         label: "{{ _layer.name }}"
 
     - name: Resolve the answer to every registered question
-      # An unanswered question falls back to its declared default, so a prefs file
+      # An unanswered question falls back to its declared default, so a machine file
       # written before the question existed still yields a complete answer set. An
       # answer to a question no layer declares any more is dropped rather than
       # carried as a phantom var.
@@ -132,7 +143,7 @@
           Answer '{{ computer_setup_answers[item.key] }}' for question
           '{{ item.key }}' is not one of its options
           ({{ item.value.options | map(attribute='value') | join(', ') }}).
-          Fix `answers.{{ item.key }}` in {{ computer_setup_prefs_file }}, or re-run
+          Fix `answers.{{ item.key }}` in {{ computer_setup_machine_file }}, or re-run
           bootstrap.sh.
         quiet: true
       loop: >-
@@ -142,7 +153,7 @@
         label: "{{ item.key }}"
 
     - name: Assert every answer satisfies its question's validate pattern
-      # Bootstrap enforces this at the prompt, but the prefs file is a plain
+      # Bootstrap enforces this at the prompt, but the machine file is a plain
       # YAML file a human may edit, and an --answers file comes from anywhere.
       # Catch it here rather than render a malformed value into a config file.
       ansible.builtin.assert:
@@ -152,7 +163,7 @@
           Answer '{{ computer_setup_answers[item.key] }}' for question
           '{{ item.key }}' does not match the pattern its layer declares
           ({{ item.value.validate }}).
-          Fix `answers.{{ item.key }}` in {{ computer_setup_prefs_file }}, or
+          Fix `answers.{{ item.key }}` in {{ computer_setup_machine_file }}, or
           re-run bootstrap.sh.
         quiet: true
       loop: >-

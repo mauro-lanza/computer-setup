@@ -1,4 +1,18 @@
 ---
+# A machine declaration: layers + answers + selections in ONE file, the
+# shape bootstrap.sh writes and the engine reads. Formerly two fixtures
+# (layers.yml + prefs.yml), which let a test pair a layer set with answers
+# that no real machine would have had.
+layers:
+  - name: base
+    repo: git@github.com:example/base.git
+    priority: 10
+    private: false
+  - name: override
+    repo: git@github.com:example/override.git
+    priority: 20
+    private: true
+
 # Answers to the layers' questions. `editor` is answered; `unanswered` is not
 # (it must fall back to its declared default); `phantom` refers to a question no
 # layer declares (it must be dropped, not carried into play scope). `git-email`

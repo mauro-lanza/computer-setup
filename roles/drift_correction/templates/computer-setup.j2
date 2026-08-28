@@ -45,9 +45,12 @@ set -uo pipefail
 
 REPO_URL="{{ computer_setup_repo_url }}"
 REPO_BRANCH="{{ computer_setup_repo_branch }}"
-PREFS_FILE="{{ computer_setup_prefs_file }}"
+# THE machine declaration: layers + answers + capability selections in one
+# file. Previously two (prefs.yml and layers.yml), which meant a backup could
+# be half a machine — the capability ids are meaningless without the layer
+# registry that defines them.
+MACHINE_FILE="{{ computer_setup_machine_file }}"
 LAYER_CACHE="{{ computer_setup_layer_cache }}"
-LAYERS_FILE="{{ computer_setup_layers_manifest }}"
 LOG_FILE="{{ computer_setup_log_file }}"
 # Machine-readable run state, written by the computer_setup_state callback
 # plugin (see callback_plugins/). `status` reads it; a UI could too. The plugin
@@ -59,10 +62,10 @@ STATE_FILE="{{ computer_setup_state_dir }}/last-run.json"
 # the JSON: it must survive a run that failed, and merging JSON in bash to
 # preserve one field is how you end up with neither.
 LAST_SUCCESS_FILE="{{ computer_setup_state_dir }}/last-success"
-# Where this machine's prefs.yml is backed up, and under what name. A file of
-# its own rather than a key in layers.yml, because `manage_layers` in
-# bootstrap.sh rewrites that manifest wholesale on every reconfigure — a key
-# added there would vanish the first time someone changed a layer.
+# Where this machine's declaration is backed up, and under what name. A file of
+# its own rather than a key in machine.yml: machine.yml is the thing being
+# backed up, and bootstrap rewrites it, so a machine cannot also be the place
+# that records where its own backups go.
 STATE_CONFIG="{{ computer_setup_config_dir }}/state.yml"
 STATE_REPO_DIR="{{ computer_setup_state_repo_dir }}"
 # Days without a successful scheduled run before `status` calls it stale. A
@@ -82,9 +85,10 @@ REPOS_BASE_DIR="{{ repositories_base_dir | expanduser }}"
 
 # ─── The pull argument set — single source of truth ──────────────────────────
 ARGS=(-U "$REPO_URL" -C "$REPO_BRANCH")
-[[ -f "$PREFS_FILE" ]] && ARGS+=(-e "@${PREFS_FILE}" -e "computer_setup_prefs_file=${PREFS_FILE}")
+# One file, so one -e @ and one path var. `layers` rides along into play scope
+# as an extra-var, which is why core reserves the name against layer vars.
+[[ -f "$MACHINE_FILE" ]] && ARGS+=(-e "@${MACHINE_FILE}" -e "computer_setup_machine_file=${MACHINE_FILE}")
 [[ -n "$LAYER_CACHE" ]] && ARGS+=(-e "computer_setup_layer_cache=${LAYER_CACHE}")
-[[ -f "$LAYERS_FILE" ]] && ARGS+=(-e "computer_setup_layers_manifest=${LAYERS_FILE}")
 
 notify() {
     /usr/bin/osascript -e "display notification \"${2}\" with title \"${1}\"" 2>/dev/null || true
@@ -121,8 +125,8 @@ EOF
 # This includes `apply` — the mode a human runs by hand is the one that most
 # needs current layers.
 sync_layers() {
-    [[ -n "$LAYERS_FILE" && -f "$LAYERS_FILE" && -n "$LAYER_CACHE" ]] || return 0
-    "$LAYER_SYNC" sync --manifest "$LAYERS_FILE" --cache "$LAYER_CACHE" \
+    [[ -n "$MACHINE_FILE" && -f "$MACHINE_FILE" && -n "$LAYER_CACHE" ]] || return 0
+    "$LAYER_SYNC" sync --manifest "$MACHINE_FILE" --cache "$LAYER_CACHE" \
         --schema-version {{ computer_setup_schema_version }}
 }
 
@@ -314,10 +318,11 @@ cmd_status() {
 }
 
 # ─── Machine prefs backup ────────────────────────────────────────────────────
-# prefs.yml is this machine's entire declaration: the answers to every layer
-# question, plus the capability selections. `bootstrap.sh --answers <file>`
-# replays one non-interactively — and check.sh asserts a written prefs.yml is a
-# valid answers file — so a backed-up copy IS a restorable machine.
+# machine.yml is this machine's entire declaration: which layers it uses, the
+# answers to their questions, and the capability selections. `bootstrap.sh
+# --answers <file>` replays one non-interactively, so a backed-up copy IS a
+# restorable machine — including the layers, without which the capability ids
+# in it mean nothing.
 #
 # Kept in a private repo, one file per machine under machines/<name>.yml, so
 # "set the loaner up like my laptop" is a fetch plus the answers path that
@@ -420,15 +425,15 @@ cmd_prefs_init() {
 
 cmd_prefs_push() {
     prefs_load_config || return 1
-    if [[ ! -f "$PREFS_FILE" ]]; then
-        printf '%s\n' "No prefs file at ${PREFS_FILE} — run bootstrap.sh first." >&2
+    if [[ ! -f "$MACHINE_FILE" ]]; then
+        printf '%s\n' "No machine declaration at ${MACHINE_FILE} — run bootstrap.sh first." >&2
         return 1
     fi
     prefs_sync_clone || return 1
 
     local rel="machines/${prefs_machine}.yml"
     mkdir -p "$STATE_REPO_DIR/machines"
-    cp "$PREFS_FILE" "$STATE_REPO_DIR/$rel"
+    cp "$MACHINE_FILE" "$STATE_REPO_DIR/$rel"
 
     if [[ -z "$(git -C "$STATE_REPO_DIR" status --porcelain -- "$rel")" ]]; then
         echo "Already up to date: ${rel}"
@@ -665,8 +670,8 @@ cmd_layers() {
         done
         [[ $has_cache -eq 0 && -n "$LAYER_CACHE" ]] \
             && args=(--cache "$LAYER_CACHE" "${args[@]+"${args[@]}"}")
-        [[ $has_manifest -eq 0 && -f "$LAYERS_FILE" ]] \
-            && args=(--manifest "$LAYERS_FILE" "${args[@]+"${args[@]}"}")
+        [[ $has_manifest -eq 0 && -f "$MACHINE_FILE" ]] \
+            && args=(--manifest "$MACHINE_FILE" "${args[@]+"${args[@]}"}")
     fi
 
     exec "$LAYER_SYNC" "$sub" "${args[@]+"${args[@]}"}"

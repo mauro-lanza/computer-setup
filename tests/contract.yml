@@ -6,8 +6,7 @@
   vars:
     home_dir: "{{ ansible_facts['env']['HOME'] }}"
     computer_setup_layer_cache: "{{ playbook_dir }}/fixtures/layers_cache"
-    computer_setup_layers_manifest: "{{ playbook_dir }}/fixtures/layers.yml"
-    computer_setup_prefs_file: "{{ playbook_dir }}/fixtures/prefs.yml"
+    computer_setup_machine_file: "{{ playbook_dir }}/fixtures/machine.yml"
     computer_setup_schema_version: 1
   pre_tasks:
     - name: Initialize computer-setup orchestration

@@ -109,7 +109,7 @@ alone tells you nothing.
 | What you change | Behaviour |
 |---|---|
 | Extra files in `~/.zsh/` | Left on disk. Cleanup only removes paths recorded in `~/.zsh/.computer-setup-snippets` from a previous run. |
-| `~/.config/computer-setup/prefs.yml` edited by hand | Read as-is. Malformed YAML falls back to defaults with a warning. |
+| `~/.config/computer-setup/machine.yml` edited by hand | Read as-is. Malformed YAML falls back to defaults with a warning. |
 | Local changes in a listed repo | Never touched. Cloning uses `update: false` and only clones repos that are entirely absent. |
 
 ## Non-destructive guarantees
@@ -174,7 +174,7 @@ and completion lines in `.zshrc`). To bring one under management:
 
 1. Add it as a capability in a layer's `capabilities.yml`, then add that
    capability's `id` to `selected_capabilities` in
-   `~/.config/computer-setup/prefs.yml`. Selection is by capability id, not by
+   `~/.config/computer-setup/machine.yml`. Selection is by capability id, not by
    package name.
 2. Apply, so Homebrew installs the managed copy.
 3. Remove the manual install dir and its `.zshrc` lines.
@@ -188,14 +188,15 @@ under management, remove the manual copy so the brew version wins.
 
 ## Backing up and restoring a machine
 
-`prefs.yml` is this machine's entire declaration — every answer, every
-capability selection. `bootstrap.sh --answers <file>` replays one
-non-interactively, and `check.sh` asserts a written `prefs.yml` is a valid
+`machine.yml` is this machine's entire declaration — its layers, every answer,
+every capability selection. One file because it is one decision: the capability
+ids mean nothing without the layers that define them. `bootstrap.sh --answers <file>` replays one
+non-interactively, and `check.sh` asserts a written `machine.yml` is a valid
 answers file, so **a backup is a restorable machine**.
 
 ```bash
 computer-setup prefs init     # choose the private repo and name this machine
-computer-setup prefs push     # back up the current prefs.yml
+computer-setup prefs push     # back up the current machine.yml
 computer-setup prefs list     # machines backed up in the repo
 computer-setup prefs pull work-macbook
 ```
@@ -205,10 +206,10 @@ separate declarations instead of fighting over one. The machine name is prompted
 at `init` — the hostname is a serial number on a corporate Mac, which is exactly
 why it is not silently used as the default.
 
-`pull` writes a **file**; it never touches the live `prefs.yml`. Review it, then:
+`pull` writes a **file**; it never touches the live `machine.yml`. Review it, then:
 
 ```bash
-bootstrap.sh --answers ./work-macbook-prefs.yml
+bootstrap.sh --answers ./work-macbook-machine.yml
 ```
 
 so a restore from the wrong machine is a deleted file rather than a reconfigured

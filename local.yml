@@ -23,8 +23,11 @@
     # paths cannot drift apart. Overridable with -e for testing.
     computer_setup_config_dir: "{{ home_dir }}/.config/computer-setup"
     # Written by bootstrap.sh. Absent = run standalone on empty defaults.
-    computer_setup_layers_manifest: "{{ computer_setup_config_dir }}/layers.yml"
-    computer_setup_prefs_file: "{{ computer_setup_config_dir }}/prefs.yml"
+    # THE machine declaration: which layers this machine uses, the answers to
+    # their questions, and the capability selections. One file because it is one
+    # decision — a restored machine needs all three or none, and two files meant
+    # a backup could be half a machine.
+    computer_setup_machine_file: "{{ computer_setup_config_dir }}/machine.yml"
     # Cache lives outside this checkout so the drift re-clone cannot wipe it.
     # Each layer is <cache>/<name>/ with layer.yml + vars.yml + capabilities.yml
     # + files/.

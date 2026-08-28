@@ -54,13 +54,13 @@ explicit message rather than silently accepting every default.
 0. **Prerequisites + GitHub auth** — platform check → Xcode CLT → Homebrew →
    `yq`/`git`/`gh`/`ansible` → `gh auth login`. Auth completes before any layer
    is cloned, and readiness is confirmed with a real `git ls-remote` over SSH.
-1. **Layer selection & fetch** — define your layer manifest (persisted to
-   `~/.config/computer-setup/layers.yml`), then clone each layer into
+1. **Layer selection & fetch** — define your layers (persisted to
+   `~/.config/computer-setup/machine.yml`), then clone each layer into
    `~/.local/share/computer-setup/layers/<name>/`, validating `schema_version`.
 2. **Build preferences** — offer the layers' presets as a starting point, then
    merge every layer's `questions.yml` into one set of decisions and every
    `capabilities.yml` into one menu, prompt for both, and write
-   `~/.config/computer-setup/prefs.yml`. Git identity is one of those decisions, so a private
+   the same `machine.yml`. Git identity is one of those decisions, so a private
    layer can pre-fill it rather than have it retyped.
 3. **Run Ansible** — `ansible-pull` this orchestrator with the merged input.
 
@@ -80,8 +80,8 @@ your-layer/
 ```
 
 Add it during `bootstrap.sh` Phase 1, or edit
-`~/.config/computer-setup/layers.yml` directly (see
-[layers.example.yml](layers.example.yml)), which is also where merge `priority`
+the `layers:` block of `~/.config/computer-setup/machine.yml` directly (see
+[machine.example.yml](machine.example.yml)), which is also where merge `priority`
 is declared.
 
 The **variable interface** plus `schema_version` is the public API. Merge rules,
@@ -91,7 +91,7 @@ the capability model, and reserved keys are all specified in
 ## The `computer-setup` command
 
 One command in `~/.local/bin` operates the whole system. It owns the
-`ansible-pull` invocation — repo, branch, prefs, layer cache, layer manifest —
+`ansible-pull` invocation — repo, branch, machine declaration, layer cache —
 so the scheduled agents and everything you type by hand can never drift apart.
 
 - `computer-setup apply` — reconcile the machine now. Streams to your terminal.
@@ -107,11 +107,11 @@ so the scheduled agents and everything you type by hand can never drift apart.
   repo is unreachable — a closed laptop is not a fault — so this is what makes a
   machine that quietly stopped syncing distinguishable from a healthy one.
 - `computer-setup prefs <init|push|list|pull>` — back up this machine's
-  `prefs.yml` to a **private** repo, one file per machine, and restore another
-  machine's. `prefs.yml` is the machine's whole declaration (answers +
-  selections), and `bootstrap.sh --answers` replays one non-interactively, so a
-  backup *is* a restorable machine. `pull` writes a file for you to review and
-  pass to `--answers`; it never overwrites the live prefs.
+  `machine.yml` to a **private** repo, one file per machine, and restore
+  another machine's. `machine.yml` is the whole declaration — layers, answers
+  and selections — and `bootstrap.sh --answers` replays one non-interactively,
+  so a backup *is* a restorable machine. `pull` writes a file for you to review and
+  pass to `--answers`; it never overwrites the live `machine.yml`.
 - `computer-setup repos` — scaffold a `repositories.yml` from this machine's
   checkouts. To clone the ones that are *missing*, run
   `computer-setup apply --tags repositories`.

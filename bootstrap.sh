@@ -20,8 +20,13 @@ set -euo pipefail
 # Every piece of machine-local state lives under one directory, so "back up this
 # machine's answers" is a single `cp -r` and nothing is stranded in $HOME.
 CONFIG_DIR="$HOME/.config/computer-setup"
-PREFS_FILE="$CONFIG_DIR/prefs.yml"
-LAYERS_FILE="$CONFIG_DIR/layers.yml"
+# THE machine declaration: layers + answers + capability selections. One file
+# because it is one decision — capability ids are meaningless without the layer
+# registry that defines them, so a backup of half of it restores nothing.
+MACHINE_FILE="$CONFIG_DIR/machine.yml"
+# 0 until Phase 2 has gathered answers. Guards machine_write against emitting
+# empty answers over a reconfigured machine's existing ones.
+MACHINE_ANSWERS_LOADED=0
 LAYER_CACHE="$HOME/.local/share/computer-setup/layers"
 
 # Apple silicon prefix. Asserted in main() and in the playbook, so this is a
@@ -244,13 +249,13 @@ ensure_gh_auth() {
 # Does the manifest exist and declare at least one layer? Asked at three points
 # in the layer-management flow; an empty `layers:` list is not a manifest.
 manifest_has_layers() {
-    [[ -f "$LAYERS_FILE" ]] || return 1
-    [[ "$(yq -r '.layers | length' "$LAYERS_FILE" 2>/dev/null || echo 0)" -gt 0 ]]
+    [[ -f "$MACHINE_FILE" ]] || return 1
+    [[ "$(yq -r '.layers | length' "$MACHINE_FILE" 2>/dev/null || echo 0)" -gt 0 ]]
 }
 
 show_layers() {
     if manifest_has_layers; then
-        yq -r '.layers | sort_by(.priority) | .[] | "    • \(.name) (priority \(.priority)) → \(.repo)"' "$LAYERS_FILE"
+        yq -r '.layers | sort_by(.priority) | .[] | "    • \(.name) (priority \(.priority)) → \(.repo)"' "$MACHINE_FILE"
     else
         echo "    (none)"
     fi
@@ -262,10 +267,10 @@ manage_layers() {
     # is used as-is; a missing one is fatal rather than a silently empty setup.
     if [[ -n "$ANSWERS_FILE" ]]; then
         if manifest_has_layers; then
-            ok "Using existing layer manifest (${LAYERS_FILE})"
+            ok "Using existing layer manifest (${MACHINE_FILE})"
             return
         fi
-        error "--answers needs an existing layer manifest at ${LAYERS_FILE}."
+        error "--answers needs an existing layer manifest at ${MACHINE_FILE}."
         error "Run bootstrap.sh once interactively to configure layers."
         exit 1
     fi
@@ -285,10 +290,10 @@ manage_layers() {
         fi
     fi
 
+    # Entries only — machine_write supplies the `layers:` key and the rest of
+    # the file around them.
     local tmp; tmp="$(mktemp)"
-    echo "---" > "$tmp"
-    echo "# Content-layer manifest for computer-setup. Managed by bootstrap.sh." >> "$tmp"
-    echo "layers:" >> "$tmp"
+    : > "$tmp"
 
     local added=0 name repo prio
     while true; do
@@ -319,15 +324,19 @@ manage_layers() {
         added=$((added + 1))
     done
 
+    # This runs in Phase 1, BEFORE answers are gathered, and writes the same
+    # file Phase 2 writes. Emitting from memory here would blank the answers of
+    # a machine being reconfigured, so the other sections are carried across
+    # from the file itself.
     if [[ $added -gt 0 ]]; then
-        mv "$tmp" "$LAYERS_FILE"
-        chmod 600 "$LAYERS_FILE"
-        ok "Wrote layer manifest ($added layer(s)) to ${LAYERS_FILE}"
+        machine_write "$tmp"
+        ok "Wrote layer manifest ($added layer(s)) to ${MACHINE_FILE}"
     else
-        rm -f "$tmp"
-        printf -- "---\nlayers: []\n" > "$LAYERS_FILE"
+        : > "$tmp"
+        machine_write "$tmp"
         warn "No layers defined — orchestrator will run on safe empty defaults."
     fi
+    rm -f "$tmp"
     echo
     info "Active layers:"
     show_layers
@@ -335,7 +344,7 @@ manage_layers() {
 
 # Clone/update each layer into the stable layer cache.
 clone_layers() {
-    [[ ! -f "$LAYERS_FILE" ]] && return
+    [[ ! -f "$MACHINE_FILE" ]] && return
     if [[ ! -x "$LAYER_SYNC_SCRIPT" ]]; then
         local repo_raw="$RAW_BASE"
         LAYER_SYNC_SCRIPT="$(mktemp)"
@@ -345,7 +354,7 @@ clone_layers() {
     fi
 
     "$LAYER_SYNC_SCRIPT" sync \
-        --manifest "$LAYERS_FILE" \
+        --manifest "$MACHINE_FILE" \
         --cache "$LAYER_CACHE" \
         --schema-version "$SCHEMA_VERSION_MAX"
     ok "All layers fetched to ${LAYER_CACHE}"
@@ -371,9 +380,9 @@ merge_layer_file() {
     local filename="$1" projection="$2" outfile="$3"
     local seen=" " order name src line id
 
-    [[ -f "$LAYERS_FILE" ]] || return 0
+    [[ -f "$MACHINE_FILE" ]] || return 0
 
-    order="$(yq -r '.layers | sort_by(.priority) | reverse | .[].name' "$LAYERS_FILE" 2>/dev/null || true)"
+    order="$(yq -r '.layers | sort_by(.priority) | reverse | .[].name' "$MACHINE_FILE" 2>/dev/null || true)"
     for name in $order; do
         src="$LAYER_CACHE/$name/$filename"
         [[ -f "$src" ]] || continue
@@ -443,7 +452,7 @@ order_capabilities_by_requires() {
 load_capabilities() {
     MERGED_CAPABILITIES_FILE="$(mktemp)"
 
-    if [[ ! -f "$LAYERS_FILE" ]]; then
+    if [[ ! -f "$MACHINE_FILE" ]]; then
         warn "No layer manifest — no capabilities offered."
         return 0
     fi
@@ -582,7 +591,7 @@ choose_preset() {
 
 # ─── Non-interactive answers (zero-touch rebuild) ────────────────────────────
 # `--answers <file>` skips every prompt and takes the whole preference set from a
-# file with the same shape write_prefs emits, so a previous machine's prefs.yml
+# file with the same shape write_machine emits, so a previous machine's prefs.yml
 # works directly. Nothing in it is required: unknown answers are dropped and
 # unanswered questions fall back to their layer default, so a partial file is
 # valid and an empty one means "take every layer default".
@@ -668,14 +677,14 @@ is_prior_selected() {
 }
 
 load_prior_prefs() {
-    [[ ! -f "$PREFS_FILE" ]] && return
+    [[ ! -f "$MACHINE_FILE" ]] && return
     HAS_PRIOR_PREFS=true
 
     # Selections are just capability ids now — remember them directly.
     local cap
     while IFS= read -r cap; do
         [[ -n "$cap" ]] && PRIOR_SELECTED_IDS="${PRIOR_SELECTED_IDS}${cap} "
-    done < <(yq -r '.selected_capabilities[]?' "$PREFS_FILE" 2>/dev/null || true)
+    done < <(yq -r '.selected_capabilities[]?' "$MACHINE_FILE" 2>/dev/null || true)
 }
 
 # Prior answer for one question id, empty when unanswered. Read on demand rather
@@ -685,9 +694,9 @@ load_prior_prefs() {
 # is mikefarah/yq, which has no jq-style `--arg`, and interpolating an id
 # straight into the expression would break on any quoting in it.
 prior_answer() {
-    [[ -f "$PREFS_FILE" ]] || return 0
+    [[ -f "$MACHINE_FILE" ]] || return 0
     CS_ANSWER_KEY="$1" yq -r '.answers[strenv(CS_ANSWER_KEY)] // ""' \
-        "$PREFS_FILE" 2>/dev/null || true
+        "$MACHINE_FILE" 2>/dev/null || true
 }
 
 
@@ -722,7 +731,7 @@ cap_is_present() {
 # derived by the engine from the merged capability registry at apply time.
 gather_optional_tools() {
     echo
-    # Always defined, including on the early return below, so write_prefs never
+    # Always defined, including on the early return below, so write_machine never
     # has to reason about an unset array (bash 3.2 + `set -u` is unforgiving).
     SELECTED_CAPABILITIES=()
 
@@ -789,7 +798,7 @@ gather_optional_tools() {
     done 3< "$MERGED_CAPABILITIES_FILE"
 
     # A `while` returns its body's last status, which under `set -e` would abort
-    # main() after the last prompt but before write_prefs.
+    # main() after the last prompt but before write_machine.
     return 0
 }
 
@@ -848,7 +857,7 @@ gather_answers() {
     done 3< "$MERGED_QUESTIONS_FILE"
 
     # A `while` returns its body's last status, which under `set -e` would abort
-    # main() after the last prompt but before write_prefs.
+    # main() after the last prompt but before write_machine.
     return 0
 }
 
@@ -941,35 +950,80 @@ yaml_list() {
     fi
 }
 
-write_prefs() {
-    info "Writing preferences to ${PREFS_FILE}"
-    # Not guaranteed to exist: --answers with a pre-existing manifest skips
-    # manage_layers, which is the only other thing that creates this directory.
-    mkdir -p "$(dirname "$PREFS_FILE")"
+# The ONE writer of machine.yml. Both phases go through it: Phase 1 has layers
+# but no answers yet, Phase 2 has answers but must not lose the layers. Whichever
+# section the caller is not supplying is carried across from the file itself, so
+# neither phase can blank the other's work.
+#
+# $1 — optional file of `layers:` ENTRIES (as written by manage_layers). Omit it
+#      to keep the layers already on disk.
+machine_write() {
+    local layers_src="${1:-}"
+    mkdir -p "$(dirname "$MACHINE_FILE")"
+    local tmp; tmp="$(mktemp)"
     {
         echo "---"
-        echo "# Generated by bootstrap.sh — $(date +%Y-%m-%d)"
+        echo "# This machine's declaration. Generated by bootstrap.sh — $(date +%Y-%m-%d)"
         echo "# Re-run bootstrap.sh to update; prior answers are remembered."
+        echo
+        echo "# Content layers, in merge-priority order (higher wins on conflicts)."
+        echo "layers:"
+        if [[ -n "$layers_src" ]]; then
+            [[ -s "$layers_src" ]] && cat "$layers_src"
+        else
+            machine_existing_layers
+        fi
         echo
         echo "# Answers to the layers' questions. The engine turns each into play-scope"
         echo "# vars via the question's set_var / the chosen option's set payload."
-        echo "answers:"
-        if [[ ${#ANSWER_IDS[@]} -eq 0 ]]; then
-            echo "  {}"
+        if [[ "$MACHINE_ANSWERS_LOADED" -eq 1 ]]; then
+            echo "answers:"
+            if [[ ${#ANSWER_IDS[@]} -eq 0 ]]; then
+                echo "  {}"
+            else
+                local _i
+                for _i in $(seq 0 $((${#ANSWER_IDS[@]} - 1))); do
+                    echo "  ${ANSWER_IDS[$_i]}: $(yaml_quote "${ANSWER_VALUES[$_i]}")"
+                done
+            fi
+            echo
+            echo "# Selection tokens. Packages, config, and gating are derived from the"
+            echo "# merged capability registry (the layers' capabilities) at apply time."
+            yaml_list selected_capabilities "${SELECTED_CAPABILITIES[@]+"${SELECTED_CAPABILITIES[@]}"}"
         else
-            local _i
-            for _i in $(seq 0 $((${#ANSWER_IDS[@]} - 1))); do
-                echo "  ${ANSWER_IDS[$_i]}: $(yaml_quote "${ANSWER_VALUES[$_i]}")"
-            done
+            machine_existing_answers
         fi
-        echo
-        echo "# Selection tokens. Packages, config, and gating are derived from the"
-        echo "# merged capability registry (the layers' capabilities) at apply time."
-        yaml_list selected_capabilities "${SELECTED_CAPABILITIES[@]+"${SELECTED_CAPABILITIES[@]}"}"
-    } > "$PREFS_FILE"
+    } > "$tmp"
 
-    chmod 600 "$PREFS_FILE"
-    ok "Preferences saved"
+    mv "$tmp" "$MACHINE_FILE"
+    chmod 600 "$MACHINE_FILE"
+}
+
+# The `layers:` entries already on disk, re-indented under the key the caller
+# just printed. Empty output is valid — it yields `layers:` with nothing under
+# it, which YAML reads as null and the engine defaults to [].
+machine_existing_layers() {
+    [[ -f "$MACHINE_FILE" ]] || return 0
+    yq -r '.layers // [] | .[] | "  - name: \"" + .name + "\"\n    repo: \"" + .repo + "\"\n    priority: " + (.priority | tostring)' \
+        "$MACHINE_FILE" 2>/dev/null || true
+}
+
+# The answers/selections already on disk, for the Phase 1 write that happens
+# before they have been gathered.
+machine_existing_answers() {
+    if [[ -f "$MACHINE_FILE" ]]; then
+        yq -r '{"answers": (.answers // {}), "selected_capabilities": (.selected_capabilities // [])}' \
+            "$MACHINE_FILE" 2>/dev/null && return 0
+    fi
+    echo "answers: {}"
+    echo "selected_capabilities: []"
+}
+
+write_machine() {
+    info "Writing machine declaration to ${MACHINE_FILE}"
+    MACHINE_ANSWERS_LOADED=1
+    machine_write
+    ok "Machine declaration saved"
 }
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -982,10 +1036,9 @@ run_playbook() {
     echo
 
     local extra_args=(
-        -e "@${PREFS_FILE}"
+        -e "@${MACHINE_FILE}"
         -e "computer_setup_layer_cache=${LAYER_CACHE}"
-        -e "computer_setup_layers_manifest=${LAYERS_FILE}"
-        -e "computer_setup_prefs_file=${PREFS_FILE}"
+        -e "computer_setup_machine_file=${MACHINE_FILE}"
         -e "computer_setup_repo_branch=${REPO_BRANCH}"
     )
 
@@ -1099,14 +1152,14 @@ main() {
         load_answers_file "$ANSWERS_FILE"
     else
         if $HAS_PRIOR_PREFS; then
-            ok "Found existing prefs at ${PREFS_FILE} — using prior answers as defaults"
+            ok "Found existing prefs at ${MACHINE_FILE} — using prior answers as defaults"
             echo
         fi
         choose_preset
         gather_answers
         gather_optional_tools
     fi
-    write_prefs
+    write_machine
 
     # ── Phase 3 ──────────────────────────────────────────────────────────────
     run_playbook
