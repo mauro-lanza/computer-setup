@@ -518,10 +518,10 @@ Anything loose is there because the tool gives no choice:
 |---|---|
 | `~/.zshrc` | zsh reads only this, unless `ZDOTDIR` is set in `~/.zshenv` — a bigger change than it looks |
 | `~/.gitconfig` | git prefers it over the XDG path, and it is user-authored: the engine only **appends an include** |
-| `~/.gitignore_global` | loose today; `~/.config/git/ignore` is git's own XDG location and would be the natural next move |
 | `~/.zsh/*.zsh` | snippets, auto-sourced by glob, garbage-collected via the manifest |
 | `~/.zsh/configs/*` | whole-file configs, sourced by name, **not** garbage-collected |
 | `~/.config/<tool>/` | anything that honours XDG: `git`, `zed`, `opencode`, `computer-setup` |
+| `~/.config/git/ignore` | git's own XDG path for the global ignore list — `core.excludesFile` is still set explicitly, because git only falls back to this path when that key is **unset** |
 | `~/.local/bin/` | the runner and its helpers |
 | `~/.ansible/pull/computer-setup/` | `ansible-pull`'s checkout of this repo — ansible's own directory, but the name is **pinned** (see below) |
 | `~/.dbt/`, `~/.docker/` | the tool insists |

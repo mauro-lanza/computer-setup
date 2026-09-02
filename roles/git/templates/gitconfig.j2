@@ -30,7 +30,7 @@
 	editor = {{ _editor }}
 {% endif %}
 {% if _has_excludes %}
-	excludesFile = {{ home_dir }}/.gitignore_global
+	excludesFile = {{ git_global_gitignore_path }}
 {% endif %}
 {% endif %}
 {% for section, entries in git_config_sections.items() %}

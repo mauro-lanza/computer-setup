@@ -1,4 +1,16 @@
 ---
+# ─── Managed git config (included, not imposed) ──────────────────────────────
+# This role owns git_managed_config_path completely and touches ~/.gitconfig
+# only to add one `include.path`. Never replace ~/.gitconfig wholesale: it
+# carries the user's signing key, credential helper and includeIf rules.
+#
+# First, because both the managed config and the global ignore file live here.
+- name: Ensure the managed git config directory exists
+  ansible.builtin.file:
+    path: "{{ git_managed_config_dir }}"
+    state: directory
+    mode: "0755"
+
 - name: Deploy global .gitignore file
   ansible.builtin.copy:
     content: |
@@ -6,11 +18,11 @@
       {% for entry in git_global_gitignore_entries %}
       {{ entry }}
       {% endfor %}
-    dest: "{{ home_dir }}/.gitignore_global"
+    dest: "{{ git_global_gitignore_path }}"
     mode: "0644"
     # The entries default to [], so without the `when` below this truncates a
-    # restored ~/.gitignore_global to one comment line — and gitconfig.j2 then
-    # points core.excludesFile at the file just emptied.
+    # restored ignore file to one comment line — and gitconfig.j2 then points
+    # core.excludesFile at the file just emptied.
     backup: true
   when: git_global_gitignore_entries | default([], true) | length > 0
 
@@ -21,19 +33,8 @@
   ansible.builtin.debug:
     msg: >-
       No `git_global_gitignore_entries` declared by any active layer —
-      leaving {{ home_dir }}/.gitignore_global untouched.
+      leaving {{ git_global_gitignore_path }} untouched.
   when: git_global_gitignore_entries | default([], true) | length == 0
-
-# ─── Managed git config (included, not imposed) ──────────────────────────────
-# This role owns git_managed_config_path completely and touches ~/.gitconfig
-# only to add one `include.path`. Never replace ~/.gitconfig wholesale: it
-# carries the user's signing key, credential helper and includeIf rules.
-
-- name: Ensure the managed git config directory exists
-  ansible.builtin.file:
-    path: "{{ git_managed_config_dir }}"
-    state: directory
-    mode: "0755"
 
 - name: Deploy the managed git config
   ansible.builtin.template:

@@ -16,7 +16,7 @@ git_default_branch: ""
 # recursively across layers). The gitconfig.j2 template renders it generically.
 git_config_sections: {}
 
-# Entries written to ~/.gitignore_global (list — appends across layers).
+# Entries written to the global gitignore (list — appends across layers).
 git_global_gitignore_entries: []
 
 # ─── Where the managed config lives ──────────────────────────────────────────
@@ -25,6 +25,11 @@ git_global_gitignore_entries: []
 # docs/operations.md.
 git_managed_config_dir: "{{ home_dir }}/.config/git"
 git_managed_config_path: "{{ git_managed_config_dir }}/computer-setup.gitconfig"
+# git's own XDG location for the global ignore file. `core.excludesFile` is
+# still written explicitly rather than relying on git reading this path by
+# default, because git only falls back to it when core.excludesFile is UNSET —
+# and this role must not claim a file it did not populate.
+git_global_gitignore_path: "{{ git_managed_config_dir }}/ignore"
 
 # Per-directory identities, rendered as `includeIf` blocks — how a work layer
 # supplies a work address without touching the machine-wide identity.

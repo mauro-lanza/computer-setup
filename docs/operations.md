@@ -88,7 +88,7 @@ alone tells you nothing.
 | `~/.zshrc` | Replaced from the layer-provided `zshrc` (timestamped backup kept). Edit it in the layer. |
 | `~/.zsh/*.zsh` managed snippets | Regenerated from the layers' `files/shell/*.zsh`. |
 | `~/.config/git/computer-setup.gitconfig` | Re-rendered whole. Anything not declared in a layer is dropped. `~/.gitconfig` itself is only appended to. |
-| `~/.gitignore_global` | Replaced entirely from `git_global_gitignore_entries`. |
+| `~/.config/git/ignore` | Replaced entirely from `git_global_gitignore_entries`. `core.excludesFile` is pointed at it explicitly. |
 | `~/.zsh/configs/p10k.zsh` | Replaced from the layer-provided `p10k.zsh`. Sourced by name via `POWERLEVEL9K_CONFIG_FILE`, not by the snippet glob, and never garbage-collected. |
 | macOS defaults | `osx_defaults` enforces the layer-declared value; System Settings changes are reverted. |
 | NVM default alias | Mismatch is detected and `nvm alias default <declared>` re-run. |
