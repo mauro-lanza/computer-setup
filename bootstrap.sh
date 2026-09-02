@@ -28,6 +28,12 @@ MACHINE_FILE="$CONFIG_DIR/machine.yml"
 # empty answers over a reconfigured machine's existing ones.
 MACHINE_ANSWERS_LOADED=0
 LAYER_CACHE="$HOME/.local/share/computer-setup/layers"
+# Must match `computer_setup_pull_dir` in local.yml. Pinned rather than left to
+# ansible-pull's `~/.ansible/pull/<hostname>` default: a Mac's hostname changes
+# with the network (mDNS appends `.home`), so the default silently starts a
+# second checkout per network. Getting this wrong is not fatal — it just means
+# bootstrap clones to one directory and every later run re-clones to another.
+PULL_DIR="$HOME/.ansible/pull/computer-setup"
 
 # Apple silicon prefix. Asserted in main() and in the playbook, so this is a
 # constant rather than a `brew --prefix` call that must run before Homebrew is
@@ -1148,6 +1154,7 @@ run_playbook() {
         ansible-pull \
             -U "$REPO_URL" \
             -C "$REPO_BRANCH" \
+            -d "$PULL_DIR" \
             "${extra_args[@]}" \
             --check --diff \
             local.yml || warn "Dry-run completed with warnings (some tasks can't be previewed)"
@@ -1164,6 +1171,7 @@ run_playbook() {
     ansible-pull \
         -U "$REPO_URL" \
         -C "$REPO_BRANCH" \
+        -d "$PULL_DIR" \
         "${extra_args[@]}" \
         local.yml
 

@@ -38,6 +38,15 @@
     # but emphatically NOT a layer — `computer-setup-layers sync` force-syncs
     # layers with a hard reset, which would destroy exactly those commits.
     computer_setup_backup_repo_dir: "{{ home_dir }}/.local/share/computer-setup/backups"
+    # Where ansible-pull keeps its checkout of THIS repo. Pinned, because the
+    # default is `~/.ansible/pull/<hostname>` and a Mac's hostname is not
+    # stable — joining a network that appends an mDNS suffix silently starts a
+    # SECOND checkout, which then sits stale until that network comes back.
+    # The hostname is in the default so hosts sharing an NFS home don't collide;
+    # a per-user macOS home has no such sharing, so the segment buys nothing and
+    # costs a duplicate clone per network. Stays under `~/.ansible/` — the tool
+    # already looks there, per "What this system puts in $HOME".
+    computer_setup_pull_dir: "{{ home_dir }}/.ansible/pull/computer-setup"
     # Where this system installs the executables it owns (the runner, the layer
     # sync helper, macos-capture, and any capability shipping a script). One
     # play var because three roles create and write into it; two independent

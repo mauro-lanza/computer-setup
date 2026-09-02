@@ -404,6 +404,28 @@ if [[ "$sv_bootstrap" != "$sv_playbook" || "$sv_bootstrap" != "$sv_sync" ]]; the
 fi
 echo "  ok  all three agree on schema_version $sv_bootstrap"
 
+# bootstrap.sh clones the orchestrator before the playbook has ever run, so it
+# cannot read the play var. If the two spellings drift, bootstrap clones into one
+# directory and every subsequent run re-clones into another — which looks like a
+# slow first run, not like a bug, so nothing would ever report it.
+echo "==> Pull directory agreement"
+# shellcheck disable=SC2016  # $HOME is matched literally in the source line, not expanded
+pull_bootstrap="$(sed -n 's|^PULL_DIR="\$HOME/\(.*\)"$|\1|p' bootstrap.sh)"
+pull_playbook="$(yq -r '.[0].vars.computer_setup_pull_dir' local.yml \
+    | sed 's|^{{ home_dir }}/||')"
+if [[ -z "$pull_bootstrap" || -z "$pull_playbook" ]]; then
+    echo "ERROR: could not read the pull directory from both sources" >&2
+    echo "       bootstrap.sh='$pull_bootstrap' local.yml='$pull_playbook'" >&2
+    exit 1
+fi
+if [[ "$pull_bootstrap" != "$pull_playbook" ]]; then
+    echo "ERROR: pull directory disagreement" >&2
+    echo "       bootstrap.sh PULL_DIR                 = \$HOME/$pull_bootstrap" >&2
+    echo "       local.yml computer_setup_pull_dir     = {{ home_dir }}/$pull_playbook" >&2
+    exit 1
+fi
+echo "  ok  bootstrap.sh and local.yml agree on ~/$pull_bootstrap"
+
 # A gate, not an advisory: .ansible-lint waives the two rules that contradict
 # this architecture, so any finding is real. Missing ansible-lint is a FAILURE —
 # a fresh machine is where the tool is absent and where "passed" must mean it.

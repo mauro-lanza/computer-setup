@@ -523,6 +523,7 @@ Anything loose is there because the tool gives no choice:
 | `~/.zsh/configs/*` | whole-file configs, sourced by name, **not** garbage-collected |
 | `~/.config/<tool>/` | anything that honours XDG: `git`, `zed`, `opencode`, `computer-setup` |
 | `~/.local/bin/` | the runner and its helpers |
+| `~/.ansible/pull/computer-setup/` | `ansible-pull`'s checkout of this repo — ansible's own directory, but the name is **pinned** (see below) |
 | `~/.dbt/`, `~/.docker/` | the tool insists |
 
 The distinction inside `~/.zsh` is the one that catches people. A snippet is
@@ -541,3 +542,13 @@ Two rules follow, and both have already been learned the hard way:
   garbage-collected, so the previous path stays on every machine that already
   had it — usually shadowing nothing, occasionally shadowing everything. Remove
   it deliberately, in the same change.
+- **The pull checkout is pinned, and must never be edited.** `ansible-pull`
+  defaults to `~/.ansible/pull/<hostname>`, and a Mac's hostname is not stable —
+  joining a network that appends an mDNS `.home` suffix starts a second checkout
+  which then sits stale until that network comes back. The hostname is in the
+  default so hosts sharing an NFS home don't collide; a per-user macOS home has
+  no such sharing. Both callers pass `-d` (`computer_setup_pull_dir` in
+  `local.yml`, `PULL_DIR` in `bootstrap.sh`) and `check.sh` asserts they agree.
+  Editing the checkout is separately fatal: `ansible-pull` clones with
+  `force=no`, so a dirty checkout makes it **refuse to update**, and the
+  scheduled agents then run stale code without complaining.

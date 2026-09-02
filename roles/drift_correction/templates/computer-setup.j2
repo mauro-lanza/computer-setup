@@ -73,6 +73,10 @@ BACKUP_REPO_DIR="{{ computer_setup_backup_repo_dir }}"
 # machine that quietly stopped syncing is the failure this makes visible.
 STALE_AFTER_DAYS={{ drift_correction_stale_after_days }}
 ANSIBLE_PULL="{{ homebrew_prefix }}/bin/ansible-pull"
+# ansible-pull's checkout of the orchestrator. Never edit it by hand: a dirty
+# checkout makes ansible-pull refuse to update (it clones with force=no), and
+# the scheduled agents then run stale code with no visible complaint.
+PULL_DIR="{{ computer_setup_pull_dir }}"
 BIN_DIR="{{ computer_setup_bin_dir }}"
 LAYER_SYNC="${BIN_DIR}/computer-setup-layers"
 MACHINE_SYNC="${BIN_DIR}/computer-setup-machine"
@@ -86,7 +90,11 @@ CONNECTIVITY_TIMEOUT={{ drift_correction_connectivity_timeout }}
 REPOS_BASE_DIR="{{ repositories_base_dir | expanduser }}"
 
 # ─── The pull argument set — single source of truth ──────────────────────────
-ARGS=(-U "$REPO_URL" -C "$REPO_BRANCH")
+# `-d` pins the checkout. Without it ansible-pull derives the directory from the
+# hostname, which on a Mac changes with the network (an mDNS `.home` suffix), so
+# each network would get its own clone and each would be stale until that
+# network came back.
+ARGS=(-U "$REPO_URL" -C "$REPO_BRANCH" -d "$PULL_DIR")
 # One file, so one -e @ and one path var. `layers` rides along into play scope
 # as an extra-var, which is why core reserves the name against layer vars.
 [[ -f "$MACHINE_FILE" ]] && ARGS+=(-e "@${MACHINE_FILE}" -e "computer_setup_machine_file=${MACHINE_FILE}")
