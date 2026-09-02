@@ -14,10 +14,7 @@ __pycache__/
 .idea/
 *.swp
 
-# Cross-session working notes for AI agents. Deliberately NOT tracked: this repo
-# is PUBLIC and the file records internal context (employer MDM, team direction)
-# that does not belong in it. Kept under docs/ so it sits with the material it
-# refers to and an agent reading the docs finds it.
+# Cross-session working notes for AI agents. Deliberately NOT tracked
 #
 # CAUTION: `git clean -fdx` deletes ignored files. This one is the only copy of
 # several sessions of context — see the note at the top of it.
