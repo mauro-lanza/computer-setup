@@ -145,7 +145,7 @@ class CallbackModule(CallbackBase):
                     return value
         return None
 
-    def _entry(self, task, dest):
+    def _entry(self, task, dest, label=None):
         # `.name`, not `get_name()`: the latter returns "git : Deploy the
         # managed git config", duplicating the `role` field below and forcing
         # every consumer to strip a prefix to display a task name. Unnamed tasks
@@ -159,6 +159,12 @@ class CallbackModule(CallbackBase):
             pass
         if dest:
             entry["dest"] = dest
+        elif label:
+            # A looped task with no path still has to say WHICH item changed.
+            # `_ansible_item_label` is the loop_control label Ansible already
+            # computes, so this is generic: without it, two missing credentials
+            # or two failed packages render as two identical lines.
+            entry["item"] = label
         return entry
 
     def _record(self, bucket, result):
@@ -186,7 +192,10 @@ class CallbackModule(CallbackBase):
                     dest = self._dest_from_diff(sub.get("diff"))
                     if not dest:
                         dest = self._dest_from_item(sub.get("item"))
-                    bucket.append(self._entry(task, dest))
+                    label = sub.get("_ansible_item_label")
+                    if not isinstance(label, str):
+                        label = None
+                    bucket.append(self._entry(task, dest, label))
                 return
 
             if len(bucket) >= MAX_RECORDED:

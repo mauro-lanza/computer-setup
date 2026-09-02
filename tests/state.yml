@@ -59,3 +59,18 @@
       loop:
         - { dest: "{{ state_scratch }}-loop-a.txt" }
         - { dest: "{{ state_scratch }}-loop-b.txt" }
+
+    # A looped task with NO path — the shape a credential check or a package
+    # loop has. Without the item label such entries are indistinguishable from
+    # each other in the state file, which is the whole point of recording them.
+    - name: A looped task that changes but touches no file
+      ansible.builtin.command: "true"
+      # Read-only probes run under --check so drift is visible; without this the
+      # command module is skipped and the case under test never happens.
+      check_mode: false
+      changed_when: true
+      loop:
+        - alpha-item
+        - beta-item
+      loop_control:
+        label: "{{ item }}"

@@ -1,0 +1,21 @@
+---
+# Credentials a person has to obtain, declared by layers.
+#
+# These exist because a reminder is the wrong tool for the job. A reminder is
+# unconditional: "Run: gcloud auth login (if using GCP)" prints on every run
+# forever, whether or not you did it, so it is noise the day after you read it.
+# A login entry is CHECKED — it reports only while the credential is actually
+# missing, and goes quiet once it is not.
+#
+# Each entry:
+#   id                  stable token, used in messages
+#   desc                what a human is being asked to sign in to
+#   detect_file         the credential store; its EXISTENCE is the check
+#   detect_key          optional: require this key inside it (JSON only), for a
+#                       store that holds several providers
+#   remedy              the command that obtains the credential
+#   requires_capability optional: skip entirely unless that capability is active
+logins: []
+
+# Global kill switch, independent of any entry.
+logins_enabled: true

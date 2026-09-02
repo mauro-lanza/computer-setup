@@ -161,6 +161,20 @@ plist sets a fixed `PATH` covering Homebrew and the system, and a tool installed
 anywhere else will not be found. `launchctl list | grep <label>` shows whether
 the job is loaded and what it last exited with.
 
+## Credentials
+
+`computer-setup status` reports a missing sign-in like any other drift:
+
+```
+Drift:     1 task(s) would change:
+  - Check for each declared credential  →  opencode-on-dev-tooling
+```
+
+Run `computer-setup apply` **from a terminal** to be prompted through it. The
+09:00 and 10:00 agents will never attempt it — the flows are interactive and a
+LaunchAgent has no terminal to answer them — so an unattended run reports it and
+moves on. It goes quiet by itself once you have signed in.
+
 ## Adopting manually-installed apps
 
 The `homebrew` role only uses `install_options: adopt` for casks explicitly

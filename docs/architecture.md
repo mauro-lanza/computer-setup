@@ -432,6 +432,55 @@ before any layer key has been published as a fact. This is why
 `repositories_base_dir` is a play var in `local.yml` rather than layer content.
 Use a play var, or repeat the literal.
 
+## Logins: credentials a person has to obtain
+
+Some things cannot be installed, only signed in to. `opencode auth login` and
+`gcloud auth login` open a browser or prompt and have no token flag, so the
+engine can detect them but not perform them unattended.
+
+Declared by layers, alongside `scheduled_agents` and with the same
+`requires_capability` gating:
+
+```yaml
+logins:
+  - id: opencode-on-dev-tooling
+    desc: "opencode → On dev-tooling"
+    requires_capability: opencode
+    detect_file: "{{ home_dir }}/.local/share/opencode/auth.json"
+    detect_key: "https://dev-tooling.on.com"     # optional
+    remedy: "opencode auth login https://dev-tooling.on.com"
+```
+
+`detect_file` alone means *existence is the check*, which is all a single-purpose
+store allows (gcloud keeps SQLite). `detect_key` additionally requires a
+top-level key, because a store holding several providers proves nothing by
+existing — a machine signed in to Copilot alone still has opencode's `auth.json`.
+
+**This is what a reminder should have been.** `reminders:` prints on every run
+whether or not the thing is done, so it is noise the day after you read it. A
+login is *checked*: it reports as ordinary drift while the credential is missing
+— by name, in `computer-setup status` — and goes quiet once it is not.
+
+Two halves, split deliberately:
+
+- **Detection always runs**, including under `--check` (`check_mode: false`),
+  because a check that cannot see a missing credential is not a check. The probe
+  is inline rather than a deployed script: a deployed one would have to exist
+  before it could be used, so the first check on a machine would report
+  everything missing, and deploying it during `--check` would mean a check that
+  mutates.
+- **The remedy runs only when `computer_setup_interactive`** is true. Both
+  scheduled modes pass `false`, so a LaunchAgent with no TTY reports instead of
+  hanging on a browser flow — the same split as casks in the upgrade role.
+
+The probe prints nothing from the file. These are token stores, so the exit code
+is the entire result and no credential reaches Ansible's memory, a `-v`
+transcript, or the run-state file.
+
+A login can only exist where the signed-in state is visible on disk. 1Password
+stays an unconditional reminder because it is a GUI app with no readable marker
+— an honest nag beats a check that cannot check.
+
 ## Where files live
 
 Split by the XDG question — who owns it, and what does losing it cost:

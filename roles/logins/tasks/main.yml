@@ -1,0 +1,117 @@
+---
+# Report credentials a person still has to obtain, and offer to obtain them when
+# a person is actually there.
+#
+# WHY THIS IS NOT JUST A COMMAND TASK
+# The remedy is interactive — `opencode auth login` and `gcloud auth login` open
+# a browser or prompt, and there is no token flag on either. Running one from the
+# 10:00 LaunchAgent would hang it with no TTY and nobody watching, which is the
+# same trap as `sudo` in an unattended task (see docs/findings.md). So the two
+# halves are split: DETECTION always runs, including under --check, and the
+# REMEDY runs only when `computer_setup_interactive` says a person is present.
+#
+# The detection task is the one that carries `changed_when`, so a missing
+# credential shows up as ordinary drift — by name, in `computer-setup status` —
+# instead of being invisible until someone reads a reminder they stopped seeing
+# months ago.
+
+- name: Resolve which logins apply to this machine
+  ansible.builtin.set_fact:
+    _logins_wanted: >-
+      {{ (_eligible | rejectattr('requires_capability', 'defined') | list)
+         + (_eligible
+            | selectattr('requires_capability', 'defined')
+            | selectattr('requires_capability', 'in',
+                         computer_setup_active_capabilities | default([]))
+            | list) }}
+  vars:
+    _eligible: "{{ logins if (logins_enabled | bool) else [] }}"
+
+# Layer data, so it is wrong in a layer repo rather than here. An entry missing
+# `remedy` would detect a problem and be unable to say what to do about it.
+- name: Validate login definitions
+  ansible.builtin.assert:
+    that:
+      - item.id is defined
+      - item.desc is defined
+      - item.detect_file is defined
+      - item.remedy is defined
+    fail_msg: >-
+      Login entry {{ item.id | default('(no id)') }} must define id, desc,
+      detect_file and remedy.
+    quiet: true
+  loop: "{{ _logins_wanted }}"
+  loop_control:
+    label: "{{ item.id | default('(no id)') }}"
+
+# `check_mode: false` because this is READ-ONLY and must run under --check —
+# otherwise the drift check could never see a missing credential, which is the
+# entire point. `changed_when` on the probe's exit code is what turns "not
+# signed in" into a drift entry naming the thing to sign in to.
+#
+# The probe prints nothing from the file, so no token is ever registered here.
+- name: Check for each declared credential
+  ansible.builtin.command:
+    argv: >-
+      {{ ['python3', '-c', _logins_probe_src, item.detect_file]
+         + ([item.detect_key] if item.detect_key is defined else []) }}
+  vars:
+    # Inline, NOT a script deployed to ~/.local/bin. A deployed probe would have
+    # to exist before it could be used, so the first `--check` on a machine —
+    # before any apply had placed it — would report every credential missing.
+    # Deploying it during --check to avoid that would mean a check that mutates,
+    # which is the one thing check must never do.
+    #
+    # Prints NOTHING from the file. These are token stores, so the exit code is
+    # the entire result and no credential reaches Ansible's memory, a -v
+    # transcript, or the run-state file.
+    _logins_probe_src: |
+      import json, os, sys
+      path = os.path.expanduser(sys.argv[1])
+      if not os.path.exists(path) or os.path.getsize(path) == 0:
+          sys.exit(1)
+      if len(sys.argv) < 3:
+          sys.exit(0)   # existence is the whole check for a non-JSON store
+      try:
+          with open(path) as handle:
+              data = json.load(handle)
+      except Exception:
+          sys.exit(1)   # unreadable or not JSON: never claim "present"
+      sys.exit(0 if isinstance(data, dict) and sys.argv[2] in data else 1)
+  register: _logins_probe
+  loop: "{{ _logins_wanted }}"
+  loop_control:
+    label: "{{ item.id }}"
+  check_mode: false
+  changed_when: _logins_probe.rc != 0
+  failed_when: false
+
+- name: Collect the logins still missing
+  ansible.builtin.set_fact:
+    _logins_missing: >-
+      {{ _logins_probe.results | default([])
+         | selectattr('rc', 'defined') | selectattr('rc', 'ne', 0)
+         | map(attribute='item') | list }}
+
+# Interactive only. `computer_setup_interactive` is false for both scheduled
+# modes, so an unattended run reports below and never blocks.
+- name: Sign in to each missing credential
+  ansible.builtin.command: "{{ item.remedy }}"
+  loop: "{{ _logins_missing }}"
+  loop_control:
+    label: "{{ item.desc }}"
+  when: computer_setup_interactive | default(true) | bool
+  changed_when: true
+  # A person may cancel a browser flow, and that must not fail the play: the
+  # credential is simply still missing and the next run says so again.
+  failed_when: false
+
+- name: Report credentials that still need a person
+  ansible.builtin.debug:
+    msg: >-
+      {{ _logins_missing | map(attribute='desc') | list }} still need signing
+      in. Run `computer-setup apply` from a terminal, or the command directly:
+      {{ _logins_missing | map(attribute='remedy') | list }}
+  when:
+    - _logins_missing | length > 0
+    - not (computer_setup_interactive | default(true) | bool)

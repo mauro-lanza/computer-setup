@@ -48,6 +48,10 @@
     # which ansible-core the Galaxy collections were resolved against. One play
     # var for the same reason as bin_dir — more than one role writes in here.
     computer_setup_state_dir: "{{ home_dir }}/.local/state/computer-setup"
+    # Whether a PERSON is present. False for both scheduled modes, which is what
+    # keeps an interactive `auth login` out of a LaunchAgent that has no TTY to
+    # answer it. Same split as casks in the upgrade role.
+    computer_setup_interactive: true
     # The single entry point for operating this machine: every ansible-pull goes
     # through it, and the scheduled agents invoke its internal modes. Play-scoped
     # because drift_correction deploys it and the agents reference it.
@@ -91,6 +95,10 @@
     # Deploys the `computer-setup` command; the two agents that invoke it are
     # ordinary `scheduled_agents` entries, so there is one LaunchAgent
     # implementation rather than a private second copy here.
+    # After capability_configs (a credential store may be created by a config
+    # deploy) and before the agents, so a machine that just signed in reports
+    # clean on the very next check rather than one run later.
+    - { role: logins, tags: [logins] }
     - { role: drift_correction, tags: [drift_correction] }
     # Last, and after drift_correction, which deploys the program its own two
     # agents invoke. It runs late for the same reason drift_correction does:

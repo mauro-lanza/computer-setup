@@ -281,8 +281,15 @@ for expected in (
     "/tmp/cs-state-contract-loop-b.txt",
 ):
     assert expected in by_dest, f"{expected} missing from {sorted(by_dest)}"
-assert d["totals"]["changed"] == 3, d["totals"]
-assert len(d["changed"]) == 4, "a looped task must contribute one entry per item"
+assert d["totals"]["changed"] == 4, d["totals"]
+assert len(d["changed"]) == 6, "a looped task must contribute one entry per item"
+
+# A looped task with no path must still say WHICH item, via the loop label.
+# Two missing credentials would otherwise be two identical lines.
+by_item = {e.get("item"): e for e in d["changed"] if "item" in e}
+for expected in ("alpha-item", "beta-item"):
+    assert expected in by_item, f"{expected} missing; got {sorted(by_item)}"
+assert "dest" not in by_item["alpha-item"], "item and dest should not both be set"
 assert by_dest["/tmp/cs-state-contract.txt"]["action"] == "ansible.builtin.copy"
 
 # Bare task name: `get_name()` would return "role : name", duplicating `role`

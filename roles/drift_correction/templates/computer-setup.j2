@@ -249,7 +249,7 @@ days_since_success() {
 # yq is mikefarah's, which has no jq-style `if/then/else` to inline it.
 state_task_list() {
     [[ -f "$STATE_FILE" ]] || return 0
-    yq -r "${1}[] | \"  - \" + .task + \"\t\" + (.dest // \"\")" "$STATE_FILE" 2>/dev/null \
+    yq -r "${1}[] | \"  - \" + .task + \"\t\" + (.dest // .item // \"\")" "$STATE_FILE" 2>/dev/null \
         | sed -e 's/\t$//' -e 's/\t/  →  /' || true
 }
 
@@ -279,7 +279,10 @@ cmd_status() {
     result="$(state_field '.result')"
     finished="$(state_field '.finished')"
     dur="$(state_field '.duration_seconds')"
-    changed="$(state_field '.totals.changed')"
+    # The LENGTH of the recorded list, not `.totals.changed`: Ansible counts a
+    # looped task once however many items changed, so a task that found three
+    # missing credentials would announce "1" and then list three.
+    changed="$(state_field '.changed | length')"
 
     echo "Last run:  ${mode:-?} — ${result:-?} at ${finished:-?}${dur:+ (${dur}s)}"
     # Without this line a tag-limited run reads as a verdict on the whole
@@ -407,12 +410,18 @@ run_scheduled() {
     # check:   -e homebrew_update=false — `state=present` never upgrades, so
     #          refreshing the Homebrew index adds time with zero detection value.
     # upgrade: formulae/Galaxy/Node only; casks need sudo and there's no TTY.
-    local -a mode_args
+    #
+    # BOTH are non-interactive. A LaunchAgent has no terminal and no one
+    # watching, so anything that would prompt — a cask's sudo, an `auth login`
+    # browser flow — must be reported rather than attempted. It is passed for
+    # every scheduled mode rather than only where it is needed today, because
+    # the next thing that prompts should be safe by default.
+    local -a mode_args=(-e computer_setup_interactive=false)
     if [[ "$mode" == "check" ]]; then
-        mode_args=(-e homebrew_update=false --check --diff)
+        mode_args+=(-e homebrew_update=false --check --diff)
     else
-        mode_args=(--tags upgrade -e computer_setup_upgrade_assume_yes=true
-                   -e computer_setup_upgrade_include_casks=false)
+        mode_args+=(--tags upgrade -e computer_setup_upgrade_assume_yes=true
+                    -e computer_setup_upgrade_include_casks=false)
     fi
 
     local pull_out rc partial=0
