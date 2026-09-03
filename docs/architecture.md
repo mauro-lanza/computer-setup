@@ -278,6 +278,82 @@ Staleness is tracked separately in `last-success`, a plain ISO timestamp written
 only by a scheduled run that reached the repo and finished cleanly. It is not a
 field in the JSON because it has to survive a run that failed.
 
+## The manifest: what this system owns
+
+The same callback writes `managed-paths.json` — every filesystem path the run
+managed, whether or not it changed. `computer-setup manifest` renders it.
+
+```json
+{ "schema_version": 1, "generated": "…", "mode": "check",
+  "partial": false, "complete": true,
+  "files":       [ { "path": "…", "action": "template", "role": "shell", "task": "…" } ],
+  "directories": [ … ],
+  "backups":     [ … ] }
+```
+
+**Drift is an event; an inventory is a state.** `last-run.json` lists what
+changed, so on a converged machine it is empty — correct for drift, useless for
+knowing what the tool owns. The manifest lists a file that is already correct,
+which is why the two are separate artifacts with separate schema versions rather
+than more fields on one.
+
+Why derived from the callback rather than declared per role: a declared path and
+a written path are the same fact in two places, and this repo has twice paid for
+that — `mode` declared on capability configs, and `computer_setup_state_dir`
+declared `0700` by one role and `0755` by another, drifting daily for a week. A
+list maintained by hand drifts silently, and here the silent side holds the
+delete button.
+
+Three omissions are deliberate, and `check.sh` asserts each one:
+
+- **A `state: absent` path is not managed.** Recording it would have a
+  collection step re-delete what it just deleted, forever.
+- **A skipped task contributes nothing.** A task skipped because its capability
+  was deselected no longer manages its path, and that path dropping out of the
+  manifest is precisely the signal collection needs.
+- **`command`/`shell` side effects are invisible.** nvm, tfenv, editor
+  extensions and `logins` remedies write through them and the path is not
+  knowable from a callback. They are also not files anything would collect —
+  they need `brew uninstall` or `--uninstall-extension`, a different verb.
+
+`backups` is its own class: `backup: true` leaves `<dest>.<pid>.<date>@<time>~`
+beside a file and **nothing has ever removed them**. Ansible names the file it
+generated in its result, so these are captured rather than guessed at with a
+glob.
+
+### `complete` is the only field a deletion may act on
+
+`complete` is true when the run was neither partial nor failed. Both cases
+produce a manifest that is a *fraction* of the machine, and diffing a fraction
+against a previous whole marks everything missing as an orphan:
+
+- `--tags git` yields three files. The other 24 are not orphans.
+- A run that fails at task 40 never reaches task 41's path.
+
+The interlocks already existed — `partial` was added so nobody could read "no
+drift in the one role I ran" as "machine converged", which is the same
+precondition. Nothing collects anything yet; this is the field that will decide
+when something does.
+
+## Run history
+
+`history.jsonl` — one JSON line per run, oldest trimmed past 500.
+
+The rolling log (`~/Library/Logs/computer-setup.log`) is capped at 5000 lines,
+which sounds generous and is about **three days**, because it stores full
+Ansible output. The history stores nine fields, so the same budget covers most
+of a year. It is what makes "when did this machine last actually change
+anything" answerable.
+
+JSON Lines, not a JSON array: appending to an array means rewriting the whole
+file, and a run that dies mid-write leaves invalid JSON. A truncated last line
+costs one record.
+
+One line per **invocation**, not per play. `ansible-pull` can reach the
+callback's final hook more than once, and since this file is appended rather
+than overwritten, each line is keyed on `CS_RUN_ID` and a repeat of the same id
+replaces the previous line instead of adding one.
+
 ## Orchestrator primitives
 
 `local.yml` delegates all layer handling to the `core` role. It is not a role in
@@ -491,8 +567,12 @@ Split by the XDG question — who owns it, and what does losing it cost:
 | `~/.config/computer-setup/backup.yml` | which repo backs this machine up, under what name | you re-run `machine init` |
 | `~/.local/share/computer-setup/layers/` | the layer cache | re-cloned on the next run |
 | `~/.local/share/computer-setup/backups/` | clone of the backup repo | **possibly a commit** — see below |
-| `~/.local/state/computer-setup/` | `last-run.json`, `last-success`, the galaxy marker | nothing; regenerated |
-| `~/Library/Logs/computer-setup.log` | the rolling log | nothing |
+| `~/.local/state/computer-setup/last-run.json` | what the last run did | nothing; the next run rewrites it |
+| `~/.local/state/computer-setup/managed-paths.json` | every path this system owns | nothing — but collection loses its memory, so orphans survive. Fails safe |
+| `~/.local/state/computer-setup/history.jsonl` | one line per run, ~500 runs | the run history, which no run can reconstruct |
+| `~/.local/state/computer-setup/last-success` | when a scheduled run last succeeded | staleness reads as "never synced" until the next one |
+| `~/.local/state/computer-setup/galaxy-core-version` | which ansible-core the collections were resolved against | a redundant re-resolve |
+| `~/Library/Logs/computer-setup.log` | the rolling log, ~3 days | nothing |
 
 Both `~/.config` entries are configuration because a HUMAN decided them and no
 run can reconstruct them. `backup.yml` is config despite describing where state
@@ -508,6 +588,12 @@ entitled to delete from underneath a running job.
 
 `~/.local/state` means one thing here: a record of what this machine did. It is
 never read to decide what to do.
+
+`history.jsonl` is the one entry whose loss is not free — nothing regenerates a
+run history. It stays in `state` rather than `share` because it is still only a
+record, and because the alternative is pretending a log is data. If it ever
+matters enough to survive a wipe, it belongs in the backup repo, not a different
+directory.
 
 ### What this system puts in `$HOME`
 

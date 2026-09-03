@@ -305,6 +305,124 @@ print("  ok  shape, 0600, and no file contents recorded")
 PY
 rm -rf "$(dirname "$cs_state")"
 
+# The manifest is the basis for deciding a path is no longer managed, so what it
+# OMITS matters as much as what it lists. Each omission below is deliberate and
+# would be invisible if it regressed.
+echo "==> Manifest contract"
+cs_mdir="$(mktemp -d)"
+cs_mscratch=/tmp/cs-manifest-contract
+rm -rf -- "$cs_mscratch"
+CS_MANIFEST_FILE="$cs_mdir/managed-paths.json" CS_HISTORY_FILE="$cs_mdir/history.jsonl" \
+    CS_RUN_MODE=apply CS_RUN_PARTIAL=0 CS_RUN_ID=contract-1 \
+    ansible-playbook tests/manifest.yml >/dev/null
+# A second run with the SAME run id: ansible-pull can reach the callback's final
+# hook more than once per invocation, and history is appended, so without a key
+# one run would leave two lines.
+CS_MANIFEST_FILE="$cs_mdir/managed-paths.json" CS_HISTORY_FILE="$cs_mdir/history.jsonl" \
+    CS_RUN_MODE=apply CS_RUN_PARTIAL=0 CS_RUN_ID=contract-1 \
+    ansible-playbook tests/manifest.yml >/dev/null
+# A third, with a new id and narrowed — the shape of a `--tags` run.
+CS_MANIFEST_FILE="$cs_mdir/managed-paths.json" CS_HISTORY_FILE="$cs_mdir/history.jsonl" \
+    CS_RUN_MODE=check CS_RUN_PARTIAL=1 CS_RUN_ID=contract-2 \
+    ansible-playbook tests/manifest.yml >/dev/null
+"$CS_PY" - "$cs_mdir" <<'PY'
+import json, os, stat, sys
+
+d = os.path.abspath(sys.argv[1])
+m = json.load(open(os.path.join(d, "managed-paths.json")))
+base = "/tmp/cs-manifest-contract"
+
+assert m["schema_version"] == 1, m["schema_version"]
+files = {e["path"] for e in m["files"]}
+dirs = {e["path"] for e in m["directories"]}
+backups = {e["path"] for e in m["backups"]}
+
+# An inventory is a STATE: the third run changed nothing, and every managed file
+# must still be listed. A manifest that empties itself on a converged machine
+# would be useless exactly when it matters.
+for expected in (f"{base}/managed.conf", f"{base}/looped-a.conf", f"{base}/looped-b.conf"):
+    assert expected in files, f"{expected} missing from {sorted(files)}"
+assert base in dirs, f"{base} missing from {sorted(dirs)}"
+assert base not in files and f"{base}/managed.conf" not in dirs, "file/directory confusion"
+
+# A loop's rendered per-item path, not the bare `item.dest` filename.
+assert all(p.startswith("/") for p in files), f"relative path recorded: {sorted(files)}"
+
+# Recording a removal has a collection step re-deleting what it just deleted.
+assert f"{base}/removed.conf" not in files | dirs, "a `state: absent` path entered the manifest"
+
+# A skipped task no longer manages its path — that is the signal collection
+# needs, so it must NOT appear.
+assert f"{base}/skipped.conf" not in files, "a skipped task's path entered the manifest"
+
+# The known blind spot, asserted so it stays known rather than being rediscovered.
+assert f"{base}/invisible.txt" not in files, "command side effects are not knowable here"
+
+# `backup: true` residue: named by the module, never removed by anything else.
+assert len(backups) == 1, f"expected one backup, got {sorted(backups)}"
+assert next(iter(backups)).startswith(f"{base}/managed.conf."), sorted(backups)
+assert not (backups & files), "a backup must not also be listed as a live file"
+
+# The one field a collection step may act on. The last run was PARTIAL.
+assert m["partial"] is True, m["partial"]
+assert m["complete"] is False, "a partial run must never be marked complete"
+
+mode = stat.S_IMODE(os.stat(os.path.join(d, "managed-paths.json")).st_mode)
+assert mode == 0o600, oct(mode)
+
+# History: appended, one line per RUN and not per play.
+lines = [l for l in open(os.path.join(d, "history.jsonl")).read().splitlines() if l.strip()]
+assert len(lines) == 2, f"expected 2 runs, got {len(lines)}: {lines}"
+assert [json.loads(l)["run_id"] for l in lines] == ["contract-1", "contract-2"]
+last = json.loads(lines[-1])
+for key in ("finished", "mode", "result", "changed", "failed", "ok", "duration_seconds"):
+    assert key in last, f"history line missing {key}: {last}"
+assert last["partial"] is True, last
+mode = stat.S_IMODE(os.stat(os.path.join(d, "history.jsonl")).st_mode)
+assert mode == 0o600, oct(mode)
+print("  ok  inventory, omissions, backups, partial flag, and one line per run")
+PY
+rm -rf -- "$cs_mdir" "$cs_mscratch"
+
+# `result` was derived from a stats key Ansible does not emit ("failed" rather
+# than "failures"), so every failed run reported itself as ok. `complete` is
+# derived from the same total, which would have authorised collection after a
+# run that never finished.
+echo "==> Failure is reported as failure"
+cs_fdir="$(mktemp -d)"
+cs_fscratch=/tmp/cs-failure-contract
+rm -rf -- "$cs_fscratch"
+if CS_STATE_FILE="$cs_fdir/last-run.json" CS_MANIFEST_FILE="$cs_fdir/managed-paths.json" \
+   CS_HISTORY_FILE="$cs_fdir/history.jsonl" CS_RUN_MODE=apply CS_RUN_PARTIAL=0 \
+   CS_RUN_ID=fail-1 ansible-playbook tests/failure.yml >/dev/null 2>&1; then
+    echo "ERROR: tests/failure.yml was expected to fail and did not" >&2
+    exit 1
+fi
+"$CS_PY" - "$cs_fdir" <<'PY'
+import json, os, sys
+
+d = os.path.abspath(sys.argv[1])
+s = json.load(open(os.path.join(d, "last-run.json")))
+m = json.load(open(os.path.join(d, "managed-paths.json")))
+h = [json.loads(l) for l in
+     open(os.path.join(d, "history.jsonl")).read().splitlines() if l.strip()]
+
+assert s["result"] == "failed", f"a failed run reported result={s['result']!r}"
+assert s["totals"]["failed"] == 1, s["totals"]
+assert len(s["failed"]) == 1, s["failed"]
+assert h[-1]["result"] == "failed", h[-1]
+assert h[-1]["failed"] == 1, h[-1]
+
+# The point: the task after the failure never ran, so its path is absent. Acting
+# on this manifest would delete a file the machine still manages.
+paths = {e["path"] for e in m["files"]}
+assert "/tmp/cs-failure-contract/reached.conf" in paths, sorted(paths)
+assert "/tmp/cs-failure-contract/unreached.conf" not in paths, sorted(paths)
+assert m["complete"] is False, "a failed run must never be marked complete"
+print("  ok  failed runs say so, and their manifest refuses to be complete")
+PY
+rm -rf -- "$cs_fdir" "$cs_fscratch"
+
 # A guard whose expression always evaluates false looks exactly like a passing
 # suite. Assert the run FAILS, and for the right reason.
 echo "==> Layer contract (negative paths)"

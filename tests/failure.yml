@@ -1,0 +1,41 @@
+---
+# A run that FAILS part-way. Exists because `complete` in the manifest is the
+# only thing standing between a future collection step and deleting every path
+# a failed run never reached — and because `result` reported "ok" for a failed
+# run until this was gated.
+#
+# Expected to exit non-zero. check.sh asserts the failure, then asserts what the
+# callback recorded about it.
+- name: Exercise the callback on a failing run
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    f: /tmp/cs-failure-contract
+  tasks:
+    - name: A directory that succeeds
+      ansible.builtin.file:
+        path: "{{ f }}"
+        state: directory
+        mode: "0755"
+
+    - name: A file that succeeds
+      ansible.builtin.copy:
+        dest: "{{ f }}/reached.conf"
+        content: "x\n"
+        mode: "0644"
+
+    # Fails: the parent is not writable and is not created here.
+    - name: A task that fails
+      ansible.builtin.copy:
+        dest: /cs-failure-contract-unwritable/nope.conf
+        content: "x\n"
+        mode: "0644"
+
+    # Never runs. Its absence from the manifest is exactly why a failed run must
+    # not be treated as a complete inventory.
+    - name: A file that is never reached
+      ansible.builtin.copy:
+        dest: "{{ f }}/unreached.conf"
+        content: "x\n"
+        mode: "0644"

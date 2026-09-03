@@ -43,6 +43,50 @@ one. Past `drift_correction_stale_after_days` (14 by default) it reports
 interface a UI would consume; see "Run state" in
 [architecture.md](architecture.md) for the shape and its guarantees.
 
+Ask what this system owns:
+
+```bash
+computer-setup manifest
+```
+
+```
+Recorded:  2026-09-03T21:40:11+0200
+
+Files (27):
+  /Users/you/.zshrc                                   core
+  /Users/you/.zsh/010-public-00-path.zsh              shell
+  /Users/you/.config/git/ignore                       git
+  …
+
+Directories (11):
+  /Users/you/.zsh
+  …
+```
+
+Every path here was recorded by the run itself, not from a hand-kept list. If
+the header says `INCOMPLETE`, the last run was narrowed by `--tags` or failed
+part-way and saw only a fraction of the machine — read it as a sample, not an
+inventory. A `Backup copies left behind` section lists `backup: true` residue,
+which nothing removes automatically.
+
+Ask what this machine has been doing:
+
+```bash
+computer-setup history 10
+```
+
+```
+FINISHED                   MODE     RESULT    CHANGED   FAILED  DURATION
+2026-09-03T09:00:31+0200   upgrade* ok              0        0     41.2s
+2026-09-03T10:00:12+0200   check    ok              0        0     47.5s
+
+* = partial run (narrowed by tags or arguments)
+```
+
+The rolling log holds about three days because it stores full Ansible output;
+this holds roughly the last 500 runs. Use `computer-setup log` for *what
+happened* in a recent run, and `history` for *when* something last did.
+
 Clone repositories that are listed but missing:
 
 ```bash

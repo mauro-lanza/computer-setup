@@ -42,6 +42,10 @@ DOCUMENTATION = """
         role and destination path. Metadata only, never file contents.
       - Silently does nothing when CS_STATE_FILE is unset, so ordinary
         interactive runs are unaffected.
+      - Records every managed filesystem path to CS_MANIFEST_FILE, so "what
+        does this system own" is a question with an answer.
+      - Appends one line per run to CS_HISTORY_FILE, so a machine has a history
+        longer than its last run.
     requirements:
       - Set the CS_STATE_FILE environment variable to enable.
 """
@@ -51,10 +55,32 @@ DOCUMENTATION = """
 # scripts/check.sh, the same way layers carry a schema_version.
 STATE_SCHEMA_VERSION = 1
 
+# The manifest is a SEPARATE interface with its own lifecycle: last-run.json
+# describes one run and is rewritten every time, the manifest describes what the
+# machine owns and is the basis for garbage collection. Versioned apart so
+# either can change without forcing the other.
+MANIFEST_SCHEMA_VERSION = 1
+
 # A pathological run (a large loop over layer content) should not write an
 # unbounded file. Past this, the count still reflects reality and `changed` is
 # truncated — flagged by `truncated` so a reader never mistakes it for the whole.
 MAX_RECORDED = 200
+
+# Runs of history to keep. Two scheduled runs a day makes this most of a year,
+# at roughly 200 bytes a line. Deliberately NOT capped the way `changed` is:
+# an inventory or a history that silently drops entries is worse than a big
+# file, so this trims the OLDEST rather than refusing the newest.
+MAX_HISTORY = 500
+
+# Modules that put something on disk at a path we could later have to remove.
+# An allow-list, not a deny-list: a module absent from here contributes nothing
+# to the manifest, which fails safe (an orphan survives). `command`/`shell` are
+# deliberately absent — nvm, tfenv and editor extensions write through them and
+# the path is unknowable from the callback.
+WRITE_ACTIONS = frozenset((
+    "copy", "template", "file", "lineinfile", "blockinfile",
+    "assemble", "get_url", "unarchive", "ini_file",
+))
 
 
 class CallbackModule(CallbackBase):
@@ -76,6 +102,21 @@ class CallbackModule(CallbackBase):
         self.changed = []
         self.failed = []
         self.truncated = False
+        # Both are independent opt-ins, like state_file: a caller that wants a
+        # run summary but no inventory simply does not set them.
+        self.manifest_file = os.environ.get("CS_MANIFEST_FILE") or ""
+        self.history_file = os.environ.get("CS_HISTORY_FILE") or ""
+        # Identifies THIS invocation across every play it runs. ansible-pull can
+        # reach the stats hook more than once (its own checkout play, then the
+        # real one), and history is appended rather than overwritten — so
+        # without this a single run could leave two lines. Keyed rather than
+        # counted, because the two plays may be separate processes.
+        self.run_id = os.environ.get("CS_RUN_ID") or ""
+        # path -> entry. A dict, so a path deployed by two tasks (a parent
+        # directory created by several roles) is recorded once.
+        self.managed_files = {}
+        self.managed_dirs = {}
+        self.managed_backups = {}
         # The plugin is constructed as the play starts, so this is the run's
         # start within a second. Recorded because "the 10:00 check now takes
         # four minutes" is a thing worth being able to see, and it cannot be
@@ -206,6 +247,87 @@ class CallbackModule(CallbackBase):
         except Exception:
             pass
 
+    # ── the manifest: what this system owns ──────────────────────────────────
+    def _manifest_entry(self, task, dest):
+        entry = {"path": dest, "action": task.action.split(".")[-1]}
+        name = getattr(task, "name", "") or ""
+        if name:
+            entry["task"] = name
+        try:
+            role = task._role
+            if role:
+                entry["role"] = role.get_name()
+        except Exception:
+            pass
+        return entry
+
+    def _inventory(self, result):
+        """Record every path this run manages, changed or not.
+
+        The difference from `_record` is the whole point: drift is an EVENT, so
+        it only lists what changed. An inventory is a STATE, so a file that is
+        already correct still has to appear — otherwise the manifest would empty
+        itself out on a converged machine, which is exactly when it matters.
+
+        Skipped tasks are deliberately absent. A task skipped because its
+        capability was deselected no longer manages its path, and that path
+        dropping out of the manifest is precisely the signal collection needs.
+        """
+        if not self.manifest_file:
+            return
+        try:
+            task = result._task
+            action = task.action.split(".")[-1]
+            if action not in WRITE_ACTIONS:
+                return
+            payload = result._result
+            args = getattr(task, "args", {}) or {}
+
+            def absorb(dest, state, sub):
+                if not isinstance(dest, str) or not dest.startswith("/"):
+                    return
+                # A removal is the opposite of a managed path — recording it
+                # would have collection re-delete what it just deleted, forever.
+                if state == "absent":
+                    return
+                bucket = self.managed_dirs if state == "directory" else self.managed_files
+                bucket.setdefault(dest, self._manifest_entry(task, dest))
+                # `backup: true` leaves <dest>.<pid>.<date>@<time>~ beside the
+                # file and nothing ever removes it. Ansible names it in the
+                # result, so it is captured here rather than guessed at later
+                # with a glob.
+                backup = sub.get("backup_file")
+                if isinstance(backup, str) and backup.startswith("/"):
+                    self.managed_backups.setdefault(
+                        backup, self._manifest_entry(task, backup))
+
+            sub_results = payload.get("results")
+            if isinstance(sub_results, list) and sub_results:
+                for sub in sub_results:
+                    if not isinstance(sub, dict) or sub.get("skipped"):
+                        continue
+                    item = sub.get("item")
+                    state = args.get("state")
+                    if isinstance(item, dict) and item.get("state"):
+                        state = item["state"]
+                    # The per-item result carries the RENDERED absolute path.
+                    # `item.dest` does not: in the shell role it is a bare
+                    # filename, which no consumer could act on.
+                    absorb(sub.get("dest") or sub.get("path"), state, sub)
+                return
+
+            dest = payload.get("dest") or payload.get("path")
+            if not isinstance(dest, str) or not dest.startswith("/"):
+                # Falls back to the task args, which ARE rendered by the time a
+                # task has run. Only a loop leaves "{{ item.x }}" here, and
+                # loops are handled above.
+                dest = args.get("dest") or args.get("path")
+                if isinstance(dest, str) and "{{" in dest:
+                    dest = None
+            absorb(dest, args.get("state"), payload)
+        except Exception:
+            pass
+
     # ── hooks ────────────────────────────────────────────────────────────────
     def v2_runner_on_ok(self, result):
         try:
@@ -213,6 +335,7 @@ class CallbackModule(CallbackBase):
             # change", which is exactly what drift detection asks.
             if result._result.get("changed"):
                 self._record(self.changed, result)
+            self._inventory(result)
         except Exception:
             pass
 
@@ -227,20 +350,37 @@ class CallbackModule(CallbackBase):
         self._record(self.failed, result)
 
     def v2_playbook_on_stats(self, stats):
-        """Write the state file once, at the end of the play.
+        """Write the run's three artifacts, once, at the end of the play.
 
         `ansible-pull` runs its own checkout play before the real one. Both
         reach this hook, and the LAST write wins — which is the real play, the
-        one worth recording.
+        one worth recording. History is APPENDED rather than overwritten, so it
+        is keyed on the run id instead of relying on that.
+
+        Each artifact is an independent opt-in and gets its own try block: a
+        caller may want a run summary and no inventory, and a failure to write
+        one must not cost the others — least of all the run itself.
         """
-        if not self.state_file:
+        if not (self.state_file or self.manifest_file or self.history_file):
             return
         try:
-            totals = {"ok": 0, "changed": 0, "failed": 0, "unreachable": 0, "skipped": 0}
+            # Ansible's summary calls it `failures`; this file has always
+            # published it as `failed`, to match the `failed` list beside it.
+            # Mapped explicitly — reading `failed` straight out of the summary
+            # silently yields 0 forever, which is how a failed run reported
+            # itself as ok until this was caught.
+            summary_keys = {
+                "ok": "ok",
+                "changed": "changed",
+                "failed": "failures",
+                "unreachable": "unreachable",
+                "skipped": "skipped",
+            }
+            totals = dict.fromkeys(summary_keys, 0)
             for host in stats.processed.keys():
                 summary = stats.summarize(host)
-                for key in totals:
-                    totals[key] += summary.get(key, 0)
+                for ours, theirs in summary_keys.items():
+                    totals[ours] += summary.get(theirs, 0)
 
             payload = {
                 "schema_version": STATE_SCHEMA_VERSION,
@@ -254,18 +394,121 @@ class CallbackModule(CallbackBase):
                 "failed": self.failed,
                 "truncated": self.truncated,
             }
-            self._write(payload)
+            if self.state_file:
+                self._write(self.state_file, payload)
+        except Exception:
+            totals = {k: 0 for k in
+                      ("ok", "changed", "failed", "unreachable", "skipped")}
+
+        try:
+            self._write_manifest(totals)
+        except Exception:
+            pass
+        try:
+            self._append_history(totals)
         except Exception:
             pass
 
-    def _write(self, payload):
+    def _write_manifest(self, totals):
+        """The set of paths this system owns, as of this run.
+
+        `complete` is the field that matters: it is the ONLY safe basis for
+        deleting anything. A run narrowed by --tags saw one role, so its
+        manifest is a fraction of the machine — diffing that against a previous
+        full manifest would mark everything else an orphan. A run that failed
+        part-way is the same problem wearing a different hat.
+        """
+        if not self.manifest_file:
+            return
+        payload = {
+            "schema_version": MANIFEST_SCHEMA_VERSION,
+            "generated": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            "mode": self.run_mode,
+            "partial": self.partial,
+            "complete": (not self.partial)
+            and not totals["failed"]
+            and not totals["unreachable"],
+            "files": sorted(self.managed_files.values(), key=lambda e: e["path"]),
+            "directories": sorted(self.managed_dirs.values(), key=lambda e: e["path"]),
+            # Ansible's `backup: true` residue. Listed apart from `files`
+            # because they are the one class here that is pure litter: nothing
+            # reads them and nothing else will ever remove them.
+            "backups": sorted(self.managed_backups.values(), key=lambda e: e["path"]),
+        }
+        self._write(self.manifest_file, payload)
+
+    def _append_history(self, totals):
+        """One line per run, oldest trimmed.
+
+        JSON Lines rather than a JSON array: appending to an array means reading
+        and rewriting the whole file, and a run that dies mid-write leaves
+        invalid JSON. A truncated last line costs one record.
+
+        The full log is capped at 5000 lines, which is about three days. This is
+        the record that outlives it — deliberately tiny, so it can.
+        """
+        if not self.history_file:
+            return
+        record = {
+            "finished": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            "mode": self.run_mode,
+            "partial": self.partial,
+            "result": "failed"
+            if (totals["failed"] or totals["unreachable"])
+            else "ok",
+            "duration_seconds": round(time.time() - self.started, 1),
+            "changed": totals["changed"],
+            "failed": totals["failed"],
+            "ok": totals["ok"],
+        }
+        if self.run_id:
+            record["run_id"] = self.run_id
+
+        directory = os.path.dirname(self.history_file) or "."
+        try:
+            os.makedirs(directory, mode=0o700)
+        except OSError:
+            pass
+
+        lines = []
+        if os.path.exists(self.history_file):
+            with open(self.history_file, "r") as stream:
+                lines = [line for line in stream.read().splitlines() if line.strip()]
+
+        # Same run, second play: replace rather than append. ansible-pull can
+        # reach this hook more than once per invocation, and two lines for one
+        # run would make every rate or count computed from this file wrong.
+        if self.run_id and lines:
+            try:
+                if json.loads(lines[-1]).get("run_id") == self.run_id:
+                    lines.pop()
+            except ValueError:
+                pass
+
+        lines.append(json.dumps(record, sort_keys=True))
+        lines = lines[-MAX_HISTORY:]
+
+        handle, tmp_path = tempfile.mkstemp(dir=directory, prefix=".history-")
+        try:
+            with os.fdopen(handle, "w") as stream:
+                stream.write("\n".join(lines) + "\n")
+            os.chmod(tmp_path, 0o600)
+            os.replace(tmp_path, self.history_file)
+        except Exception:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+            raise
+
+    def _write(self, target, payload):
         """Atomic, 0600.
 
         Written to a temp file in the same directory and renamed: a reader (the
         `status` command, a UI polling it) must never observe a half-written
         file, and rename is atomic within a filesystem.
         """
-        directory = os.path.dirname(self.state_file) or "."
+        directory = os.path.dirname(target) or "."
         try:
             os.makedirs(directory, mode=0o700)
         except OSError:
@@ -276,7 +519,7 @@ class CallbackModule(CallbackBase):
                 json.dump(payload, stream, indent=2, sort_keys=True)
                 stream.write("\n")
             os.chmod(tmp_path, 0o600)
-            os.replace(tmp_path, self.state_file)
+            os.replace(tmp_path, target)
         except Exception:
             try:
                 os.unlink(tmp_path)

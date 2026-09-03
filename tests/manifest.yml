@@ -1,0 +1,77 @@
+---
+# Drives the manifest and history outputs of the computer_setup_state callback.
+#
+# Separate from tests/state.yml on purpose: that file asserts the RUN-STATE
+# contract (what changed), and its assertions count changed tasks exactly. This
+# one asserts the INVENTORY contract (what is managed) and the run history, so
+# it needs tasks that converge without changing — which would break those counts
+# if they lived in the same play.
+#
+# The distinction under test is the whole reason the manifest exists: drift is
+# an event and only lists what changed, an inventory is a state and must list a
+# file that is already correct.
+- name: Exercise the manifest and history outputs
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    m: /tmp/cs-manifest-contract
+  tasks:
+    - name: A managed directory
+      ansible.builtin.file:
+        path: "{{ m }}"
+        state: directory
+        mode: "0755"
+
+    - name: A managed file
+      ansible.builtin.copy:
+        dest: "{{ m }}/managed.conf"
+        content: "v1\n"
+        mode: "0644"
+
+    # Deployed a second time with backup:true and different content, so Ansible
+    # leaves <dest>.<pid>.<date>@<time>~ beside it. Nothing in this system ever
+    # removes those, so the manifest has to name them — and it can, because the
+    # module reports the generated name rather than us having to guess it.
+    - name: A managed file that leaves a backup behind
+      ansible.builtin.copy:
+        dest: "{{ m }}/managed.conf"
+        content: "v2\n"
+        mode: "0644"
+        backup: true
+
+    # A LOOP creating files. The per-item result carries the rendered absolute
+    # path; `item.dest` here is a bare filename, which is what the shell role's
+    # snippets look like and what a naive implementation would record.
+    - name: Managed files from a loop
+      ansible.builtin.copy:
+        dest: "{{ m }}/{{ item.dest }}"
+        content: "x\n"
+        mode: "0644"
+      loop:
+        - { dest: looped-a.conf }
+        - { dest: looped-b.conf }
+
+    # A REMOVAL. Recording this as managed would have a collection step
+    # re-deleting what it just deleted, on every run, forever.
+    - name: A path being removed
+      ansible.builtin.file:
+        path: "{{ m }}/removed.conf"
+        state: absent
+
+    # A SKIPPED task. Its path is unrendered and unknowable here — and that is
+    # correct: a task skipped because its capability was deselected no longer
+    # manages its path, and the path dropping out of the manifest is precisely
+    # the signal collection needs.
+    - name: A task whose capability is not active
+      ansible.builtin.copy:
+        dest: "{{ m }}/skipped.conf"
+        content: "x\n"
+        mode: "0644"
+      when: false
+
+    # A shell side effect: the known blind spot, asserted so it stays known.
+    # nvm, tfenv and editor extensions all write this way.
+    - name: A file created by a command
+      ansible.builtin.command: "touch {{ m }}/invisible.txt"
+      changed_when: false

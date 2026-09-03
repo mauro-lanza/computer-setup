@@ -57,6 +57,15 @@ LOG_FILE="{{ computer_setup_log_file }}"
 # is inert unless CS_STATE_FILE is exported, which is why every mode that wants
 # state recorded sets it explicitly.
 STATE_FILE="{{ computer_setup_state_dir }}/last-run.json"
+# Every filesystem path this system manages, rewritten each complete run. The
+# basis for auditing what the tool owns, and later for collecting what it has
+# stopped owning. Separate from last-run.json because it answers a different
+# question: that file is what HAPPENED, this is what IS.
+MANIFEST_FILE="{{ computer_setup_state_dir }}/managed-paths.json"
+# One JSON line per run, oldest trimmed. The rolling log holds about three days
+# because it stores full Ansible output; this holds most of a year because it
+# stores nine fields.
+HISTORY_FILE="{{ computer_setup_state_dir }}/history.jsonl"
 # Plain ISO timestamp of the last SCHEDULED run that reached the repo and
 # finished cleanly. Deliberately a separate one-line file rather than a field in
 # the JSON: it must survive a run that failed, and merging JSON in bash to
@@ -115,6 +124,8 @@ computer-setup — operate this machine's configuration.
   upgrade          Upgrade managed tools INCLUDING casks, after confirming.
   log [n]          Tail the rolling log (default 100 lines).
   status [--json]  What the last run did, and whether syncing has gone stale.
+  manifest [--json] Every file and directory this system manages.
+  history [n]      The last n runs, one line each (default 20).
   machine <sub>    Back up / restore this machine's declaration (init|push|list|pull).
   repos [dir]      Print a repositories.yml scaffolded from existing checkouts.
   capture [args]   Diff live macOS defaults against the declared values.
@@ -149,9 +160,17 @@ sync_layers() {
 # legitimate invocation, and this file is a report, not a shell history.
 state_env() {
     CS_STATE_FILE="$STATE_FILE"
+    CS_MANIFEST_FILE="$MANIFEST_FILE"
+    CS_HISTORY_FILE="$HISTORY_FILE"
     CS_RUN_MODE="$1"
     CS_RUN_PARTIAL="$2"
-    export CS_STATE_FILE CS_RUN_MODE CS_RUN_PARTIAL
+    # Identifies this invocation across every play it runs. History is APPENDED,
+    # and ansible-pull can reach the callback's final hook more than once, so
+    # without a key one run could leave two lines. $$ alone is not enough — the
+    # plays may be separate processes — hence the timestamp.
+    CS_RUN_ID="$$-$(date +%s)"
+    export CS_STATE_FILE CS_MANIFEST_FILE CS_HISTORY_FILE
+    export CS_RUN_MODE CS_RUN_PARTIAL CS_RUN_ID
 }
 
 # ─── Interactive reconcile: stream, don't capture ────────────────────────────
@@ -328,6 +347,76 @@ cmd_status() {
     else
         echo "Sync:      ok — last successful scheduled run ${days} day(s) ago"
     fi
+}
+
+# ─── What this system owns ───────────────────────────────────────────────────
+# The manifest answers "which files are mine", which until now could only be
+# reconstructed by reading the roles and resolving them against layer data. It
+# is written by the same callback that writes the run state, so it records what
+# the run ACTUALLY managed rather than a second hand-maintained list that could
+# disagree with it.
+cmd_manifest() {
+    if [[ ! -f "$MANIFEST_FILE" ]]; then
+        echo "No manifest yet. Run \`computer-setup check\` to populate it."
+        return 0
+    fi
+    if [[ "${1:-}" == "--json" ]]; then
+        cat "$MANIFEST_FILE"
+        return 0
+    fi
+
+    local generated complete n_files n_dirs n_backups
+    generated="$(yq -r '.generated // ""' "$MANIFEST_FILE" 2>/dev/null)"
+    complete="$(yq -r '.complete // false' "$MANIFEST_FILE" 2>/dev/null)"
+    n_files="$(yq -r '.files | length' "$MANIFEST_FILE" 2>/dev/null)"
+    n_dirs="$(yq -r '.directories | length' "$MANIFEST_FILE" 2>/dev/null)"
+    n_backups="$(yq -r '.backups | length' "$MANIFEST_FILE" 2>/dev/null)"
+
+    echo "Recorded:  ${generated:-?}"
+    # A partial or failed run saw only part of the machine. Saying so matters
+    # more here than anywhere else: this is the list a future collection step
+    # would delete FROM, and acting on a fraction of it would be destructive.
+    if [[ "$complete" != "true" ]]; then
+        echo "           INCOMPLETE — a partial or failed run. Not the whole machine."
+    fi
+    echo
+    echo "Files (${n_files:-0}):"
+    yq -r '.files[] | "  " + .path + "\t" + (.role // "-")' "$MANIFEST_FILE" 2>/dev/null \
+        | column -t -s $'\t' 2>/dev/null || yq -r '.files[].path' "$MANIFEST_FILE"
+    echo
+    echo "Directories (${n_dirs:-0}):"
+    yq -r '.directories[] | "  " + .path' "$MANIFEST_FILE" 2>/dev/null
+    # Ansible's `backup: true` residue. Nothing reads these and nothing removes
+    # them, so they are listed apart rather than mixed in with live files.
+    if [[ "${n_backups:-0}" -gt 0 ]]; then
+        echo
+        echo "Backup copies left behind (${n_backups}):"
+        yq -r '.backups[] | "  " + .path' "$MANIFEST_FILE" 2>/dev/null
+    fi
+}
+
+# ─── Run history ─────────────────────────────────────────────────────────────
+# The rolling log holds about three days because it stores full Ansible output.
+# This holds most of a year because it stores nine fields, so "when did this
+# machine last actually apply anything" stays answerable.
+cmd_history() {
+    if [[ ! -f "$HISTORY_FILE" ]]; then
+        echo "No history yet. It is appended to by every run."
+        return 0
+    fi
+    local n="${1:-20}"
+    [[ "$n" =~ ^[0-9]+$ ]] || { printf '%s\n' "history: expected a number, got '$n'" >&2; return 64; }
+    printf '%-26s %-8s %-8s %8s %8s %9s\n' FINISHED MODE RESULT CHANGED FAILED DURATION
+    tail -n "$n" "$HISTORY_FILE" | while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        printf '%s\n' "$line" | yq -r \
+            '[.finished, .mode + (if .partial then "*" else "" end), .result,
+              (.changed | tostring), (.failed | tostring), (.duration_seconds | tostring) + "s"]
+             | @tsv' 2>/dev/null \
+        | awk -F'\t' '{printf "%-26s %-8s %-8s %8s %8s %9s\n", $1, $2, $3, $4, $5, $6}'
+    done
+    echo
+    echo "* = partial run (narrowed by tags or arguments)"
 }
 
 # ─── Machine declaration backup ──────────────────────────────────────────────
@@ -524,6 +613,8 @@ case "$COMMAND" in
     log)                cmd_log "$@" ;;
     machine)            cmd_machine "$@" ;;
     status)             cmd_status "$@" ;;
+    manifest)           cmd_manifest "$@" ;;
+    history)            cmd_history "$@" ;;
     repos)              cmd_repos "$@" ;;
     capture)            exec "${BIN_DIR}/macos-capture" "$@" ;;
     layers)             cmd_layers "$@" ;;
