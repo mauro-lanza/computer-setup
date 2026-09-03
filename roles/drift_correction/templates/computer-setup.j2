@@ -338,6 +338,15 @@ cmd_status() {
         echo "           Run \`computer-setup log\` for the detail."
     fi
 
+    # Cheap here, and it is the only place someone looks daily. The detail lives
+    # in `computer-setup manifest`; this is just the pointer.
+    local orphan_n
+    orphan_n="$(yq -r '.orphans // [] | length' "$MANIFEST_FILE" 2>/dev/null || true)"
+    if [[ "${orphan_n:-0}" =~ ^[0-9]+$ && "${orphan_n:-0}" -gt 0 ]]; then
+        echo "Orphans:   ${orphan_n} path(s) no longer managed but still on disk"
+        echo "           See \`computer-setup manifest\`. Nothing is deleted automatically."
+    fi
+
     # The point of the whole file: a machine that silently stopped syncing looks
     # identical to a healthy one until someone asks.
     if [[ -z "$days" ]]; then
@@ -365,20 +374,17 @@ cmd_manifest() {
         return 0
     fi
 
-    local generated complete n_files n_dirs n_backups
+    local generated n_files n_dirs n_backups n_orphans
     generated="$(yq -r '.generated // ""' "$MANIFEST_FILE" 2>/dev/null)"
-    complete="$(yq -r '.complete // false' "$MANIFEST_FILE" 2>/dev/null)"
     n_files="$(yq -r '.files | length' "$MANIFEST_FILE" 2>/dev/null)"
     n_dirs="$(yq -r '.directories | length' "$MANIFEST_FILE" 2>/dev/null)"
     n_backups="$(yq -r '.backups | length' "$MANIFEST_FILE" 2>/dev/null)"
+    n_orphans="$(yq -r '.orphans // [] | length' "$MANIFEST_FILE" 2>/dev/null)"
 
+    # Only a complete run writes this file, so it is always the last full
+    # picture — but it may predate the last run, and saying when it was taken is
+    # how someone notices they have been running tagged applies all week.
     echo "Recorded:  ${generated:-?}"
-    # A partial or failed run saw only part of the machine. Saying so matters
-    # more here than anywhere else: this is the list a future collection step
-    # would delete FROM, and acting on a fraction of it would be destructive.
-    if [[ "$complete" != "true" ]]; then
-        echo "           INCOMPLETE — a partial or failed run. Not the whole machine."
-    fi
     echo
     echo "Files (${n_files:-0}):"
     yq -r '.files[] | "  " + .path + "\t" + (.role // "-")' "$MANIFEST_FILE" 2>/dev/null \
@@ -392,6 +398,18 @@ cmd_manifest() {
         echo
         echo "Backup copies left behind (${n_backups}):"
         yq -r '.backups[] | "  " + .path' "$MANIFEST_FILE" 2>/dev/null
+    fi
+    # Paths this system used to write, still on disk, no longer written by any
+    # active capability. REPORTED, never removed — deciding a file is garbage is
+    # a judgement, and the evidence is shown so a person can make it.
+    if [[ "${n_orphans:-0}" -gt 0 ]]; then
+        echo
+        echo "No longer managed, still on disk (${n_orphans}):"
+        yq -r '.orphans[] | "  " + .path + "\t" + ("was " + (.role // "?")) + "\tsince " + (.since // "?")' \
+            "$MANIFEST_FILE" 2>/dev/null | column -t -s $'\t' 2>/dev/null \
+            || yq -r '.orphans[].path' "$MANIFEST_FILE" 2>/dev/null
+        echo
+        echo "  Nothing is deleted automatically. Remove what you recognise."
     fi
 }
 

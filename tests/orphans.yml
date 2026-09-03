@@ -1,0 +1,24 @@
+---
+# Second phase of the manifest contract: what happens when a path STOPS being
+# managed. Same fixture directory as tests/manifest.yml, minus the looped files
+# and the backup — so running this after it makes those paths orphans.
+- name: Exercise orphan detection
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    m: /tmp/cs-manifest-contract
+  tasks:
+    - name: A managed directory
+      ansible.builtin.file:
+        path: "{{ m }}"
+        state: directory
+        mode: "0755"
+
+    # The only file still declared. Everything tests/manifest.yml wrote and this
+    # does not is now unmanaged but still on disk.
+    - name: The one file still managed
+      ansible.builtin.copy:
+        dest: "{{ m }}/managed.conf"
+        content: "v2\n"
+        mode: "0644"

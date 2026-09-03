@@ -321,19 +321,61 @@ beside a file and **nothing has ever removed them**. Ansible names the file it
 generated in its result, so these are captured rather than guessed at with a
 glob.
 
-### `complete` is the only field a deletion may act on
+### Only a complete run writes it
 
-`complete` is true when the run was neither partial nor failed. Both cases
-produce a manifest that is a *fraction* of the machine, and diffing a fraction
-against a previous whole marks everything missing as an orphan:
+A run that was partial or failed **does not write the manifest at all**. It saw
+a fraction of the machine — `--tags git` sees three files of twenty-seven — and
+replacing a full inventory with a fraction gives a wrong answer to "what does
+this own" until the next full run. The previous complete manifest is the better
+answer, so it survives untouched.
 
-- `--tags git` yields three files. The other 24 are not orphans.
-- A run that fails at task 40 never reaches task 41's path.
+That is stricter than marking the file incomplete and letting readers check,
+which is what this did first. The stricter rule is what makes orphan detection
+possible at all: the diff below needs a trustworthy *previous*, and a partial
+run would have destroyed it.
+
+`complete` stays in the payload even though it is now always true. A consumer
+should be able to check the property rather than having to know the rule that
+guarantees it.
 
 The interlocks already existed — `partial` was added so nobody could read "no
 drift in the one role I ran" as "machine converged", which is the same
-precondition. Nothing collects anything yet; this is the field that will decide
-when something does.
+precondition.
+
+## Orphans: paths that stopped being managed
+
+Each complete run diffs the previous manifest against its own and records what
+fell out, in `orphans`. `computer-setup manifest` lists them and `status` says
+how many there are.
+
+**Reported, never removed.** Deciding a file is garbage is a judgement, and the
+evidence is presented so a person can make it. Shipping the report first is
+deliberate: it should be watched being right for a while before anything acts on
+it.
+
+Three properties, each gated:
+
+- **An orphan is carried forward, not recomputed.** A naive
+  previous-minus-current diff reports a path exactly once — on the next run the
+  previous manifest no longer lists it either, so it silently disappears while
+  the file is still sitting there. An orphan stays on the list until it stops
+  existing or comes back under management.
+- **It must still exist on disk** (`lexists`, so a broken symlink counts). A
+  report that only grows is one nobody reads.
+- **Directories are not tracked.** A directory falling out almost always means
+  its contents did too, and the blast radius is categorically larger —
+  `~/Library/Logs` and `~/.local/bin` are both managed directories and neither
+  is this system's to delete.
+
+Attribution (`role`, `task`, `action`) is kept from when the path *was* managed,
+plus a `since` timestamp preserved across runs. "Which role used to own this,
+and how long has it been unmanaged" is what someone asks when deciding whether
+to delete it.
+
+Scheduled agents are the one thing that reaps itself rather than waiting for
+this, because **an agent is not just a file**: removing the plist without
+`launchctl bootout` leaves the job running until the next reboot, so removal has
+an ordering requirement no path-based collector can honour.
 
 ## Run history
 

@@ -103,6 +103,9 @@ ansible-playbook --syntax-check local.yml
 ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook --syntax-check tests/contract.yml
 ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook --syntax-check tests/scheduled-agents.yml
 ansible-playbook --syntax-check tests/truncation.yml
+ansible-playbook --syntax-check tests/orphans.yml
+ansible-playbook --syntax-check tests/failure.yml
+ansible-playbook --syntax-check tests/manifest.yml
 
 echo "==> Inventory"
 ansible-inventory --list >/dev/null
@@ -381,9 +384,14 @@ assert len(backups) == 1, f"expected one backup, got {sorted(backups)}"
 assert next(iter(backups)).startswith(f"{base}/managed.conf."), sorted(backups)
 assert not (backups & files), "a backup must not also be listed as a live file"
 
-# The one field a collection step may act on. The last run was PARTIAL.
-assert m["partial"] is True, m["partial"]
-assert m["complete"] is False, "a partial run must never be marked complete"
+# The third run was PARTIAL, and must not have been written at all: it saw a
+# fraction of the machine, and replacing a full inventory with a fraction gives
+# a wrong answer to "what does this own" until the next full run. The previous
+# complete manifest is the better answer, so it survives untouched.
+assert m["complete"] is True, "a partial run overwrote the manifest"
+assert m["partial"] is False, m["partial"]
+assert m["mode"] == "apply", "the partial check run clobbered the manifest"
+assert f"{base}/looped-a.conf" in files, "the partial run truncated the inventory"
 
 mode = stat.S_IMODE(os.stat(os.path.join(d, "managed-paths.json")).st_mode)
 assert mode == 0o600, oct(mode)
@@ -400,6 +408,68 @@ mode = stat.S_IMODE(os.stat(os.path.join(d, "history.jsonl")).st_mode)
 assert mode == 0o600, oct(mode)
 print("  ok  inventory, omissions, backups, partial flag, and one line per run")
 PY
+
+# Phase two: a path that STOPS being managed. Same fixture directory, fewer
+# declared files — so what tests/manifest.yml wrote is now unmanaged and still
+# on disk. Report-only; nothing here deletes anything.
+CS_MANIFEST_FILE="$cs_mdir/managed-paths.json" CS_RUN_MODE=apply CS_RUN_PARTIAL=0 \
+    CS_RUN_ID=contract-3 ansible-playbook tests/orphans.yml >/dev/null
+# Twice, because an orphan must SURVIVE the next run. A naive
+# previous-minus-current diff reports it once and then silently forgets it,
+# while the file is still sitting there.
+CS_MANIFEST_FILE="$cs_mdir/managed-paths.json" CS_RUN_MODE=apply CS_RUN_PARTIAL=0 \
+    CS_RUN_ID=contract-4 ansible-playbook tests/orphans.yml >/dev/null
+"$CS_PY" - "$cs_mdir" <<'PYEOF'
+import json, os, sys
+
+d = os.path.abspath(sys.argv[1])
+m = json.load(open(os.path.join(d, "managed-paths.json")))
+base = "/tmp/cs-manifest-contract"
+orphans = {e["path"]: e for e in m["orphans"]}
+
+# Dropped from the declaration, still on disk, and still reported after a
+# SECOND run — the property a one-shot diff does not have.
+for expected in (f"{base}/looped-a.conf", f"{base}/looped-b.conf"):
+    assert expected in orphans, f"{expected} missing from {sorted(orphans)}"
+
+# Still declared, so not an orphan however many runs go by.
+assert f"{base}/managed.conf" not in orphans, "a managed file was reported as an orphan"
+
+# Never existed on disk: `state: absent` and skipped paths must not be
+# resurrected as orphans by the diff.
+for never in (f"{base}/removed.conf", f"{base}/skipped.conf"):
+    assert never not in orphans, f"{never} was invented as an orphan"
+
+# Directories are deliberately untracked: ~/Library/Logs and ~/.local/bin are
+# both managed directories and neither is ours to delete.
+assert base not in orphans, "a directory was reported as an orphan"
+
+# Attribution survives the file falling out of management — "which role used to
+# own this" is what someone asks when deciding whether to delete it.
+assert orphans[f"{base}/looped-a.conf"].get("since"), "an orphan carries no `since`"
+print("  ok  orphans found, carried across runs, and not invented")
+PYEOF
+
+# Phase three: an orphan that gets DEALT WITH must stop being reported. Without
+# this the list only ever grows, and a report that never shrinks is one nobody
+# reads. The check is `lexists`, so a broken symlink still counts as present.
+rm -f -- "$cs_mscratch/looped-a.conf"
+CS_MANIFEST_FILE="$cs_mdir/managed-paths.json" CS_RUN_MODE=apply CS_RUN_PARTIAL=0 \
+    CS_RUN_ID=contract-5 ansible-playbook tests/orphans.yml >/dev/null
+"$CS_PY" - "$cs_mdir" <<'PYEOF'
+import json, os, sys
+
+d = os.path.abspath(sys.argv[1])
+m = json.load(open(os.path.join(d, "managed-paths.json")))
+base = "/tmp/cs-manifest-contract"
+orphans = {e["path"] for e in m["orphans"]}
+
+assert f"{base}/looped-a.conf" not in orphans, "a deleted orphan is still reported"
+# The one still on disk must survive, or the rule is "forget everything" rather
+# than "forget what is gone".
+assert f"{base}/looped-b.conf" in orphans, "deleting one orphan dropped the others"
+print("  ok  an orphan removed from disk stops being reported")
+PYEOF
 rm -rf -- "$cs_mdir" "$cs_mscratch"
 
 # MAX_RECORDED had never executed: the run-state contract asserts
@@ -485,12 +555,11 @@ if CS_STATE_FILE="$cs_fdir/last-run.json" CS_MANIFEST_FILE="$cs_fdir/managed-pat
     echo "ERROR: tests/failure.yml was expected to fail and did not" >&2
     exit 1
 fi
-"$CS_PY" - "$cs_fdir" <<'PY'
+"$CS_PY" - "$cs_fdir" <<'PYEOF'
 import json, os, sys
 
 d = os.path.abspath(sys.argv[1])
 s = json.load(open(os.path.join(d, "last-run.json")))
-m = json.load(open(os.path.join(d, "managed-paths.json")))
 h = [json.loads(l) for l in
      open(os.path.join(d, "history.jsonl")).read().splitlines() if l.strip()]
 
@@ -500,14 +569,14 @@ assert len(s["failed"]) == 1, s["failed"]
 assert h[-1]["result"] == "failed", h[-1]
 assert h[-1]["failed"] == 1, h[-1]
 
-# The point: the task after the failure never ran, so its path is absent. Acting
-# on this manifest would delete a file the machine still manages.
-paths = {e["path"] for e in m["files"]}
-assert "/tmp/cs-failure-contract/reached.conf" in paths, sorted(paths)
-assert "/tmp/cs-failure-contract/unreached.conf" not in paths, sorted(paths)
-assert m["complete"] is False, "a failed run must never be marked complete"
-print("  ok  failed runs say so, and their manifest refuses to be complete")
-PY
+# A failed run writes NO manifest. The task after the failure never ran, so its
+# path would be missing from the inventory — and the next run would then report
+# a file the machine still manages as an orphan. Both the run summary and the
+# history still record the failure; only the inventory abstains.
+assert not os.path.exists(os.path.join(d, "managed-paths.json")), \
+    "a failed run wrote a manifest"
+print("  ok  failed runs say so, and write no inventory at all")
+PYEOF
 rm -rf -- "$cs_fdir" "$cs_fscratch"
 
 # A guard whose expression always evaluates false looks exactly like a passing

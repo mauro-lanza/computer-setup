@@ -410,32 +410,103 @@ class CallbackModule(CallbackBase):
             pass
 
     def _write_manifest(self, totals):
-        """The set of paths this system owns, as of this run.
+        """The set of paths this system owns, as of the last COMPLETE run.
 
-        `complete` is the field that matters: it is the ONLY safe basis for
-        deleting anything. A run narrowed by --tags saw one role, so its
-        manifest is a fraction of the machine — diffing that against a previous
-        full manifest would mark everything else an orphan. A run that failed
-        part-way is the same problem wearing a different hat.
+        Not written at all by a partial or failed run. Such a run saw a fraction
+        of the machine — `--tags git` sees three files of twenty-seven — and
+        writing that fraction would destroy the inventory until the next full
+        run, which is exactly when someone asking "what does this own" gets a
+        wrong answer. The previous complete manifest is a better answer than a
+        fresh incomplete one, so it is left alone.
+
+        `complete` stays in the payload even though it is now always true: a
+        consumer should be able to check the property rather than having to know
+        the rule that guarantees it.
         """
         if not self.manifest_file:
             return
+        complete = (
+            not self.partial
+            and not totals["failed"]
+            and not totals["unreachable"]
+        )
+        if not complete:
+            return
+
+        previous = {}
+        try:
+            with open(self.manifest_file) as stream:
+                previous = json.load(stream)
+        except Exception:
+            previous = {}
+
+        files = sorted(self.managed_files.values(), key=lambda e: e["path"])
+        directories = sorted(self.managed_dirs.values(), key=lambda e: e["path"])
         payload = {
             "schema_version": MANIFEST_SCHEMA_VERSION,
             "generated": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
             "mode": self.run_mode,
             "partial": self.partial,
-            "complete": (not self.partial)
-            and not totals["failed"]
-            and not totals["unreachable"],
-            "files": sorted(self.managed_files.values(), key=lambda e: e["path"]),
-            "directories": sorted(self.managed_dirs.values(), key=lambda e: e["path"]),
+            "complete": complete,
+            "files": files,
+            "directories": directories,
             # Ansible's `backup: true` residue. Listed apart from `files`
             # because they are the one class here that is pure litter: nothing
             # reads them and nothing else will ever remove them.
             "backups": sorted(self.managed_backups.values(), key=lambda e: e["path"]),
+            "orphans": self._orphans(previous, files),
         }
         self._write(self.manifest_file, payload)
+
+    def _orphans(self, previous, files):
+        """Paths this system used to manage, still on disk, no longer written.
+
+        REPORTED ONLY. Nothing deletes them; this is the evidence a collection
+        step would eventually act on, and the point of shipping it first is to
+        watch it be right for a while before anything is destructive.
+
+        Carried forward rather than recomputed from scratch. A naive
+        previous-minus-current diff reports an orphan exactly once — the next
+        run's "previous" no longer lists it either, so it silently disappears
+        while the file is still sitting there. An orphan therefore stays on the
+        list until it stops existing or comes back under management.
+
+        Directories are deliberately not tracked. A directory falling out of the
+        manifest almost always means its contents did too, and removing
+        directories is a categorically larger blast radius than removing the
+        files this system wrote — `~/Library/Logs` and `~/.local/bin` are both
+        in here, and neither is ours to delete.
+        """
+        current = {entry["path"] for entry in files}
+        # Anything the previous run listed as managed, including its own
+        # orphans: a path stays reported until it is gone or is managed again.
+        candidates = {}
+        for entry in previous.get("files", []) + previous.get("orphans", []):
+            if not isinstance(entry, dict):
+                continue
+            path = entry.get("path")
+            if not isinstance(path, str) or path in current:
+                continue
+            candidates[path] = entry
+
+        orphans = []
+        for path, entry in sorted(candidates.items()):
+            try:
+                if not os.path.lexists(path):
+                    continue
+            except Exception:
+                continue
+            record = {"path": path}
+            # Kept from when it WAS managed: "which role used to own this" is
+            # the question someone asks when deciding whether to delete it.
+            for key in ("role", "task", "action"):
+                if entry.get(key):
+                    record[key] = entry[key]
+            # Preserved across runs so the report can say how long it has been
+            # unmanaged, rather than resetting to "since the last run".
+            record["since"] = entry.get("since") or time.strftime("%Y-%m-%dT%H:%M:%S%z")
+            orphans.append(record)
+        return orphans
 
     def _append_history(self, totals):
         """One line per run, oldest trimmed.
