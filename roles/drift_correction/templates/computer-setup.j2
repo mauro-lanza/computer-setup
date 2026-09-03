@@ -406,15 +406,26 @@ cmd_history() {
     fi
     local n="${1:-20}"
     [[ "$n" =~ ^[0-9]+$ ]] || { printf '%s\n' "history: expected a number, got '$n'" >&2; return 64; }
-    printf '%-26s %-8s %-8s %8s %8s %9s\n' FINISHED MODE RESULT CHANGED FAILED DURATION
-    tail -n "$n" "$HISTORY_FILE" | while IFS= read -r line; do
-        [[ -z "$line" ]] && continue
-        printf '%s\n' "$line" | yq -r \
-            '[.finished, .mode + (if .partial then "*" else "" end), .result,
-              (.changed | tostring), (.failed | tostring), (.duration_seconds | tostring) + "s"]
-             | @tsv' 2>/dev/null \
-        | awk -F'\t' '{printf "%-26s %-8s %-8s %8s %8s %9s\n", $1, $2, $3, $4, $5, $6}'
-    done
+
+    # One yq over the whole slice, not one per line: `history 500` would
+    # otherwise be 500 process spawns for what is a single read.
+    #
+    # `partial` is emitted as a plain field and turned into the asterisk by awk.
+    # yq here is mikefarah's, which has no jq-style `if/then/else` — see the
+    # note in docs/findings.md; this is the second time that has bitten.
+    {
+        printf '%-26s %-8s %-8s %8s %8s %9s\n' FINISHED MODE RESULT CHANGED FAILED DURATION
+        # HISTORY_TSV_EXPR — kept on one line so check.sh can lift it out and
+        # run it against a fixture. A broken expression here fails silently
+        # (the header still prints, the rows just vanish), which is how the
+        # if/then/else version shipped.
+        tail -n "$n" "$HISTORY_FILE" \
+            | yq -p json -r '[.finished, .mode, .result, (.partial | tostring), (.changed | tostring), (.failed | tostring), (.duration_seconds | tostring)] | @tsv' \
+            | awk -F'\t' '{
+                mode = $2 ($4 == "true" ? "*" : "")
+                printf "%-26s %-8s %-8s %8s %8s %8ss\n", $1, mode, $3, $5, $6, $7
+              }'
+    }
     echo
     echo "* = partial run (narrowed by tags or arguments)"
 }

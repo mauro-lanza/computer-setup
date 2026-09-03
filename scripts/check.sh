@@ -384,6 +384,43 @@ print("  ok  inventory, omissions, backups, partial flag, and one line per run")
 PY
 rm -rf -- "$cs_mdir" "$cs_mscratch"
 
+# `computer-setup history` renders through a yq expression, and a broken one
+# fails SILENTLY: the header still prints and the rows simply vanish. That is
+# how a jq-style `if/then/else` shipped — yq here is mikefarah's, which has no
+# such construct. Lifted out of the template rather than duplicated, so the
+# thing under test is the thing that runs.
+echo "==> History rendering"
+hist_expr="$(sed -n "s/.*| yq -p json -r '\(.*\)' \\\\$/\1/p" \
+    roles/drift_correction/templates/computer-setup.j2)"
+if [[ -z "$hist_expr" ]]; then
+    echo "ERROR: could not lift the history yq expression out of the runner" >&2
+    echo "       (looked for the HISTORY_TSV_EXPR line)" >&2
+    exit 1
+fi
+hist_fixture="$(mktemp)"
+cat > "$hist_fixture" <<'JSONL'
+{"changed":0,"duration_seconds":48.5,"failed":0,"finished":"2026-09-03T21:43:28+0200","mode":"check","ok":163,"partial":false,"result":"ok","run_id":"a"}
+{"changed":2,"duration_seconds":11.4,"failed":1,"finished":"2026-09-03T21:44:54+0200","mode":"apply","ok":78,"partial":true,"result":"failed","run_id":"b"}
+JSONL
+# Captured into a variable, not piped into grep: check.sh runs with pipefail and
+# `grep -q` SIGPIPEs the producer, which racily fails a passing assertion.
+hist_out="$(yq -p json -r "$hist_expr" < "$hist_fixture")"
+rm -f -- "$hist_fixture"
+hist_rows="$(printf '%s\n' "$hist_out" | grep -c . || true)"
+if [[ "$hist_rows" -ne 2 ]]; then
+    echo "ERROR: the history expression rendered $hist_rows row(s), expected 2" >&2
+    echo "       expression: $hist_expr" >&2
+    exit 1
+fi
+# Field order is what awk positionally depends on downstream.
+if [[ "$(printf '%s\n' "$hist_out" | tail -1)" \
+      != "2026-09-03T21:44:54+0200	apply	failed	true	2	1	11.4" ]]; then
+    echo "ERROR: the history expression changed shape" >&2
+    printf '%s\n' "$hist_out" >&2
+    exit 1
+fi
+echo "  ok  2 rows, fields in the order awk expects"
+
 # `result` was derived from a stats key Ansible does not emit ("failed" rather
 # than "failures"), so every failed run reported itself as ok. `complete` is
 # derived from the same total, which would have authorised collection after a
