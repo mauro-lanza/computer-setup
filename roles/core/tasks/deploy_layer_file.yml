@@ -60,12 +60,19 @@
     _cs_deploy_src: "{{ _cs_tpl_src | default('', true) or _cs_file_src | default('', true) }}"
     _cs_deploy_as_template: "{{ (_cs_tpl_src | default('', true) | length) > 0 }}"
 
+# Skipped when the parent is $HOME itself — which happens for any dest sitting
+# directly in the home directory, ~/.zshrc being the one in practice. $HOME
+# always exists, so "create it" is meaningless, and `mode: 0755` would have this
+# role assert a permission on the user's home directory. Harmless while it
+# already matches, a silent re-permissioning of $HOME if it ever does not.
 - name: "Ensure parent directory exists: {{ computer_setup_deploy_dest | dirname }}"
   ansible.builtin.file:
     path: "{{ computer_setup_deploy_dest | dirname }}"
     state: directory
     mode: "0755"
-  when: _cs_deploy_src | default('', true) | length > 0
+  when:
+    - _cs_deploy_src | default('', true) | length > 0
+    - (computer_setup_deploy_dest | dirname) != home_dir
 
 # Mode is deliberately UNMANAGED below unless the file has to be executable.
 # Pinning a mode makes any third party that chmods its own config file (an
