@@ -79,26 +79,79 @@
     label: "{{ agent.label }} (@ {{ agent.hour }}:{{ '%02d' | format(agent.minute | int) }})"
   notify: Reload scheduled user agents
 
+# ─── Reconcile ───────────────────────────────────────────────────────────────
 # Turning an agent off must actually stop it, not just stop rewriting the plist.
-# An orphaned plist stays loaded across reboots, so the job would keep running
-# long after the machine said no.
+# An orphaned plist stays loaded across reboots, so the job keeps running long
+# after the machine said no.
+#
+# `_scheduled_agents_unwanted` covers an agent still DECLARED but disabled — by
+# `enabled: false`, a kill switch, or a capability going away. It cannot cover an
+# agent whose entry was DELETED from a layer outright: nothing declares it, so
+# nothing names it, and its plist was orphaned and left loaded forever. That is
+# what the manifest below fixes.
+#
+# Beside the plists it tracks, exactly as the shell role keeps
+# `.computer-setup-snippets` beside its snippets. launchd only loads `*.plist`,
+# so a dotfile here is inert. It records LABELS, not paths, because unloading
+# needs the label and the path is derived from it.
+#
+# This role reaps its own agents rather than leaving them to a generic file
+# collector for a reason that will not go away: an agent is not just a file.
+# Deleting the plist without `launchctl bootout` leaves the job running until
+# the next reboot, so removal has an ordering requirement no path-based
+# collector can honour.
+- name: Check the previous scheduled agent manifest
+  ansible.builtin.stat:
+    path: "{{ scheduled_agents_manifest_path }}"
+  register: _scheduled_agents_manifest
+
+- name: Read the previous scheduled agent manifest
+  ansible.builtin.slurp:
+    src: "{{ scheduled_agents_manifest_path }}"
+  register: _scheduled_agents_manifest_data
+  when: _scheduled_agents_manifest.stat.exists
+
+- name: Resolve scheduled agents to tear down
+  ansible.builtin.set_fact:
+    # Previously deployed, plus still-declared-but-unwanted, minus wanted.
+    # `reject('equalto', '')` because an empty manifest splits to [''], which
+    # would otherwise reach the teardown loop as a label of "".
+    _scheduled_agents_stale: >-
+      {{ (((_scheduled_agents_manifest_data.content | default('') | b64decode).splitlines()
+            if _scheduled_agents_manifest.stat.exists else [])
+          + (_scheduled_agents_unwanted | map(attribute='label') | list))
+         | reject('equalto', '')
+         | unique
+         | difference(_scheduled_agents_wanted | map(attribute='label') | list) }}
+
 - name: Unload scheduled agents that no longer apply
   ansible.builtin.command:
-    cmd: launchctl bootout gui/{{ ansible_facts['user_uid'] }} {{ home_dir }}/Library/LaunchAgents/{{ agent.label }}.plist
-  loop: "{{ _scheduled_agents_unwanted }}"
-  loop_control:
-    loop_var: agent
-    label: "{{ agent.label }}"
+    cmd: launchctl bootout gui/{{ ansible_facts['user_uid'] }} {{ home_dir }}/Library/LaunchAgents/{{ item }}.plist
+  loop: "{{ _scheduled_agents_stale }}"
   register: _scheduled_agents_bootout
   changed_when: _scheduled_agents_bootout.rc == 0
   # Not loaded (or never was) is the desired end state, not an error.
   failed_when: false
+  when: scheduled_agents_activate | bool
 
 - name: Remove plists for scheduled agents that no longer apply
   ansible.builtin.file:
-    path: "{{ home_dir }}/Library/LaunchAgents/{{ agent.label }}.plist"
+    path: "{{ home_dir }}/Library/LaunchAgents/{{ item }}.plist"
     state: absent
-  loop: "{{ _scheduled_agents_unwanted }}"
-  loop_control:
-    loop_var: agent
-    label: "{{ agent.label }}"
+  loop: "{{ _scheduled_agents_stale }}"
+
+# Written last, and only from what is actually wanted, so a run that failed
+# before deploying does not record agents it never wrote. Zero agents must write
+# an EMPTY file rather than "\n" — see the same trap in the shell role.
+- name: Write the current scheduled agent manifest
+  ansible.builtin.copy:
+    dest: "{{ scheduled_agents_manifest_path }}"
+    mode: "0644"
+    content: "{{ (_labels | sort | join('\n') ~ '\n') if _labels | length > 0 else '' }}"
+  vars:
+    _labels: "{{ _scheduled_agents_wanted | map(attribute='label') | list }}"
+  # The directory above is only created when something is wanted. A machine that
+  # has never had an agent has nothing to record and no directory to record it
+  # in; one that had them keeps the directory, so the empty manifest still
+  # lands and the next run knows the reaping is done.
+  when: _scheduled_agents_wanted | length > 0 or _scheduled_agents_manifest.stat.exists

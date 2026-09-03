@@ -32,7 +32,25 @@ scheduled_agents: []
 # Global kill switch, independent of the per-entry `enabled` flag.
 scheduled_agents_enabled: true
 
+# Whether to actually load and unload jobs in launchd, as opposed to only
+# writing and removing the plists. Always true in production — a plist that is
+# not loaded does nothing, and one that is not unloaded keeps running.
+#
+# It exists because the launchd GUI domain is MACHINE-GLOBAL: there is no
+# scratch launchd the way there is a scratch HOME, so a test that exercised the
+# real teardown would bootstrap and bootout jobs in the developer's own session.
+# Setting this false lets the file-level reconcile be tested honestly, and
+# leaves the launchctl calls as the part that is only ever exercised for real.
+scheduled_agents_activate: true
+
 scheduled_agents_log_dir: "{{ home_dir }}/Library/Logs"
+
+# Labels this role deployed on the previous run, one per line. Kept beside the
+# plists it tracks (launchd only loads `*.plist`, so a dotfile here is inert),
+# mirroring the shell role's snippet manifest. Without it an agent DELETED from
+# a layer is unreachable: nothing declares it, so nothing can name it, and its
+# plist stays loaded across reboots.
+scheduled_agents_manifest_path: "{{ home_dir }}/Library/LaunchAgents/.computer-setup-agents"
 
 # The engine's OWN agents, in the same shape as the list above — there is one
 # LaunchAgent implementation, not a second one inside `drift_correction`. Kept

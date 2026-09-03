@@ -1,0 +1,102 @@
+---
+# A scheduled agent DELETED from a layer used to be unreachable: the teardown
+# set was computed from agents still declared, so nothing named it, and its
+# plist stayed in ~/Library/LaunchAgents — loaded across reboots, running long
+# after the machine stopped declaring it.
+#
+# Driven against a scratch HOME so no real LaunchAgent is touched. `launchctl
+# bootout` on a label that was never loaded fails harmlessly and the role
+# already ignores that, so this exercises the real teardown path rather than a
+# mocked one.
+- name: Validate scheduled agent teardown
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  vars:
+    computer_setup_active_capabilities: []
+    # The plist template puts the Homebrew prefix on the agent's PATH; a
+    # LaunchAgent inherits almost nothing.
+    homebrew_prefix: /opt/homebrew
+    # The launchd GUI domain is machine-global — there is no scratch launchd the
+    # way there is a scratch HOME. This keeps the gate off the developer's own
+    # session; the file-level reconcile below is what is under test.
+    scheduled_agents_activate: false
+    drift_correction_enabled: false
+    scheduled_agents_engine: []
+    agent_alpha:
+      label: com.computer-setup.test-alpha
+      program: /usr/bin/true
+      hour: 3
+      minute: 0
+    agent_beta:
+      label: com.computer-setup.test-beta
+      program: /usr/bin/true
+      hour: 4
+      minute: 0
+
+  tasks:
+    - name: Create a scratch HOME
+      ansible.builtin.tempfile:
+        state: directory
+      register: agents_home
+
+    # ── Run 1: both agents declared ──────────────────────────────────────────
+    - name: Deploy two agents
+      ansible.builtin.include_role:
+        name: scheduled_agents
+      vars:
+        home_dir: "{{ agents_home.path }}"
+        scheduled_agents: ["{{ agent_alpha }}", "{{ agent_beta }}"]
+
+    - name: Stat after the first run
+      ansible.builtin.stat:
+        path: "{{ agents_home.path }}/Library/LaunchAgents/{{ item }}.plist"
+      register: after_first
+      loop:
+        - com.computer-setup.test-alpha
+        - com.computer-setup.test-beta
+
+    # ── Run 2: beta is DELETED from the declaration entirely ─────────────────
+    # Not disabled, not capability-gated — removed. This is the case the
+    # manifest exists for; every other teardown path still names the agent.
+    - name: Redeploy with beta deleted outright
+      ansible.builtin.include_role:
+        name: scheduled_agents
+      vars:
+        home_dir: "{{ agents_home.path }}"
+        scheduled_agents: ["{{ agent_alpha }}"]
+
+    - name: Stat after the second run
+      ansible.builtin.stat:
+        path: "{{ agents_home.path }}/Library/LaunchAgents/{{ item }}.plist"
+      register: after_second
+      loop:
+        - com.computer-setup.test-alpha
+        - com.computer-setup.test-beta
+
+    - name: Read the manifest
+      ansible.builtin.slurp:
+        src: "{{ agents_home.path }}/Library/LaunchAgents/.computer-setup-agents"
+      register: agents_manifest
+
+    - name: Assert the deleted agent was torn down
+      vars:
+        manifest_labels: >-
+          {{ (agents_manifest.content | b64decode).splitlines() | reject('equalto', '') | list }}
+      ansible.builtin.assert:
+        that:
+          - after_first.results[0].stat.exists
+          - after_first.results[1].stat.exists
+          # The one still declared survives.
+          - after_second.results[0].stat.exists
+          # The one deleted outright is gone — this is the regression.
+          - not after_second.results[1].stat.exists
+          # And the manifest now names only what is still wanted, so the next
+          # run does not try to reap it again.
+          - manifest_labels == ['com.computer-setup.test-alpha']
+        success_msg: "an agent deleted from a layer is unloaded and its plist removed"
+
+    - name: Clean up the scratch HOME
+      ansible.builtin.file:
+        path: "{{ agents_home.path }}"
+        state: absent

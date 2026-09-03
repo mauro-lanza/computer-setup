@@ -101,6 +101,7 @@ PY
 echo "==> Ansible syntax"
 ansible-playbook --syntax-check local.yml
 ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook --syntax-check tests/contract.yml
+ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook --syntax-check tests/scheduled-agents.yml
 
 echo "==> Inventory"
 ansible-inventory --list >/dev/null
@@ -119,6 +120,22 @@ ansible-playbook --list-tasks --tags upgrade local.yml >/dev/null
 
 echo "==> Layer contract"
 ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook tests/contract.yml >/dev/null
+
+# An agent DELETED from a layer (as opposed to disabled) used to be unreachable:
+# the teardown set was built from agents still declared, so nothing could name
+# it, and its plist stayed loaded across reboots — the job kept running long
+# after the machine stopped declaring it.
+echo "==> Scheduled agent teardown"
+# Output captured, not discarded: an `assert` failure prints its message on
+# STDOUT, so `>/dev/null` would leave a failing gate showing its heading and
+# nothing else.
+if ! sa_out="$(ANSIBLE_ROLES_PATH="$PWD/roles" \
+        ansible-playbook tests/scheduled-agents.yml 2>&1)"; then
+    printf '%s\n' "$sa_out" >&2
+    echo "ERROR: a scheduled agent deleted from a layer was not torn down" >&2
+    exit 1
+fi
+echo "  ok  an agent deleted from a layer is torn down, not orphaned"
 
 # The state file is a CONSUMED INTERFACE: `computer-setup status` reads it, and
 # a UI would too. Assert its shape, and — the point of the whole design — that
