@@ -52,6 +52,21 @@
         - { dest: looped-a.conf }
         - { dest: looped-b.conf }
 
+    # The same loop, but with an ABSOLUTE dest in the item — which is what the
+    # engine actually builds (the shell role composes full paths into
+    # shell_snippet_map). Under --check, creating a file yields neither a result
+    # `dest` nor a diff header, so the rendered item is the only thing left that
+    # names it. Without that fallback a fresh machine's first manifest was
+    # missing every loop-created file.
+    - name: Managed files from a loop with absolute item paths
+      ansible.builtin.copy:
+        dest: "{{ item.dest }}"
+        content: "x\n"
+        mode: "0644"
+      loop:
+        - { dest: "{{ m }}/abs-a.conf" }
+        - { dest: "{{ m }}/abs-b.conf" }
+
     # A REMOVAL. Recording this as managed would have a collection step
     # re-deleting what it just deleted, on every run, forever.
     - name: A path being removed

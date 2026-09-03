@@ -316,6 +316,29 @@ Three omissions are deliberate, and `check.sh` asserts each one:
   knowable from a callback. They are also not files anything would collect —
   they need `brew uninstall` or `--uninstall-extension`, a different verb.
 
+A path is resolved from three sources in order, because no single one covers
+both a converged run and a first one:
+
+| Source | Available when |
+|---|---|
+| the module's result `dest` | the file exists |
+| the diff's `before_header` | it exists and is changing |
+| the rendered loop item | always, including creating a file under `--check` |
+
+The third matters more than it looks. Under `--check` a file that does not exist
+yet produces neither a result path nor a diff header, so for a LOOP the rendered
+item is the only thing left that names it — and without it the first manifest a
+new machine wrote was missing every loop-created file, eight shell snippets
+among them. Found by running the whole playbook in check mode against a scratch
+`$HOME`, which is now a gate.
+
+One residual gap, on purpose: a loop under `--check` whose item is not itself
+the path — the LaunchAgent plists keyed on `agent.label`, the git identity file
+keyed on a hash — still cannot be resolved before the file exists. The first
+real `apply` records them, because then the module returns the path. Reaching
+further would mean re-rendering templates inside the callback with a variable
+context it does not have.
+
 `backups` is its own class: `backup: true` leaves `<dest>.<pid>.<date>@<time>~`
 beside a file and **nothing has ever removed them**. Ansible names the file it
 generated in its result, so these are captured rather than guessed at with a

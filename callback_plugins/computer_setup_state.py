@@ -310,10 +310,21 @@ class CallbackModule(CallbackBase):
                     state = args.get("state")
                     if isinstance(item, dict) and item.get("state"):
                         state = item["state"]
-                    # The per-item result carries the RENDERED absolute path.
-                    # `item.dest` does not: in the shell role it is a bare
-                    # filename, which no consumer could act on.
-                    absorb(sub.get("dest") or sub.get("path"), state, sub)
+                    # Three sources, in order, because no single one covers
+                    # both a converged run and a first one:
+                    #   result dest — present once the file EXISTS
+                    #   diff header — present when it exists and is changing
+                    #   rendered item — the only one that survives creating a
+                    #     file under --check, where the first two are empty
+                    # Without the last, a fresh machine's first manifest was
+                    # missing every loop-created file: eight shell snippets and
+                    # every LaunchAgent plist.
+                    dest = sub.get("dest") or sub.get("path")
+                    if not isinstance(dest, str) or not dest.startswith("/"):
+                        dest = self._dest_from_diff(sub.get("diff"))
+                    if not dest:
+                        dest = self._dest_from_item(sub.get("item"))
+                    absorb(dest, state, sub)
                 return
 
             dest = payload.get("dest") or payload.get("path")

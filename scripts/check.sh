@@ -409,6 +409,30 @@ assert mode == 0o600, oct(mode)
 print("  ok  inventory, omissions, backups, partial flag, and one line per run")
 PY
 
+# Phase 1b: the SAME playbook under --check against a directory that does not
+# exist yet — a fresh machine. Creating a file in check mode yields neither a
+# result `dest` nor a diff header, so a loop's rendered item is the only thing
+# left that names it. Without that fallback the first manifest a new machine
+# wrote was missing every loop-created file: eight shell snippets among them.
+cs_fresh="$(mktemp -d)"
+CS_MANIFEST_FILE="$cs_fresh/managed-paths.json" CS_RUN_MODE=check CS_RUN_PARTIAL=0 \
+    CS_RUN_ID=fresh-1 ansible-playbook tests/manifest.yml --check \
+    -e "m=$cs_fresh/scratch" >/dev/null
+"$CS_PY" - "$cs_fresh" <<'PYEOF'
+import json, os, sys
+
+d = os.path.abspath(sys.argv[1])
+m = json.load(open(os.path.join(d, "managed-paths.json")))
+files = {e["path"] for e in m["files"]}
+base = os.path.join(d, "scratch")
+
+for expected in (f"{base}/abs-a.conf", f"{base}/abs-b.conf"):
+    assert expected in files, f"{expected} missing from a check-mode manifest: {sorted(files)}"
+assert f"{base}/managed.conf" in files, sorted(files)
+print("  ok  a fresh machine's manifest includes loop-created files")
+PYEOF
+rm -rf -- "$cs_fresh"
+
 # Phase two: a path that STOPS being managed. Same fixture directory, fewer
 # declared files — so what tests/manifest.yml wrote is now unmanaged and still
 # on disk. Report-only; nothing here deletes anything.
@@ -429,7 +453,8 @@ orphans = {e["path"]: e for e in m["orphans"]}
 
 # Dropped from the declaration, still on disk, and still reported after a
 # SECOND run — the property a one-shot diff does not have.
-for expected in (f"{base}/looped-a.conf", f"{base}/looped-b.conf"):
+for expected in (f"{base}/looped-a.conf", f"{base}/looped-b.conf",
+                 f"{base}/abs-a.conf", f"{base}/abs-b.conf"):
     assert expected in orphans, f"{expected} missing from {sorted(orphans)}"
 
 # Still declared, so not an orphan however many runs go by.
