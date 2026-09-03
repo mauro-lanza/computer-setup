@@ -18,4 +18,7 @@ __pycache__/
 #
 # CAUTION: `git clean -fdx` deletes ignored files. This one is the only copy of
 # several sessions of context — see the note at the top of it.
+# Moved to computer-setup-layer-personal/docs/learnings.md (private, tracked,
+# backed up). The rule stays so a stray copy here is never committed to a public
+# repo by accident.
 docs/learnings.md
