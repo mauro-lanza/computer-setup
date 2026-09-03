@@ -614,6 +614,36 @@ printf -- '---\nlayers: []\n' > "$WORK/already.yml"
 assert_eq "an already-declared machine is not offered a restore" "" \
     "$(run_restore "$WORK/pick-1" 1 "" "$WORK/already.yml")"
 
+# ─── Where bootstrap thinks it is running from ───────────────────────────────
+# Under `curl | bash` there is no file, so BASH_SOURCE is empty and the old
+# fallback resolved SCRIPT_DIR to $PWD. An unrelated $PWD may well hold a
+# `requirements.yml` or a `scripts/` of its own, and bootstrap would have used
+# THOSE — installing from another project's file, silently. Missing is
+# recoverable; wrong is not.
+assert_eq "a real checkout is trusted" "$REPO_ROOT" \
+    "$(resolve_script_dir "$REPO_ROOT/bootstrap.sh")"
+
+# The two invocations with no file behind them. Both must yield nothing, so
+# every consumer downloads what it needs instead of reading a stranger's copy.
+assert_eq "curl | bash trusts no directory" "" "$(resolve_script_dir "")"
+assert_eq "bash <(curl ...) trusts no directory" "" \
+    "$(resolve_script_dir "/dev/fd/63")"
+
+# The case that motivated it: a decoy $PWD carrying both marker files. Piping
+# from here must still refuse, because nothing was passed to verify.
+DECOY="$WORK/decoy"
+mkdir -p "$DECOY/scripts"
+touch "$DECOY/local.yml" "$DECOY/scripts/computer-setup-layers" "$DECOY/requirements.yml"
+assert_eq "a lookalike \$PWD is not adopted when piped" "" \
+    "$(cd "$DECOY" && resolve_script_dir "")"
+
+# A directory missing either marker is not a checkout, however suggestive.
+HALF="$WORK/half"
+mkdir -p "$HALF/scripts"
+touch "$HALF/scripts/computer-setup-layers"
+assert_eq "a directory without local.yml is not a checkout" "" \
+    "$(resolve_script_dir "$HALF/bootstrap.sh")"
+
 echo
 if [[ "$FAILURES" -gt 0 ]]; then
     echo "bootstrap prompt tests: ${FAILURES} failure(s)" >&2

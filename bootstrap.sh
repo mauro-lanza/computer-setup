@@ -99,11 +99,37 @@ require_tty() {
     fi
 }
 
-# When piped via curl, BASH_SOURCE may be empty. Fall back to current dir.
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd)"
-SCRIPT_DIR="${SCRIPT_DIR:-$PWD}"
-LAYER_SYNC_SCRIPT="$SCRIPT_DIR/scripts/computer-setup-layers"
-MACHINE_SCRIPT="$SCRIPT_DIR/scripts/computer-setup-machine"
+# Where this script is running FROM, and only when that is verifiably this repo.
+#
+# Under `curl | bash` there is no file, so BASH_SOURCE is empty, `dirname`
+# yields "." and the old fallback resolved to $PWD. An unrelated $PWD may well
+# have a `requirements.yml` or a `scripts/` of its own — an ansible project, a
+# python project — and bootstrap would have used THOSE, silently, installing
+# from another project's file. Missing is recoverable; wrong is not.
+#
+# So an unverified directory is refused rather than guessed at, and every
+# consumer falls back to downloading the one file it needs. That is also the
+# normal path for the RECOMMENDED invocation: `bash <(curl ...)` resolves to
+# /dev/fd, which is not a checkout either.
+#
+# Takes the source path as an argument so it can be tested for all three cases
+# without having to reproduce each invocation.
+resolve_script_dir() {
+    local src="${1:-}" candidate=""
+    if [[ -n "$src" ]]; then
+        candidate="$(cd "$(dirname "$src")" 2>/dev/null && pwd)"
+    fi
+    # Two markers, both of which a lookalike directory would have to fake.
+    if [[ -n "$candidate" && -f "$candidate/local.yml" \
+          && -f "$candidate/scripts/computer-setup-layers" ]]; then
+        printf '%s\n' "$candidate"
+    fi
+}
+SCRIPT_DIR="$(resolve_script_dir "${BASH_SOURCE[0]:-}")"
+# `:+` so these stay EMPTY rather than becoming "/scripts/..." when SCRIPT_DIR
+# is. Every consumer tests the path before using it and downloads otherwise.
+LAYER_SYNC_SCRIPT="${SCRIPT_DIR:+$SCRIPT_DIR/scripts/computer-setup-layers}"
+MACHINE_SCRIPT="${SCRIPT_DIR:+$SCRIPT_DIR/scripts/computer-setup-machine}"
 # Where a restored/backed-up declaration is kept. Same paths the deployed runner
 # uses, so `bootstrap.sh` and `computer-setup machine` are the same two callers
 # of one repo rather than two conventions.
@@ -199,7 +225,7 @@ install_ansible() {
 
 install_galaxy_collections() {
     info "Installing Ansible Galaxy collections..."
-    local reqs="$SCRIPT_DIR/requirements.yml"
+    local reqs="${SCRIPT_DIR:+$SCRIPT_DIR/requirements.yml}"
     if [[ ! -f "$reqs" ]]; then
         local repo_raw="$RAW_BASE"
         reqs="$(mktemp)"
