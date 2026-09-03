@@ -1,0 +1,30 @@
+---
+# Exercises the truncation branch of the run-state callback, which had never
+# executed: the contract test asserts `truncated is False`, and nothing drove
+# the other side. It matters on exactly the run nobody has watched — a first
+# apply on a fresh machine, where a large loop changes everything at once.
+#
+# 250 files in one loop, against MAX_RECORDED = 200. Deliberately a LOOP rather
+# than 250 separate tasks, because the loop path and the single-task path cap
+# independently and the loop is the one a real run would hit.
+- name: Exercise run-state truncation
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    trunc_dir: /tmp/cs-truncation-contract
+  tasks:
+    - name: Create the scratch directory
+      ansible.builtin.file:
+        path: "{{ trunc_dir }}"
+        state: directory
+        mode: "0755"
+
+    - name: Change more files than the callback will record
+      ansible.builtin.copy:
+        dest: "{{ trunc_dir }}/f{{ item }}.txt"
+        content: "{{ item }}\n"
+        mode: "0644"
+      loop: "{{ range(250) | list }}"
+      loop_control:
+        label: "f{{ item }}"

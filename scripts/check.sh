@@ -102,6 +102,7 @@ echo "==> Ansible syntax"
 ansible-playbook --syntax-check local.yml
 ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook --syntax-check tests/contract.yml
 ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook --syntax-check tests/scheduled-agents.yml
+ansible-playbook --syntax-check tests/truncation.yml
 
 echo "==> Inventory"
 ansible-inventory --list >/dev/null
@@ -400,6 +401,38 @@ assert mode == 0o600, oct(mode)
 print("  ok  inventory, omissions, backups, partial flag, and one line per run")
 PY
 rm -rf -- "$cs_mdir" "$cs_mscratch"
+
+# MAX_RECORDED had never executed: the run-state contract asserts
+# `truncated is False` and nothing drove the other side. It matters on exactly
+# the run nobody has watched — a first apply on a fresh machine, where a large
+# loop changes everything at once.
+echo "==> Run state truncation"
+cs_tdir="$(mktemp -d)"
+cs_tscratch=/tmp/cs-truncation-contract
+rm -rf -- "$cs_tscratch"
+CS_STATE_FILE="$cs_tdir/last-run.json" CS_MANIFEST_FILE="$cs_tdir/managed-paths.json" \
+    CS_RUN_MODE=apply CS_RUN_PARTIAL=0 CS_RUN_ID=trunc-1 \
+    ansible-playbook tests/truncation.yml >/dev/null
+"$CS_PY" - "$cs_tdir" <<'PY'
+import json, os, sys
+
+d = os.path.abspath(sys.argv[1])
+s = json.load(open(os.path.join(d, "last-run.json")))
+m = json.load(open(os.path.join(d, "managed-paths.json")))
+
+assert s["truncated"] is True, "250 changes did not trip truncation"
+assert len(s["changed"]) == 200, len(s["changed"])
+
+# The whole point of the split. A drift report may be truncated — past 200
+# entries the list is a sample and says so. An INVENTORY may not: a manifest
+# that silently dropped paths would have collection treat live files as
+# orphans, which is the one failure mode worth being paranoid about.
+files = {e["path"] for e in m["files"]}
+assert len(files) == 250, f"the manifest was capped at {len(files)}"
+assert m["complete"] is True, m["complete"]
+print("  ok  drift truncates and says so; the inventory does not")
+PY
+rm -rf -- "$cs_tdir" "$cs_tscratch"
 
 # `computer-setup history` renders through a yq expression, and a broken one
 # fails SILENTLY: the header still prints and the rows simply vanish. That is
