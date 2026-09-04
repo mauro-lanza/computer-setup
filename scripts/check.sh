@@ -401,8 +401,12 @@ lines = [l for l in open(os.path.join(d, "history.jsonl")).read().splitlines() i
 assert len(lines) == 2, f"expected 2 runs, got {len(lines)}: {lines}"
 assert [json.loads(l)["run_id"] for l in lines] == ["contract-1", "contract-2"]
 last = json.loads(lines[-1])
-for key in ("finished", "mode", "result", "changed", "failed", "ok", "duration_seconds"):
+for key in ("schema_version", "finished", "mode", "result", "changed", "failed",
+            "ok", "duration_seconds"):
     assert key in last, f"history line missing {key}: {last}"
+# Versioned per LINE: a JSONL file has no header, and lines written months
+# apart can legitimately differ in shape because old ones are never rewritten.
+assert last["schema_version"] == 1, last["schema_version"]
 assert last["partial"] is True, last
 mode = stat.S_IMODE(os.stat(os.path.join(d, "history.jsonl")).st_mode)
 assert mode == 0o600, oct(mode)

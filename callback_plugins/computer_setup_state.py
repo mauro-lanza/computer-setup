@@ -66,6 +66,12 @@ MANIFEST_SCHEMA_VERSION = 1
 # truncated — flagged by `truncated` so a reader never mistakes it for the whole.
 MAX_RECORDED = 200
 
+# History is versioned PER LINE, not per file. A JSONL file has no header, and
+# lines written months apart genuinely can have different shapes — the old ones
+# are never rewritten. A reader meeting a mixed file can then handle each line
+# on its own terms, which a single file-level version could not express.
+HISTORY_SCHEMA_VERSION = 1
+
 # Runs of history to keep. Two scheduled runs a day makes this most of a year,
 # at roughly 200 bytes a line. Deliberately NOT capped the way `changed` is:
 # an inventory or a history that silently drops entries is worse than a big
@@ -532,6 +538,7 @@ class CallbackModule(CallbackBase):
         if not self.history_file:
             return
         record = {
+            "schema_version": HISTORY_SCHEMA_VERSION,
             "finished": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
             "mode": self.run_mode,
             "partial": self.partial,

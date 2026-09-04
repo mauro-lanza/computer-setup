@@ -253,13 +253,33 @@ exported, which the runner does for `apply`, `check` and both scheduled modes.
 it looked at. Without it, `apply --tags repositories` would record "no drift"
 and read as a verdict on the whole machine. `upgrade` is always partial.
 
-**`schema_version` is not yet a contract.** It exists so that it can become one
-without a migration, but `computer-setup status` — which ships in this repo, in
-the same commit as any change to the plugin — is currently the only consumer.
-Reshape it freely while that is true. It becomes a contract the moment something
-*outside* this repo reads it: a UI, a Jamf extension attribute, a teammate's
-script. From then on, bump it on a breaking change and update the contract test,
-exactly as layers do.
+### The three schemas, and when they become contracts
+
+| Artifact | Version | Versioned |
+|---|---|---|
+| `last-run.json` | `STATE_SCHEMA_VERSION` | per file |
+| `managed-paths.json` | `MANIFEST_SCHEMA_VERSION` | per file |
+| `history.jsonl` | `HISTORY_SCHEMA_VERSION` | **per line** |
+
+History is versioned per line because a JSONL file has no header, and lines
+written months apart genuinely can differ in shape — old ones are never
+rewritten. A reader meeting a mixed file handles each line on its own terms,
+which one file-level version could not express.
+
+Three numbers rather than one, because they answer different questions and will
+change for different reasons: a field added to the inventory should not force
+every reader of the run summary to re-check its version.
+
+**None of them is a contract yet.** They exist so they can become contracts
+without a migration, but everything that reads them — `computer-setup status`,
+`manifest`, `history` — ships in this repo, in the same commit as any change to
+the plugin. Reshape them freely while that is true.
+
+They become contracts the moment something *outside* this repo reads one: a UI,
+a Jamf extension attribute, a teammate's script. From then on, bump on a
+breaking change and update the contract test, exactly as layers do. That is a
+decision to take deliberately, on the day the first outside consumer is written
+— not to discover afterwards.
 
 Two properties are load-bearing:
 
