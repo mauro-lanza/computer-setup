@@ -72,6 +72,11 @@ MAX_RECORDED = 200
 # on its own terms, which a single file-level version could not express.
 HISTORY_SCHEMA_VERSION = 1
 
+# Progress is a LIVE file, rewritten from scratch by every run, and its shape is
+# its own contract: a reader tailing it mid-run must be able to tell "task 40 of
+# 193" from "finished" from "died half way".
+PROGRESS_SCHEMA_VERSION = 1
+
 # Runs of history to keep. Two scheduled runs a day makes this most of a year,
 # at roughly 200 bytes a line. Deliberately NOT capped the way `changed` is:
 # an inventory or a history that silently drops entries is worse than a big
@@ -112,6 +117,12 @@ class CallbackModule(CallbackBase):
         # run summary but no inventory simply does not set them.
         self.manifest_file = os.environ.get("CS_MANIFEST_FILE") or ""
         self.history_file = os.environ.get("CS_HISTORY_FILE") or ""
+        # Live progress, for a UI to tail while the run is happening. Truncated
+        # at the first task rather than appended to: the previous run's progress
+        # is of no interest, and a reader must never see two runs interleaved.
+        self.progress_file = os.environ.get("CS_PROGRESS_FILE") or ""
+        self.progress_handle = None
+        self.task_number = 0
         # Identifies THIS invocation across every play it runs. ansible-pull can
         # reach the stats hook more than once (its own checkout play, then the
         # real one), and history is appended rather than overwritten — so
@@ -345,6 +356,83 @@ class CallbackModule(CallbackBase):
         except Exception:
             pass
 
+    # ── live progress ────────────────────────────────────────────────────────
+    def _estimate_total(self):
+        """How many tasks this run will probably have.
+
+        Ansible does not know its own task count up front — tasks are generated
+        as roles and includes are resolved — so a progress bar has no
+        denominator available from the play itself.
+
+        The previous run of the SAME MODE is a good estimate, and history.jsonl
+        already records one per run. Mode matters: `check` and `upgrade` differ
+        by more than a hundred tasks, and using the wrong one produces a bar
+        that finishes at 60% or runs past the end.
+        """
+        if not self.history_file:
+            return None
+        try:
+            with open(self.history_file) as stream:
+                lines = [line for line in stream.read().splitlines() if line.strip()]
+            for line in reversed(lines):
+                record = json.loads(line)
+                if record.get("mode") == self.run_mode and record.get("tasks"):
+                    return record["tasks"]
+        except Exception:
+            pass
+        return None
+
+    def _progress(self, payload):
+        if not self.progress_file:
+            return
+        try:
+            if self.progress_handle is None:
+                directory = os.path.dirname(self.progress_file) or "."
+                try:
+                    os.makedirs(directory, mode=0o700)
+                except OSError:
+                    pass
+                # Truncating, not appending: see __init__.
+                self.progress_handle = open(self.progress_file, "w")
+                os.chmod(self.progress_file, 0o600)
+                header = {
+                    "schema_version": PROGRESS_SCHEMA_VERSION,
+                    "event": "start",
+                    "mode": self.run_mode,
+                    "partial": self.partial,
+                    "started": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+                    "total_estimate": self._estimate_total(),
+                }
+                if self.run_id:
+                    header["run_id"] = self.run_id
+                self.progress_handle.write(json.dumps(header, sort_keys=True) + "\n")
+            self.progress_handle.write(json.dumps(payload, sort_keys=True) + "\n")
+            # Flushed every line, or a reader tailing the file sees nothing
+            # until the run ends — which is the one moment it does not need it.
+            self.progress_handle.flush()
+        except Exception:
+            # A progress file is a convenience. It must never cost a run.
+            self.progress_file = ""
+
+    def v2_playbook_on_task_start(self, task, is_conditional):
+        self.task_number += 1
+        entry = {"event": "task", "n": self.task_number,
+                 "task": (getattr(task, "name", "") or task.action)}
+        try:
+            role = task._role
+            if role:
+                entry["role"] = role.get_name()
+        except Exception:
+            pass
+        self._progress(entry)
+
+    # A handler is a task too, and it runs AFTER the last ordinary one — so a
+    # bar that stopped at the estimate would sit at 100% through the handlers.
+    def v2_playbook_on_handler_task_start(self, task):
+        self.task_number += 1
+        self._progress({"event": "task", "n": self.task_number, "handler": True,
+                        "task": (getattr(task, "name", "") or task.action)})
+
     # ── hooks ────────────────────────────────────────────────────────────────
     def v2_runner_on_ok(self, result):
         try:
@@ -378,7 +466,8 @@ class CallbackModule(CallbackBase):
         caller may want a run summary and no inventory, and a failure to write
         one must not cost the others — least of all the run itself.
         """
-        if not (self.state_file or self.manifest_file or self.history_file):
+        if not (self.state_file or self.manifest_file
+                or self.history_file or self.progress_file):
             return
         try:
             # Ansible's summary calls it `failures`; this file has always
@@ -423,6 +512,24 @@ class CallbackModule(CallbackBase):
             pass
         try:
             self._append_history(totals)
+        except Exception:
+            pass
+
+        # Last, and always: an `end` line is how a reader tells a finished run
+        # from one that died half way. Without it a killed run leaves a file
+        # that looks like it is still going, forever.
+        try:
+            self._progress({
+                "event": "end",
+                "result": "failed" if (totals["failed"] or totals["unreachable"]) else "ok",
+                "tasks": self.task_number,
+                "changed": totals["changed"],
+                "failed": totals["failed"],
+                "finished": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            })
+            if self.progress_handle is not None:
+                self.progress_handle.close()
+                self.progress_handle = None
         except Exception:
             pass
 
@@ -549,6 +656,11 @@ class CallbackModule(CallbackBase):
             "changed": totals["changed"],
             "failed": totals["failed"],
             "ok": totals["ok"],
+            # The denominator for the next run of this mode's progress bar.
+            # Counted by the callback rather than derived from totals: a
+            # looped task is one task but many results, so no combination of
+            # ok/changed/skipped gives the number a progress bar counts up to.
+            "tasks": self.task_number,
         }
         if self.run_id:
             record["run_id"] = self.run_id

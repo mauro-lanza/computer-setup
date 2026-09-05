@@ -544,6 +544,66 @@ print("  ok  an orphan removed from disk stops being reported")
 PYEOF
 rm -rf -- "$cs_mdir" "$cs_mscratch"
 
+# A progress file is only useful if a reader can distinguish "running" from
+# "finished" from "died half way", and if the file describes THIS run rather
+# than an interleaving of two. Both are easy to get wrong and invisible when
+# wrong: the run still succeeds either way.
+echo "==> Live progress"
+cs_pdir="$(mktemp -d)"
+cs_pscratch=/tmp/cs-manifest-contract
+rm -rf -- "$cs_pscratch"
+CS_PROGRESS_FILE="$cs_pdir/progress.jsonl" CS_HISTORY_FILE="$cs_pdir/history.jsonl" \
+    CS_RUN_MODE=apply CS_RUN_PARTIAL=0 CS_RUN_ID=prog-1 \
+    ansible-playbook tests/manifest.yml >/dev/null
+# A second run must REPLACE the file, not append to it. Appending would leave a
+# reader seeing the previous run's tasks as this run's, and a progress bar that
+# starts at 100%.
+CS_PROGRESS_FILE="$cs_pdir/progress.jsonl" CS_HISTORY_FILE="$cs_pdir/history.jsonl" \
+    CS_RUN_MODE=apply CS_RUN_PARTIAL=0 CS_RUN_ID=prog-2 \
+    ansible-playbook tests/manifest.yml >/dev/null
+"$CS_PY" - "$cs_pdir" <<'PYEOF'
+import json, os, stat, sys
+
+d = os.path.abspath(sys.argv[1])
+lines = [json.loads(l) for l in
+         open(os.path.join(d, "progress.jsonl")).read().splitlines() if l.strip()]
+
+head = lines[0]
+assert head["event"] == "start", head
+assert head["schema_version"] == 1, head
+assert head["mode"] == "apply", head
+assert head["run_id"] == "prog-2", f"the file describes an earlier run: {head}"
+
+tasks = [l for l in lines if l.get("event") == "task"]
+assert tasks, "no task lines"
+# Monotonic from 1: a reader divides by the estimate, so a gap or a repeat
+# renders as a bar that jumps or goes backwards.
+assert [t["n"] for t in tasks] == list(range(1, len(tasks) + 1)), \
+    f"task numbers are not 1..n: {[t['n'] for t in tasks][:10]}"
+assert all(t.get("task") for t in tasks), "a task line carries no name"
+
+end = lines[-1]
+assert end["event"] == "end", f"the last line is not an end marker: {end}"
+assert end["result"] == "ok", end
+assert end["tasks"] == len(tasks), (end["tasks"], len(tasks))
+
+# The second run's denominator comes from the FIRST run's history entry, which
+# is the only reason a bar has a scale at all.
+assert head["total_estimate"] == end["tasks"], \
+    f"estimate {head['total_estimate']} did not match the previous run's {end['tasks']}"
+
+# It names this machine's tasks and paths.
+mode = stat.S_IMODE(os.stat(os.path.join(d, "progress.jsonl")).st_mode)
+assert mode == 0o600, oct(mode)
+
+# history carries the count the next run will read.
+hist = [json.loads(l) for l in
+        open(os.path.join(d, "history.jsonl")).read().splitlines() if l.strip()]
+assert hist[-1]["tasks"] == end["tasks"], hist[-1]
+print(f"  ok  {len(tasks)} tasks streamed, replaced not appended, end marker present")
+PYEOF
+rm -rf -- "$cs_pdir" "$cs_pscratch"
+
 # MAX_RECORDED had never executed: the run-state contract asserts
 # `truncated is False` and nothing drove the other side. It matters on exactly
 # the run nobody has watched — a first apply on a fresh machine, where a large

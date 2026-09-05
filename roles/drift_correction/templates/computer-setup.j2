@@ -66,6 +66,10 @@ MANIFEST_FILE="{{ computer_setup_state_dir }}/managed-paths.json"
 # because it stores full Ansible output; this holds most of a year because it
 # stores nine fields.
 HISTORY_FILE="{{ computer_setup_state_dir }}/history.jsonl"
+# LIVE progress, rewritten by every run: one line per task, flushed as it goes.
+# What a UI tails to show a run happening rather than a spinner. Transient by
+# design — the previous run's progress is of no interest to anyone.
+PROGRESS_FILE="{{ computer_setup_state_dir }}/progress.jsonl"
 # Plain ISO timestamp of the last SCHEDULED run that reached the repo and
 # finished cleanly. Deliberately a separate one-line file rather than a field in
 # the JSON: it must survive a run that failed, and merging JSON in bash to
@@ -149,6 +153,7 @@ computer-setup — operate this machine's configuration.
   status [--json]  What the last run did, and whether syncing has gone stale.
   manifest [--json] Every file and directory this system manages.
   history [n]      The last n runs, one line each (default 20).
+  progress         What a run is doing right now, if one is running.
   machine <sub>    Back up / restore this machine's declaration (init|push|list|pull).
   repos [dir]      Print a repositories.yml scaffolded from existing checkouts.
   capture [args]   Diff live macOS defaults against the declared values.
@@ -185,6 +190,7 @@ state_env() {
     CS_STATE_FILE="$STATE_FILE"
     CS_MANIFEST_FILE="$MANIFEST_FILE"
     CS_HISTORY_FILE="$HISTORY_FILE"
+    CS_PROGRESS_FILE="$PROGRESS_FILE"
     CS_RUN_MODE="$1"
     CS_RUN_PARTIAL="$2"
     # Identifies this invocation across every play it runs. History is APPENDED,
@@ -192,7 +198,7 @@ state_env() {
     # without a key one run could leave two lines. $$ alone is not enough — the
     # plays may be separate processes — hence the timestamp.
     CS_RUN_ID="$$-$(date +%s)"
-    export CS_STATE_FILE CS_MANIFEST_FILE CS_HISTORY_FILE
+    export CS_STATE_FILE CS_MANIFEST_FILE CS_HISTORY_FILE CS_PROGRESS_FILE
     export CS_RUN_MODE CS_RUN_PARTIAL CS_RUN_ID
 }
 
@@ -471,6 +477,60 @@ cmd_history() {
     echo "* = partial run (narrowed by tags or arguments)"
 }
 
+# ─── Live progress ───────────────────────────────────────────────────────────
+# The point is runs you did NOT start: the 09:00 upgrade or the 10:00 check are
+# invisible while they happen, and "is it stuck or is it working" had no answer
+# short of reading the log afterwards. An interactive run already prints itself.
+cmd_progress() {
+    if [[ ! -f "$PROGRESS_FILE" ]]; then
+        echo "No run has recorded progress yet."
+        return 0
+    fi
+    local head last done_line total current n
+    head="$(head -n1 "$PROGRESS_FILE")"
+    last="$(tail -n1 "$PROGRESS_FILE")"
+    done_line="$(yq -r 'select(.event == "end") | .result' <<<"$last" 2>/dev/null)"
+
+    if [[ -n "$done_line" && "$done_line" != "null" ]]; then
+        printf 'Not running. Last run: %s — %s (%s task(s))\n' \
+            "$(yq -r '.mode' <<<"$head" 2>/dev/null)" "$done_line" \
+            "$(yq -r '.tasks' <<<"$last" 2>/dev/null)"
+        return 0
+    fi
+
+    total="$(yq -r '.total_estimate // 0' <<<"$head" 2>/dev/null)"
+    n="$(yq -r '.n // 0' <<<"$last" 2>/dev/null)"
+    current="$(yq -r '.task // ""' <<<"$last" 2>/dev/null)"
+    # No end marker does not prove a run is live — it may have been killed. The
+    # file's mtime is the only evidence either way, so say which it is rather
+    # than animating a bar for a process that died an hour ago.
+    local age
+    age=$(( $(date +%s) - $(stat -f %m "$PROGRESS_FILE" 2>/dev/null || echo 0) ))
+    if [[ "$age" -gt 300 ]]; then
+        printf 'Stalled or interrupted — no progress for %sm, stopped at task %s.\n' \
+            "$(( age / 60 ))" "${n:-?}"
+        printf '  last: %s\n' "$current"
+        return 0
+    fi
+
+    if [[ "${total:-0}" -gt 0 ]]; then
+        local pct filled
+        pct=$(( 100 * n / total ))
+        [[ "$pct" -gt 100 ]] && pct=100
+        filled=$(( pct / 5 ))
+        printf '%s  [%s%s] %s%%  %s/%s\n' \
+            "$(yq -r '.mode' <<<"$head" 2>/dev/null)" \
+            "$(printf '#%.0s' $(seq 1 $filled) 2>/dev/null)" \
+            "$(printf '.%.0s' $(seq 1 $(( 20 - filled )) ) 2>/dev/null)" \
+            "$pct" "$n" "$total"
+    else
+        # First run of a mode has no previous run to size against.
+        printf '%s  task %s (no estimate yet — needs one completed run of this mode)\n' \
+            "$(yq -r '.mode' <<<"$head" 2>/dev/null)" "$n"
+    fi
+    printf '  now: %s\n' "$current"
+}
+
 # ─── Machine declaration backup ──────────────────────────────────────────────
 # Delegated to scripts/computer-setup-machine, not implemented here, because
 # bootstrap.sh needs the same operations on a machine where THIS FILE does not
@@ -667,6 +727,7 @@ case "$COMMAND" in
     status)             cmd_status "$@" ;;
     manifest)           cmd_manifest "$@" ;;
     history)            cmd_history "$@" ;;
+    progress)           cmd_progress "$@" ;;
     repos)              cmd_repos "$@" ;;
     capture)            exec "${BIN_DIR}/macos-capture" "$@" ;;
     layers)             cmd_layers "$@" ;;
