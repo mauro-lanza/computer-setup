@@ -533,15 +533,22 @@ cmd_progress() {
     fi
 
     if [[ "${total:-0}" -gt 0 ]]; then
-        local pct filled
+        local pct filled bar i
         pct=$(( 100 * n / total ))
+        # The estimate is the PREVIOUS run of this mode, so this run can
+        # legitimately have more tasks. Clamp rather than render past the end.
         [[ "$pct" -gt 100 ]] && pct=100
         filled=$(( pct / 5 ))
-        printf '%s  [%s%s] %s%%  %s/%s\n' \
+        # Built a character at a time. `printf '#%.0s' $(seq 1 0)` looks like it
+        # draws nothing and actually draws one — printf reruns its format when
+        # given no arguments — so the bar was 21 characters wide at 0%.
+        bar=""
+        for (( i = 0; i < 20; i++ )); do
+            if (( i < filled )); then bar+="#"; else bar+="."; fi
+        done
+        printf '%s  [%s] %s%%  %s/%s\n' \
             "$(yq -r '.mode' <<<"$head" 2>/dev/null)" \
-            "$(printf '#%.0s' $(seq 1 $filled) 2>/dev/null)" \
-            "$(printf '.%.0s' $(seq 1 $(( 20 - filled )) ) 2>/dev/null)" \
-            "$pct" "$n" "$total"
+            "$bar" "$pct" "$n" "$total"
     else
         # First run of a mode has no previous run to size against.
         printf '%s  task %s (no estimate yet — needs one completed run of this mode)\n' \
