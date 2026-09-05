@@ -25,8 +25,26 @@ if [[ "$pinned_core" != "$running_core" ]]; then
     echo "       Reconcile it:  computer-setup apply --tags runtime" >&2
     exit 1
 fi
+# The gate runs with mitogen too, for the same reason it runs the pinned core:
+# production uses it, so a suite that does not is testing something else.
+# CS_NO_MITOGEN=1 runs the gate the slow way, which is how you tell a mitogen
+# problem apart from a real one.
+pinned_python="$(yq -r '.python' runtime.yml)"
+pinned_mitogen="$(yq -r '.mitogen' runtime.yml)"
+MITOGEN_STRATEGY_DIR="$HOME/.local/share/computer-setup/runtime/tools/ansible-core/lib/python${pinned_python}/site-packages/ansible_mitogen/plugins/strategy"
 echo "==> Pinned runtime"
-echo "  ok  ansible-core $running_core (python $(yq -r '.python' runtime.yml)), from runtime.yml"
+if [[ "${CS_NO_MITOGEN:-0}" != "1" && -d "$MITOGEN_STRATEGY_DIR" ]]; then
+    export ANSIBLE_STRATEGY_PLUGINS="$MITOGEN_STRATEGY_DIR"
+    export ANSIBLE_STRATEGY=mitogen_linear
+    echo "  ok  ansible-core $running_core (python $pinned_python), mitogen $pinned_mitogen"
+elif [[ "${CS_NO_MITOGEN:-0}" == "1" ]]; then
+    echo "  ok  ansible-core $running_core (python $pinned_python), mitogen DISABLED"
+else
+    echo "ERROR: mitogen $pinned_mitogen is pinned but its strategy plugin is missing." >&2
+    echo "       expected: $MITOGEN_STRATEGY_DIR" >&2
+    echo "       Reconcile it:  computer-setup apply --tags runtime" >&2
+    exit 1
+fi
 
 echo "==> Bash syntax"
 bash -n bootstrap.sh

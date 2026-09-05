@@ -85,6 +85,26 @@ STALE_AFTER_DAYS={{ drift_correction_stale_after_days }}
 # See runtime.yml: brew upgrade runs unattended at 09:00 and could otherwise
 # cross an ansible-core major on every machine overnight.
 ANSIBLE_PULL="{{ computer_setup_runtime_bin }}/ansible-pull"
+
+# ─── Mitogen ─────────────────────────────────────────────────────────────────
+# Replaces Ansible's fork+exec per task with a persistent interpreter. Measured
+# on this playbook: 48.6s -> 15.4s, identical results.
+#
+# Enabled only when the strategy plugin is actually present, and skippable with
+# CS_NO_MITOGEN=1. That escape hatch matters more than it looks: mitogen
+# monkey-patches Ansible internals, so a bad interaction breaks ansible-playbook
+# itself — and this runner is also how the machine would PULL the fix. Without a
+# way to run without it, a broken mitogen would leave a machine unable to heal
+# itself. `CS_NO_MITOGEN=1 computer-setup apply` is that way.
+MITOGEN_STRATEGY_DIR="{{ computer_setup_runtime_tools }}/ansible-core/lib/python{{ computer_setup_python_version }}/site-packages/ansible_mitogen/plugins/strategy"
+use_mitogen() {
+    [[ "${CS_NO_MITOGEN:-0}" == "1" ]] && return 1
+    [[ -d "$MITOGEN_STRATEGY_DIR" ]]
+}
+if use_mitogen; then
+    export ANSIBLE_STRATEGY_PLUGINS="$MITOGEN_STRATEGY_DIR"
+    export ANSIBLE_STRATEGY=mitogen_linear
+fi
 # ansible-pull's checkout of the orchestrator. Never edit it by hand: a dirty
 # checkout makes ansible-pull refuse to update (it clones with force=no), and
 # the scheduled agents then run stale code with no visible complaint.

@@ -30,6 +30,20 @@
   failed_when: false
   check_mode: false
 
+- name: Read the installed mitogen version
+  ansible.builtin.command:
+    argv:
+      - "{{ runtime_tool_dir }}/ansible-core/bin/python"
+      - -c
+      # Normalised here rather than compared as a tuple: mitogen exposes
+      # __version__ as (0, 3, 53), and picking that apart in Jinja against a
+      # pin that is undefined until include_vars runs is unlintable.
+      - "import mitogen; print('.'.join(str(p) for p in mitogen.__version__))"
+  register: runtime_mitogen
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
 - name: Read the installed ansible-core version
   ansible.builtin.command:
     argv: ["{{ runtime_bin_dir }}/ansible", "--version"]
@@ -47,6 +61,8 @@
       {{ ('cpython-' ~ runtime_pins.python) not in (runtime_pythons.stdout | default('')) }}
     runtime_core_wrong: >-
       {{ ('core ' ~ runtime_pins.ansible_core) not in (runtime_installed.stdout | default('')) }}
+    runtime_mitogen_wrong: >-
+      {{ runtime_pins.mitogen != (runtime_mitogen.stdout | default('') | trim) }}
 
 # ─── Converge ────────────────────────────────────────────────────────────────
 - name: Install the pinned Python
@@ -64,12 +80,14 @@
       - --force
       - --python
       - "{{ runtime_pins.python }}"
+      - --with
+      - "mitogen=={{ runtime_pins.mitogen }}"
       - "ansible-core=={{ runtime_pins.ansible_core }}"
   environment:
     UV_TOOL_DIR: "{{ runtime_tool_dir }}"
     UV_TOOL_BIN_DIR: "{{ runtime_bin_dir }}"
   changed_when: true
-  when: runtime_core_wrong | bool
+  when: (runtime_core_wrong | bool) or (runtime_mitogen_wrong | bool)
 
 # A `command` never executes under --check, so the two tasks above would report
 # nothing and the run would look converged. This says so instead: `check` is the
@@ -79,9 +97,11 @@
   ansible.builtin.debug:
     msg: >-
       Engine runtime differs from runtime.yml
-      (want python {{ runtime_pins.python }}, ansible-core {{ runtime_pins.ansible_core }}).
+      (want python {{ runtime_pins.python }}, ansible-core {{ runtime_pins.ansible_core }},
+      mitogen {{ runtime_pins.mitogen }}).
       Reconcile with `computer-setup apply --tags runtime`.
   changed_when: true
   when:
     - ansible_check_mode
     - (runtime_python_missing | bool) or (runtime_core_wrong | bool)
+      or (runtime_mitogen_wrong | bool)

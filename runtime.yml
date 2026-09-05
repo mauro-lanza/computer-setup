@@ -34,3 +34,23 @@ python: "3.14"
 # is also the one anything else on the machine will be built against.
 
 ansible_core: "2.21.3"
+
+# Mitogen replaces Ansible's per-task fork+exec with a persistent interpreter.
+# Measured on this playbook: 48.6s -> 15.4s, identical results (167 ok, 0
+# changed, 0 failed), and the run-state callback produces byte-identical
+# artifacts under it.
+#
+# PINNED, and that pin is what makes it safe to use at all. Mitogen monkey-
+# patches Ansible internals, so an ansible-core it has not seen can break it.
+# With both pinned here, neither can move without the other being considered.
+# Upstream tracks core closely — 0.3.49 shipped Ansible 14 support one day
+# after release — but "closely" is not "automatically".
+#
+# Its own risks, and why they are acceptable HERE specifically:
+#   - the known open macOS bug is HTTP lookups; this playbook makes none
+#     (lookups used: env, first_found, file)
+#   - most of its recent bugs are in become/sudo; this playbook has no `become:`
+#     at all
+#   - bus factor of one maintainer: mitigated by the pin, and by the fact that
+#     turning it off is a single variable
+mitogen: "0.3.53"

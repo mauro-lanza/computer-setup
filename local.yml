@@ -51,6 +51,10 @@
     # here as well as in the role's defaults because the runner template needs
     # the path even when the role itself is skipped by --tags.
     computer_setup_runtime_bin: "{{ home_dir }}/.local/share/computer-setup/runtime/bin"
+    computer_setup_runtime_tools: "{{ home_dir }}/.local/share/computer-setup/runtime/tools"
+    # Read from the same runtime.yml the role pins from, so the runner's path to
+    # the mitogen strategy plugin cannot name a python the runtime is not on.
+    computer_setup_python_version: "{{ (lookup('ansible.builtin.file', playbook_dir ~ '/runtime.yml') | from_yaml).python }}"
     # Where this system installs the executables it owns (the runner, the layer
     # sync helper, macos-capture, and any capability shipping a script). One
     # play var because three roles create and write into it; two independent
