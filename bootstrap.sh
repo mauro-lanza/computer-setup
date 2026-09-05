@@ -34,6 +34,11 @@ LAYER_CACHE="$HOME/.local/share/computer-setup/layers"
 # second checkout per network. Getting this wrong is not fatal — it just means
 # bootstrap clones to one directory and every later run re-clones to another.
 PULL_DIR="$HOME/.ansible/pull/computer-setup"
+# The engine's pinned runtime. Must match `runtime_dir` in roles/runtime — but
+# unlike PULL_DIR the VERSIONS are not duplicated: both this script and the
+# playbook read them from runtime.yml, so there is nothing to drift.
+RUNTIME_DIR="$HOME/.local/share/computer-setup/runtime"
+RUNTIME_BIN="$RUNTIME_DIR/bin"
 
 # Apple silicon prefix. Asserted in main() and in the playbook, so this is a
 # constant rather than a `brew --prefix` call that must run before Homebrew is
@@ -213,29 +218,67 @@ ensure_prereqs() {
     ok "Core prerequisites present (yq, git, gh)"
 }
 
-install_ansible() {
-    if command -v ansible-pull &>/dev/null; then
-        ok "Ansible already installed"
+# Fetch a file from the repo: the local checkout when there is a verified one,
+# otherwise the raw URL. Phase 0 runs before anything is cloned, so several
+# things are needed before a checkout exists.
+fetch_repo_file() {
+    local name="$1" local_copy="${SCRIPT_DIR:+$SCRIPT_DIR/$1}"
+    if [[ -n "$local_copy" && -f "$local_copy" ]]; then
+        printf '%s\n' "$local_copy"
+        return 0
+    fi
+    local tmp
+    tmp="$(mktemp)"
+    if ! curl -fsSL "$RAW_BASE/$name" -o "$tmp"; then
+        rm -f "$tmp"
+        error "Failed to download $name from $RAW_BASE"
+        exit 1
+    fi
+    printf '%s\n' "$tmp"
+}
+
+# The engine's own runtime, pinned by runtime.yml — NOT the `ansible` formula.
+#
+# Homebrew's ansible is the 530M community bundle and it moves whenever
+# `brew upgrade` runs, which happens unattended at 09:00. This installs an
+# interpreter uv owns (Homebrew cannot move it) plus an exact ansible-core, so
+# the fleet only changes version when runtime.yml says so.
+#
+# Neither directory is on PATH. This is the engine's private interpreter, not a
+# general-purpose `ansible` for the user.
+install_runtime() {
+    local pins python_version core_version
+    pins="$(fetch_repo_file runtime.yml)"
+    python_version="$(yq -r '.python' "$pins")"
+    core_version="$(yq -r '.ansible_core' "$pins")"
+    if [[ -z "$python_version" || "$python_version" == "null" \
+       || -z "$core_version" || "$core_version" == "null" ]]; then
+        error "runtime.yml did not yield a python and ansible_core version"
+        exit 1
+    fi
+
+    if [[ -x "$RUNTIME_BIN/ansible-pull" ]] \
+       && "$RUNTIME_BIN/ansible" --version 2>/dev/null | grep -q "core $core_version"; then
+        ok "Engine runtime already pinned (ansible-core $core_version)"
         return
     fi
-    info "Installing Ansible..."
-    brew install ansible
-    ok "Ansible installed"
+
+    command -v uv &>/dev/null || { info "Installing uv..."; brew install uv; }
+
+    info "Installing Python ${python_version} (uv-managed, independent of Homebrew)..."
+    uv python install "$python_version"
+
+    info "Installing ansible-core ${core_version}..."
+    UV_TOOL_DIR="$RUNTIME_DIR/tools" UV_TOOL_BIN_DIR="$RUNTIME_BIN" \
+        uv tool install --force --python "$python_version" "ansible-core==${core_version}"
+    ok "Engine runtime pinned: python ${python_version}, ansible-core ${core_version}"
 }
 
 install_galaxy_collections() {
     info "Installing Ansible Galaxy collections..."
-    local reqs="${SCRIPT_DIR:+$SCRIPT_DIR/requirements.yml}"
-    if [[ ! -f "$reqs" ]]; then
-        local repo_raw="$RAW_BASE"
-        reqs="$(mktemp)"
-        trap 'rm -f "$reqs"' RETURN
-        if ! curl -fsSL "$repo_raw/requirements.yml" -o "$reqs"; then
-            error "Failed to download requirements.yml from $repo_raw"
-            exit 1
-        fi
-    fi
-    ansible-galaxy collection install -r "$reqs" --upgrade
+    local reqs
+    reqs="$(fetch_repo_file requirements.yml)"
+    "$RUNTIME_BIN/ansible-galaxy" collection install -r "$reqs" --upgrade
     ok "Collections installed"
 }
 
@@ -1177,7 +1220,7 @@ run_playbook() {
     if [[ -n "$ANSWERS_FILE" ]]; then
         info "Non-interactive run — applying without a dry-run prompt."
     elif ask_yn "Preview changes first (dry-run)?"; then
-        ansible-pull \
+        "$RUNTIME_BIN/ansible-pull" \
             -U "$REPO_URL" \
             -C "$REPO_BRANCH" \
             -d "$PULL_DIR" \
@@ -1194,7 +1237,7 @@ run_playbook() {
     collect_sudo_password
 
     info "Applying changes..."
-    ansible-pull \
+    "$RUNTIME_BIN/ansible-pull" \
         -U "$REPO_URL" \
         -C "$REPO_BRANCH" \
         -d "$PULL_DIR" \
@@ -1269,7 +1312,7 @@ main() {
     install_xcode_clt
     install_homebrew
     ensure_prereqs
-    install_ansible
+    install_runtime
     install_galaxy_collections
     ensure_gh_auth
 

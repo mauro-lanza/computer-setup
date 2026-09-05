@@ -1,0 +1,36 @@
+---
+# The engine's own runtime, pinned.
+#
+# Read by BOTH bootstrap.sh (before Ansible exists) and the playbook, so it is a
+# standalone file rather than play vars: bootstrap has to install this before it
+# can run anything that could read local.yml. One source of truth, so there is
+# no second spelling to drift — unlike PULL_DIR, which needs a check.sh gate
+# precisely because it could not be shared this way.
+#
+# WHY PINNED AT ALL
+# -----------------
+# `brew upgrade` runs unattended at 09:00. Left to Homebrew, ansible-core could
+# cross a MAJOR version on every machine in the fleet overnight, and the first
+# anyone would know is a failed run. Pinning makes that a deliberate act: bump a
+# version here, and machines converge on it through the normal sync.
+#
+# WHY NOT A VENV ON HOMEBREW'S PYTHON
+# -----------------------------------
+# A venv built on `/opt/homebrew/bin/python3` records the interpreter it was
+# built from. When Homebrew moves that Python, the venv is dead — so it would
+# not isolate anything, it would just relocate the breakage. uv installs its own
+# standalone interpreter under ~/.local/share/uv/python, which Homebrew cannot
+# touch; the resulting runtime works with /opt/homebrew off PATH entirely.
+#
+# WHY ansible-core AND NOT ansible
+# --------------------------------
+# The `ansible` formula is the 530M community bundle of ~800 collections. This
+# playbook uses exactly two: ansible.builtin and community.general — and
+# community.general is already installed explicitly, pinned, by requirements.yml.
+# ansible-core is ~34M and is the thing actually being pinned.
+python: "3.14"
+# Python 3.15 is deliberately NOT used: mitogen supports it for its own library
+# but explicitly NOT for Ansible, and 3.14 is the version Homebrew ships, so it
+# is also the one anything else on the machine will be built against.
+
+ansible_core: "2.21.3"

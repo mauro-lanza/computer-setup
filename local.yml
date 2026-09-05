@@ -47,6 +47,10 @@
     # costs a duplicate clone per network. Stays under `~/.ansible/` — the tool
     # already looks there, per "What this system puts in $HOME".
     computer_setup_pull_dir: "{{ home_dir }}/.ansible/pull/computer-setup"
+    # The engine's pinned runtime (see runtime.yml and roles/runtime). Declared
+    # here as well as in the role's defaults because the runner template needs
+    # the path even when the role itself is skipped by --tags.
+    computer_setup_runtime_bin: "{{ home_dir }}/.local/share/computer-setup/runtime/bin"
     # Where this system installs the executables it owns (the runner, the layer
     # sync helper, macos-capture, and any capability shipping a script). One
     # play var because three roles create and write into it; two independent
@@ -77,6 +81,11 @@
       tags: [always]
 
   roles:
+    # FIRST. Everything after this runs under the interpreter it pins, and a
+    # machine whose runtime has drifted from runtime.yml should converge before
+    # anything else is judged against it. Cheap on a converged machine: two
+    # commands that report "already installed".
+    - { role: runtime, tags: [runtime] }
     - { role: homebrew, tags: [homebrew] }
     - { role: git, tags: [git] }
     - { role: shell, tags: [shell] }

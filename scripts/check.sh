@@ -3,6 +3,31 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
+# Run the gate against the PINNED runtime, not whatever `ansible` happens to be
+# on PATH. Testing a different ansible-core than production runs is how a suite
+# stays green while the fleet breaks — and after pinning there may be no
+# `ansible` on PATH at all, which would silently skip every playbook check.
+RUNTIME_BIN="$HOME/.local/share/computer-setup/runtime/bin"
+if [[ ! -x "$RUNTIME_BIN/ansible-playbook" ]]; then
+    echo "ERROR: the pinned engine runtime is missing." >&2
+    echo "       expected: $RUNTIME_BIN/ansible-playbook" >&2
+    echo "       Install it:  computer-setup apply --tags runtime" >&2
+    echo "       (or re-run bootstrap.sh, which installs it in Phase 0)" >&2
+    exit 1
+fi
+PATH="$RUNTIME_BIN:$PATH"
+export PATH
+
+pinned_core="$(yq -r '.ansible_core' runtime.yml)"
+running_core="$(ansible --version | sed -n '1s/.*core \([0-9.]*\).*/\1/p')"
+if [[ "$pinned_core" != "$running_core" ]]; then
+    echo "ERROR: runtime.yml pins ansible-core $pinned_core, but the runtime has $running_core" >&2
+    echo "       Reconcile it:  computer-setup apply --tags runtime" >&2
+    exit 1
+fi
+echo "==> Pinned runtime"
+echo "  ok  ansible-core $running_core (python $(yq -r '.python' runtime.yml)), from runtime.yml"
+
 echo "==> Bash syntax"
 bash -n bootstrap.sh
 bash -n scripts/computer-setup-layers

@@ -1,0 +1,13 @@
+---
+# Where the pinned engine runtime lives. `share`, not `state`: it is fully
+# regenerable (reinstall from runtime.yml) but it is the working set every run
+# executes from, and ~/.cache is somewhere cleaners feel entitled to delete from
+# underneath a running job — the same argument as the layer cache.
+runtime_dir: "{{ home_dir }}/.local/share/computer-setup/runtime"
+
+# uv keeps a venv per tool under UV_TOOL_DIR and shims under UV_TOOL_BIN_DIR.
+# Both are pointed inside runtime_dir and NEITHER is on PATH: this is the
+# engine's private interpreter, not a general-purpose `ansible` for the user.
+# Anyone developing against it uses a project venv, as with any Python project.
+runtime_tool_dir: "{{ runtime_dir }}/tools"
+runtime_bin_dir: "{{ runtime_dir }}/bin"

@@ -1,0 +1,87 @@
+---
+# Converge the engine's own runtime on the versions pinned in runtime.yml.
+#
+# This role runs UNDER the runtime it manages. That is less circular than it
+# looks: replacing the files of a running interpreter is safe (the process holds
+# its inodes), and the current run simply finishes on the old version — the NEXT
+# run picks up the new one. `brew upgrade ansible`, which this replaces, had
+# exactly the same property.
+- name: Load the pinned runtime versions
+  ansible.builtin.include_vars:
+    file: "{{ playbook_dir }}/runtime.yml"
+    name: runtime_pins
+
+- name: Ensure the runtime directory exists
+  ansible.builtin.file:
+    path: "{{ runtime_dir }}"
+    state: directory
+    mode: "0755"
+
+# ─── Probe ───────────────────────────────────────────────────────────────────
+# `check_mode: false` because these only READ. Without it Ansible skips every
+# `command` under --check, the conditions below evaluate against nothing, and a
+# drift check would report a machine as converged while its runtime is on the
+# wrong ansible-core entirely.
+- name: Read the interpreters uv has installed
+  ansible.builtin.command:
+    argv: ["{{ homebrew_prefix }}/bin/uv", "python", "list", "--only-installed"]
+  register: runtime_pythons
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Read the installed ansible-core version
+  ansible.builtin.command:
+    argv: ["{{ runtime_bin_dir }}/ansible", "--version"]
+  register: runtime_installed
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Decide what the runtime needs
+  ansible.builtin.set_fact:
+    # uv names them `cpython-<version>-<platform>`; matching on the minor is
+    # deliberate, since uv keeps a stable path across patch releases and that
+    # stability is the whole reason for not using Homebrew's Python.
+    runtime_python_missing: >-
+      {{ ('cpython-' ~ runtime_pins.python) not in (runtime_pythons.stdout | default('')) }}
+    runtime_core_wrong: >-
+      {{ ('core ' ~ runtime_pins.ansible_core) not in (runtime_installed.stdout | default('')) }}
+
+# ─── Converge ────────────────────────────────────────────────────────────────
+- name: Install the pinned Python
+  ansible.builtin.command:
+    argv: ["{{ homebrew_prefix }}/bin/uv", "python", "install", "{{ runtime_pins.python }}"]
+  changed_when: true
+  when: runtime_python_missing | bool
+
+- name: Install or re-pin the engine runtime
+  ansible.builtin.command:
+    argv:
+      - "{{ homebrew_prefix }}/bin/uv"
+      - tool
+      - install
+      - --force
+      - --python
+      - "{{ runtime_pins.python }}"
+      - "ansible-core=={{ runtime_pins.ansible_core }}"
+  environment:
+    UV_TOOL_DIR: "{{ runtime_tool_dir }}"
+    UV_TOOL_BIN_DIR: "{{ runtime_bin_dir }}"
+  changed_when: true
+  when: runtime_core_wrong | bool
+
+# A `command` never executes under --check, so the two tasks above would report
+# nothing and the run would look converged. This says so instead: `check` is the
+# only thing that ever reports drift, and a runtime on the wrong ansible-core is
+# the most consequential drift there is — everything else is judged by it.
+- name: Report a runtime that does not match the pin
+  ansible.builtin.debug:
+    msg: >-
+      Engine runtime differs from runtime.yml
+      (want python {{ runtime_pins.python }}, ansible-core {{ runtime_pins.ansible_core }}).
+      Reconcile with `computer-setup apply --tags runtime`.
+  changed_when: true
+  when:
+    - ansible_check_mode
+    - (runtime_python_missing | bool) or (runtime_core_wrong | bool)
