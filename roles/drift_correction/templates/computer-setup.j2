@@ -200,6 +200,19 @@ state_env() {
     CS_RUN_ID="$$-$(date +%s)"
     export CS_STATE_FILE CS_MANIFEST_FILE CS_HISTORY_FILE CS_PROGRESS_FILE
     export CS_RUN_MODE CS_RUN_PARTIAL CS_RUN_ID
+
+    # Claim the progress file BEFORE ansible starts. Between invoking a run and
+    # the first task there is a real gap — layer sync, then ansible-pull's own
+    # git fetch — during which the file still describes the PREVIOUS run. A
+    # reader would show "not running" for ten seconds after being asked to run,
+    # or worse, the last run's result as if it were this one.
+    #
+    # The callback truncates and rewrites this the moment it has a task, so this
+    # line only ever survives for as long as the gap it exists to describe.
+    mkdir -p "$(dirname "$PROGRESS_FILE")" 2>/dev/null || true
+    printf '{"schema_version":1,"event":"launching","mode":"%s","run_id":"%s","started":"%s"}\n' \
+        "$1" "$CS_RUN_ID" "$(date '+%Y-%m-%dT%H:%M:%S%z')" > "$PROGRESS_FILE" 2>/dev/null || true
+    chmod 600 "$PROGRESS_FILE" 2>/dev/null || true
 }
 
 # ─── Interactive reconcile: stream, don't capture ────────────────────────────
@@ -495,6 +508,12 @@ cmd_progress() {
         printf 'Not running. Last run: %s — %s (%s task(s))\n' \
             "$(yq -r '.mode' <<<"$head" 2>/dev/null)" "$done_line" \
             "$(yq -r '.tasks' <<<"$last" 2>/dev/null)"
+        return 0
+    fi
+
+    if [[ "$(yq -r '.event' <<<"$head" 2>/dev/null)" == "launching" ]]; then
+        printf '%s  starting — syncing layers and fetching the orchestrator\n' \
+            "$(yq -r '.mode' <<<"$head" 2>/dev/null)"
         return 0
     fi
 
