@@ -218,6 +218,67 @@ previous machine's `~/.config/computer-setup/machine.yml` works directly, and
 nothing has to guess
 which layers a machine wants.
 
+## The engine's own runtime
+
+Pinned in `runtime.yml`, which is read by **both** `bootstrap.sh` and the
+playbook:
+
+```yaml
+python:       "3.14"
+ansible_core: "2.21.3"
+mitogen:      "0.3.53"
+```
+
+A standalone file rather than play vars, because bootstrap has to install this
+before anything can read `local.yml`. One source of truth read by both, so
+unlike `PULL_DIR` there is no second spelling to drift and no gate is needed.
+
+**Why pinned.** `brew upgrade` runs unattended at 09:00. Left to Homebrew,
+ansible-core could cross a *major* on every machine in the fleet overnight, and
+the first anyone would know is a failed run. Bumping `runtime.yml` is what moves
+the fleet, through the normal sync.
+
+**Why not a venv on Homebrew's Python.** A venv records the interpreter it was
+built from — `/opt/homebrew/Cellar/python@3.14/3.14.7/bin` — so when Homebrew
+moves Python the venv is dead. That relocates the breakage rather than removing
+it. `uv` installs a standalone interpreter under `~/.local/share/uv/python`,
+keyed on the *minor* so it survives patch upgrades. Verified: the runtime runs
+with `/opt/homebrew` off `PATH` entirely and links no Homebrew dylibs.
+
+**Why `ansible-core`, not `ansible`.** The formula is the 530M community bundle
+of ~800 collections. This playbook uses exactly two — `ansible.builtin` and
+`community.general` — and the second is already installed separately and pinned
+by `requirements.yml`. ansible-core is ~34M.
+
+It lives in `~/.local/share/computer-setup/runtime/` and **nothing puts it on
+`PATH`**. This is the engine's private interpreter, not an `ansible` for the
+user; develop against the repo with a project venv, as with any Python project.
+
+### Mitogen
+
+Replaces Ansible's fork-and-exec per task with a persistent interpreter.
+Measured on this playbook: **48.6s → 15.4s**, identical results, and the
+run-state callback produces byte-identical artifacts under it.
+
+The cost being removed is per *module invocation*, not per task — measured at
+~0.008s for an in-process task (`debug`, `set_fact`) against ~0.47s for a forked
+one (`copy`, `template`). That is also why batching deploys into a `loop` does
+nothing: a loop still invokes the module per item. Measured, 24 separate tasks
+vs one loop: 11.20s vs 10.97s.
+
+Pinned alongside ansible-core, and that pairing is what makes it usable at all:
+Mitogen monkey-patches Ansible internals, so a core it has not seen can break
+it. Its known risks land where this playbook is not — the open macOS bug is
+about HTTP lookups (none here; only `env`, `first_found`, `file`), and most
+recent fixes are in `become`/sudo (no `become:` anywhere).
+
+**`CS_NO_MITOGEN=1` disables it**, and that switch matters more than it looks:
+the runner is also how a machine *pulls a fix*, so a Mitogen that broke
+`ansible-playbook` would leave the machine unable to heal itself. The runner
+additionally refuses to enable it unless the strategy plugin is present.
+`check.sh` runs under Mitogen by default, because a suite testing a different
+execution model than production is testing something else.
+
 ## Runtime flow
 
 1. `bootstrap.sh` installs prerequisites and authenticates GitHub over SSH.
@@ -650,6 +711,7 @@ Split by the XDG question — who owns it, and what does losing it cost:
 |---|---|---|
 | `~/.config/computer-setup/machine.yml` | the machine declaration | you re-answer every question |
 | `~/.config/computer-setup/backup.yml` | which repo backs this machine up, under what name | you re-run `machine init` |
+| `~/.local/share/computer-setup/runtime/` | the pinned python + ansible-core + mitogen | reinstalled from `runtime.yml`, but nothing runs until it is |
 | `~/.local/share/computer-setup/layers/` | the layer cache | re-cloned on the next run |
 | `~/.local/share/computer-setup/backups/` | clone of the backup repo | **possibly a commit** — see below |
 | `~/.local/state/computer-setup/last-run.json` | what the last run did | nothing; the next run rewrites it |

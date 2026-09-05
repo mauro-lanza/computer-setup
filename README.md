@@ -52,8 +52,10 @@ explicit message rather than silently accepting every default.
 `bootstrap.sh` runs four phases:
 
 0. **Prerequisites + GitHub auth** — platform check → Xcode CLT → Homebrew →
-   `yq`/`git`/`gh`/`ansible` → `gh auth login`. Auth completes before any layer
-   is cloned, and readiness is confirmed with a real `git ls-remote` over SSH.
+   `yq`/`git`/`gh` → the pinned engine runtime (`uv`-managed Python +
+   ansible-core + mitogen, from `runtime.yml`) → `gh auth login`. Auth completes
+   before any layer is cloned, and readiness is confirmed with a real
+   `git ls-remote` over SSH.
 1. **Layer selection & fetch** — define your layers (persisted to
    `~/.config/computer-setup/machine.yml`), then clone each layer into
    `~/.local/share/computer-setup/layers/<name>/`, validating `schema_version`.

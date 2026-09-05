@@ -93,6 +93,45 @@ Clone repositories that are listed but missing:
 computer-setup apply --tags repositories
 ```
 
+## The engine's runtime is pinned
+
+The engine does not run whatever `ansible` Homebrew has. It runs a Python and an
+ansible-core pinned in `runtime.yml`, installed by `uv` into
+`~/.local/share/computer-setup/runtime/`, plus mitogen. There is deliberately no
+`ansible` on your `PATH`.
+
+```bash
+# Reconcile the runtime with runtime.yml (after bumping a version there)
+computer-setup apply --tags runtime
+
+# What the engine is actually running
+~/.local/share/computer-setup/runtime/bin/ansible --version
+```
+
+`check` reports a runtime that has drifted from the pin as changed, naming both
+versions — the probes carry `check_mode: false` precisely so it can.
+
+**Upgrading the fleet** is a one-line change to `runtime.yml`. Machines converge
+on it through the normal sync; there is no ordering of steps to arrange.
+
+### When a run misbehaves, take mitogen out of the picture first
+
+```bash
+CS_NO_MITOGEN=1 computer-setup apply
+CS_NO_MITOGEN=1 ./scripts/check.sh
+```
+
+Mitogen replaces Ansible's execution model, so it is the first thing to rule out
+when something behaves oddly — and this is how a machine still repairs itself if
+mitogen is ever the thing that is broken. It runs ~2x slower without it.
+
+### Developing against the repo
+
+Use a project venv, like any Python project. The pinned runtime is the engine's
+private interpreter and is not meant to be a general-purpose `ansible`.
+`scripts/check.sh` puts it on `PATH` for itself and refuses to run without it,
+so the gate always tests what production runs.
+
 ## git config is included, not imposed
 
 `~/.gitconfig` is **not** owned by this setup. It owns
@@ -184,6 +223,25 @@ plists it no longer wants. The reasoning above does not hold for them — an
 orphaned plist is not an inert stale file, it is a job that keeps running on
 schedule across reboots. Leaving one behind means the machine keeps doing work it
 was told to stop doing, which is worse than the deletion risk.
+
+### An outside `brew uninstall` can take managed formulae with it
+
+Homebrew autoremoves what it considers unneeded dependencies. Formulae installed
+through the `community.general.homebrew` module are not always marked
+install-on-request, so an unrelated `brew uninstall` can remove one of them.
+
+Observed: `brew uninstall ansible` also removed `tree`, a baseline formula.
+
+This is repaired rather than prevented. The next `check` reported it —
+
+```
+Drift: 1 task(s) would change:
+  - Install formulae (and refresh Homebrew first)
+```
+
+— and one `apply` put it back. Worth knowing because the window is up to a day,
+and because the reverse case is invisible: a formula this system *stops*
+declaring is never removed, and nothing reports that either.
 
 ## Where scheduled jobs log
 

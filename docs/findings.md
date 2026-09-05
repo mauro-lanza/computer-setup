@@ -160,9 +160,15 @@ because it compares against what is actually running. The marker is written only
 after a successful install, so a failed run retries with `--upgrade` instead of
 assuming the repair happened.
 
-This repairs on the run *after* the core changes, which is soon enough: upgrading
-the `ansible` formula mid-play does not change the already-running interpreter,
-so the rest of the play still executes under the old core.
+This repairs on the run *after* the core changes, which is soon enough: replacing
+the runtime mid-play does not change the already-running interpreter, so the rest
+of the play still executes under the old core.
+
+Since session 12 the core is **pinned** in `runtime.yml` rather than tracking
+Homebrew, so it now only changes when someone bumps that file — which makes this
+whole path far less likely to fire, and deliberate when it does. The mechanism
+stays because the pin can still move, and a bump is exactly when the collections
+need re-resolving.
 
 ### `--clear-response-cache` on every run
 
