@@ -155,14 +155,26 @@ notify() {
 
 log() { printf '%s\n' "$*" >> "${RUN_LOG:-/dev/null}"; }
 
-# Opens this run's log. Called before anything else can log, including the
-# connectivity probe that may exit early — a run that skipped is still a run
-# someone may ask about.
+# Opens this run's log and claims the progress file. Called FIRST, before
+# anything else can log — including the connectivity probe that may exit early,
+# because a run that skipped is still a run someone may ask about.
+#
+# The run id is minted here rather than in state_env so the progress marker can
+# carry it. state_env runs after the layer sync, which is several seconds of
+# git, and a reader polling during that window would otherwise be told the
+# previous run's result as though it were this one.
 start_run_log() {
     mkdir -p "$LOG_DIR" 2>/dev/null || true
     RUN_LOG="${LOG_DIR}/$(date '+%Y%m%d-%H%M%S')-${1}.log"
-    : > "$RUN_LOG" 2>/dev/null || { RUN_LOG=""; return 0; }
-    chmod 600 "$RUN_LOG" 2>/dev/null || true
+    : > "$RUN_LOG" 2>/dev/null || RUN_LOG=""
+    [[ -n "$RUN_LOG" ]] && chmod 600 "$RUN_LOG" 2>/dev/null
+
+    CS_RUN_ID="$$-$(date +%s)"
+    export CS_RUN_ID
+    mkdir -p "$(dirname "$PROGRESS_FILE")" 2>/dev/null || true
+    printf '{"schema_version":1,"event":"launching","mode":"%s","run_id":"%s","started":"%s"}\n' \
+        "$1" "$CS_RUN_ID" "$(date '+%Y-%m-%dT%H:%M:%S%z')" > "$PROGRESS_FILE" 2>/dev/null || true
+    chmod 600 "$PROGRESS_FILE" 2>/dev/null || true
 }
 
 # Delete successful runs' logs past the retention window, and only after a run
@@ -246,22 +258,10 @@ state_env() {
     # and ansible-pull can reach the callback's final hook more than once, so
     # without a key one run could leave two lines. $$ alone is not enough — the
     # plays may be separate processes — hence the timestamp.
-    CS_RUN_ID="$$-$(date +%s)"
+    # CS_RUN_ID is minted by start_run_log, which runs first — see the note
+    # there about why the progress marker cannot wait until this point.
     export CS_STATE_FILE CS_MANIFEST_FILE CS_HISTORY_FILE CS_PROGRESS_FILE CS_LOG_FILE
     export CS_RUN_MODE CS_RUN_PARTIAL CS_RUN_ID
-
-    # Claim the progress file BEFORE ansible starts. Between invoking a run and
-    # the first task there is a real gap — layer sync, then ansible-pull's own
-    # git fetch — during which the file still describes the PREVIOUS run. A
-    # reader would show "not running" for ten seconds after being asked to run,
-    # or worse, the last run's result as if it were this one.
-    #
-    # The callback truncates and rewrites this the moment it has a task, so this
-    # line only ever survives for as long as the gap it exists to describe.
-    mkdir -p "$(dirname "$PROGRESS_FILE")" 2>/dev/null || true
-    printf '{"schema_version":1,"event":"launching","mode":"%s","run_id":"%s","started":"%s"}\n' \
-        "$1" "$CS_RUN_ID" "$(date '+%Y-%m-%dT%H:%M:%S%z')" > "$PROGRESS_FILE" 2>/dev/null || true
-    chmod 600 "$PROGRESS_FILE" 2>/dev/null || true
 }
 
 # ─── Interactive reconcile: stream, don't capture ────────────────────────────
