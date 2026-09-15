@@ -51,7 +51,21 @@ REPO_BRANCH="{{ computer_setup_repo_branch }}"
 # registry that defines them.
 MACHINE_FILE="{{ computer_setup_machine_file }}"
 LAYER_CACHE="{{ computer_setup_layer_cache }}"
-LOG_FILE="{{ computer_setup_log_file }}"
+# ONE LOG PER RUN, in a directory of their own. Previously every scheduled run
+# appended to a single rolling file trimmed to a line count — which held about
+# three days, had no per-run boundaries, and recorded only SCHEDULED runs: an
+# interactive apply printed to your terminal and was never kept at all.
+#
+# Per-run files make "open the log for THAT run" answerable, which a menu that
+# lists recent runs needs, and they make retention a policy rather than a
+# guillotine that drops whatever fell off the end.
+LOG_DIR="{{ computer_setup_log_dir }}"
+# Successful runs are pruned past this. FAILED RUNS ARE NEVER PRUNED: the whole
+# point of keeping logs is the run that went wrong, and those are exactly the
+# ones you come back to weeks later.
+LOG_RETENTION_DAYS={{ drift_correction_log_retention_days }}
+# Set per run by start_run_log.
+RUN_LOG=""
 # Machine-readable run state, written by the computer_setup_state callback
 # plugin (see callback_plugins/). `status` reads it; a UI could too. The plugin
 # is inert unless CS_STATE_FILE is exported, which is why every mode that wants
@@ -116,7 +130,6 @@ PULL_DIR="{{ computer_setup_pull_dir }}"
 BIN_DIR="{{ computer_setup_bin_dir }}"
 LAYER_SYNC="${BIN_DIR}/computer-setup-layers"
 MACHINE_SYNC="${BIN_DIR}/computer-setup-machine"
-MAX_LINES={{ drift_correction_log_max_lines }}
 CONNECTIVITY_TIMEOUT={{ drift_correction_connectivity_timeout }}
 # `| expanduser` because this is the one path here a HUMAN answers, via the
 # repositories-dir question, and "~/Projects" is the natural answer. Ansible
@@ -140,7 +153,39 @@ notify() {
     /usr/bin/osascript -e "display notification \"${2}\" with title \"${1}\"" 2>/dev/null || true
 }
 
-log() { printf '%s\n' "$*" >> "$LOG_FILE"; }
+log() { printf '%s\n' "$*" >> "${RUN_LOG:-/dev/null}"; }
+
+# Opens this run's log. Called before anything else can log, including the
+# connectivity probe that may exit early — a run that skipped is still a run
+# someone may ask about.
+start_run_log() {
+    mkdir -p "$LOG_DIR" 2>/dev/null || true
+    RUN_LOG="${LOG_DIR}/$(date '+%Y%m%d-%H%M%S')-${1}.log"
+    : > "$RUN_LOG" 2>/dev/null || { RUN_LOG=""; return 0; }
+    chmod 600 "$RUN_LOG" 2>/dev/null || true
+}
+
+# Delete successful runs' logs past the retention window, and only after a run
+# that itself succeeded — a machine that is failing should not be quietly
+# tidying away the evidence.
+#
+# Which runs failed is read from history.jsonl rather than encoded in filenames,
+# so there is one source of truth and no rename to get wrong. A log with no
+# history entry at all is treated as keepable until it ages out: it is more
+# likely an interrupted run than litter.
+prune_logs() {
+    [[ -d "$LOG_DIR" ]] || return 0
+    local keep old_log
+    keep="$(yq -p json -r 'select(.result != "ok") | .log // ""' \
+        "$HISTORY_FILE" 2>/dev/null | grep -v '^$' || true)"
+    while IFS= read -r old_log; do
+        [[ -z "$old_log" ]] && continue
+        if [[ -n "$keep" ]] && printf '%s\n' "$keep" | grep -qxF -- "$old_log"; then
+            continue
+        fi
+        rm -f -- "$old_log"
+    done < <(find "$LOG_DIR" -type f -name '*.log' -mtime +"$LOG_RETENTION_DAYS" 2>/dev/null)
+}
 
 usage() {
     cat <<'EOF'
@@ -149,7 +194,8 @@ computer-setup — operate this machine's configuration.
   apply [args]     Reconcile now. Streams to your terminal.
   check [args]     Drift detection (--check --diff). Never mutates.
   upgrade          Upgrade managed tools INCLUDING casks, after confirming.
-  log [n]          Tail the rolling log (default 100 lines).
+  log [n]          Tail the most recent run's log (default 100 lines).
+  log --list       Every run log kept, newest first.
   status [--json]  What the last run did, and whether syncing has gone stale.
   manifest [--json] Every file and directory this system manages.
   history [n]      The last n runs, one line each (default 20).
@@ -191,6 +237,9 @@ state_env() {
     CS_MANIFEST_FILE="$MANIFEST_FILE"
     CS_HISTORY_FILE="$HISTORY_FILE"
     CS_PROGRESS_FILE="$PROGRESS_FILE"
+    # Recorded into the history line, so every run in `history` can be traced to
+    # its own log — which is what makes a "recent runs" menu clickable.
+    CS_LOG_FILE="$RUN_LOG"
     CS_RUN_MODE="$1"
     CS_RUN_PARTIAL="$2"
     # Identifies this invocation across every play it runs. History is APPENDED,
@@ -198,7 +247,7 @@ state_env() {
     # without a key one run could leave two lines. $$ alone is not enough — the
     # plays may be separate processes — hence the timestamp.
     CS_RUN_ID="$$-$(date +%s)"
-    export CS_STATE_FILE CS_MANIFEST_FILE CS_HISTORY_FILE CS_PROGRESS_FILE
+    export CS_STATE_FILE CS_MANIFEST_FILE CS_HISTORY_FILE CS_PROGRESS_FILE CS_LOG_FILE
     export CS_RUN_MODE CS_RUN_PARTIAL CS_RUN_ID
 
     # Claim the progress file BEFORE ansible starts. Between invoking a run and
@@ -216,20 +265,49 @@ state_env() {
 }
 
 # ─── Interactive reconcile: stream, don't capture ────────────────────────────
-cmd_apply() {
+# Shared by apply and check. Runs in the foreground, prints if there is anywhere
+# to print to, and ALWAYS writes this run's log.
+#
+# No longer `exec`: that replaced the shell, so nothing could tee the output or
+# run afterwards. Fine while every foreground run had a terminal; not fine now
+# that the menu bar launches runs in the background, where exec's output would
+# go nowhere and a failure would leave no trace but an exit code nobody sees.
+run_foreground() {
+    local mode="$1"; shift
+    start_run_log "$mode"
     sync_layers || printf '%s\n' "WARN: layer sync failed; continuing with cached content" >&2
-    # Exported through exec, so a hand-run apply updates `status` too — otherwise
-    # status would describe the 10:00 agent's world and not the one you just made.
-    state_env apply "$(( $# > 0 ))"
-    exec "$ANSIBLE_PULL" "${ARGS[@]}" local.yml "$@"
+    # State is recorded for hand-run modes too, or `status` would describe the
+    # 10:00 agent's world rather than the one you just made.
+    state_env "$mode" "$(( $# > 0 ))"
+
+    local rc
+    if [[ -t 1 ]]; then
+        # Interactive: still streams to the terminal exactly as before, and is
+        # kept as well. PIPESTATUS, because tee's exit code is not the run's.
+        "$ANSIBLE_PULL" "${ARGS[@]}" "$@" 2>&1 | tee -a "$RUN_LOG"
+        rc=${PIPESTATUS[0]}
+    else
+        "$ANSIBLE_PULL" "${ARGS[@]}" "$@" >> "$RUN_LOG" 2>&1
+        rc=$?
+    fi
+
+    # A background run has no terminal to complain to, so it says so here. The
+    # menu bar and `status` both show the failure regardless; this is for the
+    # case where neither is being looked at.
+    if [[ $rc -ne 0 && ! -t 1 ]]; then
+        notify "computer-setup ${mode} failed" "Exited rc=${rc}. Run \`computer-setup log\`."
+    fi
+    [[ $rc -eq 0 ]] && prune_logs
+    return "$rc"
+}
+
+cmd_apply() {
+    run_foreground apply local.yml "$@"
 }
 
 # ─── Interactive drift check ─────────────────────────────────────────────────
 cmd_check() {
-    sync_layers || printf '%s\n' "WARN: layer sync failed; continuing with cached content" >&2
-    state_env check "$(( $# > 0 ))"
-    exec "$ANSIBLE_PULL" "${ARGS[@]}" -e homebrew_update=false --check --diff \
-        local.yml "$@"
+    run_foreground check -e homebrew_update=false --check --diff local.yml "$@"
 }
 
 # ─── Upgrade managed tools, including casks ──────────────────────────────────
@@ -576,12 +654,38 @@ cmd_machine() {
         "$@"
 }
 
+# Newest-first list of run logs. A glob and a sort rather than `ls -t`: the
+# names are `YYYYmmdd-HHMMSS-<mode>.log`, generated here, so lexical order IS
+# chronological order — and shellcheck is right that parsing `ls` is a habit
+# worth not having.
+run_logs() {
+    local -a found=()
+    local candidate
+    for candidate in "$LOG_DIR"/*.log; do
+        [[ -f "$candidate" ]] && found+=("$candidate")
+    done
+    # Deliberately NOT the shell's array-length form. This file is a Jinja
+    # template, and a brace followed by a hash opens a Jinja comment — so that
+    # syntax makes the template fail to render entirely, with "Missing end of
+    # comment tag". Same reason this comment does not spell it out.
+    [[ -z "${found[*]:-}" ]] && return 1
+    printf '%s\n' "${found[@]}" | sort -r
+}
+
 cmd_log() {
-    if [[ -f "$LOG_FILE" ]]; then
-        tail -n "${1:-100}" "$LOG_FILE"
-    else
-        echo "No log yet at $LOG_FILE"
+    local logs
+    if ! logs="$(run_logs)"; then
+        echo "No logs yet in $LOG_DIR"
+        return 0
     fi
+    if [[ "${1:-}" == "--list" ]]; then
+        printf '%s\n' "$logs"
+        return 0
+    fi
+    local latest
+    latest="$(printf '%s\n' "$logs" | head -n1)"
+    printf '%s\n\n' "── $latest"
+    tail -n "${1:-100}" "$latest"
 }
 
 # ─── Repository list scaffold ────────────────────────────────────────────────
@@ -614,13 +718,13 @@ cmd_repos() {
 # Logged, notified, and guarded on connectivity. Never interactive.
 run_scheduled() {
     local mode="$1"; shift
+    start_run_log "$mode"
 
     {
-        echo
         echo "──────────────────────────────────────────────────────────"
         echo "${mode} — $(date '+%Y-%m-%d %H:%M:%S %z')"
         echo "──────────────────────────────────────────────────────────"
-    } >> "$LOG_FILE"
+    } >> "$RUN_LOG"
 
     # EXPORTED, not scoped to the probe. A command-prefix assignment would apply
     # to `git ls-remote` alone, leaving the layer sync and the ansible-pull free
@@ -640,7 +744,7 @@ run_scheduled() {
         exit 0
     fi
 
-    sync_layers >> "$LOG_FILE" 2>&1 || log "WARN: layer sync failed; continuing with cached content"
+    sync_layers >> "$RUN_LOG" 2>&1 || log "WARN: layer sync failed; continuing with cached content"
 
     # check:   -e homebrew_update=false — `state=present` never upgrades, so
     #          refreshing the Homebrew index adds time with zero detection value.
@@ -669,13 +773,6 @@ run_scheduled() {
 
     log "$pull_out"
 
-    # Trim to the last MAX_LINES lines (prevents unbounded growth, no newsyslog).
-    if [[ -f "$LOG_FILE" ]]; then
-        local tmp
-        tmp=$(mktemp)
-        tail -n "$MAX_LINES" "$LOG_FILE" > "$tmp" && mv "$tmp" "$LOG_FILE"
-    fi
-
     # Read the count from the state file the callback plugin wrote, NOT from the
     # console output. ansible-pull emits its own checkout play alongside the real
     # one, with [WARNING] lines interleaved between them, so every text-based
@@ -694,6 +791,7 @@ run_scheduled() {
     # Only a run that actually reached the repo and finished gets here, which is
     # exactly what "still syncing" means.
     date '+%Y-%m-%dT%H:%M:%S%z' > "$LAST_SUCCESS_FILE" 2>/dev/null || true
+    prune_logs
 
     if [[ "$mode" == "check" ]]; then
         if [[ "$changed_count" -gt 0 ]]; then

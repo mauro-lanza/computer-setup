@@ -121,6 +121,10 @@ class CallbackModule(CallbackBase):
         # at the first task rather than appended to: the previous run's progress
         # is of no interest, and a reader must never see two runs interleaved.
         self.progress_file = os.environ.get("CS_PROGRESS_FILE") or ""
+        # This run's own log. Recorded into the history line so every entry can
+        # be traced to the output it produced — which is what lets a "recent
+        # runs" list be clickable rather than decorative.
+        self.log_file = os.environ.get("CS_LOG_FILE") or ""
         self.progress_handle = None
         self.task_number = 0
         # Identifies THIS invocation across every play it runs. ansible-pull can
@@ -662,6 +666,8 @@ class CallbackModule(CallbackBase):
             # ok/changed/skipped gives the number a progress bar counts up to.
             "tasks": self.task_number,
         }
+        if self.log_file:
+            record["log"] = self.log_file
         if self.run_id:
             record["run_id"] = self.run_id
 

@@ -74,7 +74,8 @@
     # because drift_correction deploys it and the agents reference it.
     computer_setup_command_path: "{{ computer_setup_bin_dir }}/computer-setup"
     # Rolling log the scheduled modes append to and `computer-setup log` tails.
-    computer_setup_log_file: "{{ home_dir }}/Library/Logs/computer-setup.log"
+    # One log per run, in a directory of their own — see LOG_DIR in the runner.
+    computer_setup_log_dir: "{{ home_dir }}/Library/Logs/computer-setup"
     # Highest layer schema_version this orchestrator understands.
     computer_setup_schema_version: 1
 
