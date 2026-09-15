@@ -83,9 +83,9 @@ FINISHED                   MODE     RESULT    CHANGED   FAILED  DURATION
 * = partial run (narrowed by tags or arguments)
 ```
 
-The rolling log holds about three days because it stores full Ansible output;
-this holds roughly the last 500 runs. Use `computer-setup log` for *what
-happened* in a recent run, and `history` for *when* something last did.
+Each entry records the path to that run's own log, so `history` answers *when*
+something happened and `computer-setup log` answers *what*. History keeps
+roughly the last 500 runs; logs are pruned on a separate schedule.
 
 Clone repositories that are listed but missing:
 
@@ -243,13 +243,34 @@ Drift: 1 task(s) would change:
 and because the reverse case is invisible: a formula this system *stops*
 declaring is never removed, and nothing reports that either.
 
-## Where scheduled jobs log
+## Where runs log
 
-`computer-setup log` tails only the engine's own rolling log
-(`~/Library/Logs/computer-setup.log`) — the 09:00 upgrade and 10:00 drift check.
-It does **not** show layer-declared agents.
+Every run writes its own file, named for when it started and what it was:
 
-Those write one pair of files per agent, named for the agent's label:
+    ~/Library/Logs/computer-setup/20260915-171312-check.log
+
+```bash
+computer-setup log          # the most recent run, last 100 lines
+computer-setup log 500      # more of it
+computer-setup log --list   # every run kept, newest first
+```
+
+Interactive runs are logged too. They still print to your terminal exactly as
+before, and are kept as well — a run launched from the menu bar has no terminal
+at all, so without this its output would be lost.
+
+Successful runs are pruned after `drift_correction_log_retention_days` (30).
+**Failed runs are never pruned** — the run that went wrong is the one you come
+back to weeks later. Pruning only happens after a run that itself succeeded: a
+machine that is failing should not be tidying away the evidence.
+
+`computer-setup history` lists recent runs, and each entry records the path to
+its own log.
+
+### Layer-declared agents log separately
+
+None of the above covers agents a layer declares. Those write one pair of files
+per agent, named for the agent's label:
 
     ~/Library/Logs/<label>.stdout.log
     ~/Library/Logs/<label>.stderr.log
@@ -262,6 +283,25 @@ inherits no login-shell environment, so the usual cause is a `PATH` problem — 
 plist sets a fixed `PATH` covering Homebrew and the system, and a tool installed
 anywhere else will not be found. `launchctl list | grep <label>` shows whether
 the job is loaded and what it last exited with.
+
+## Watching a run happen
+
+```bash
+computer-setup progress
+```
+
+```
+check  [########............] 43%  88/202
+  now: homebrew : Install casks without adoption
+```
+
+The point is runs you did **not** start — the 09:00 upgrade and the 10:00 check
+are otherwise invisible while they happen, and "is it stuck or is it working"
+had no answer short of reading the log afterwards.
+
+It reports `starting` during the layer sync and `ansible-pull` fetch, before the
+first task exists, and says so plainly if a run was interrupted rather than
+animating a bar for a process that died.
 
 ## Credentials
 

@@ -483,13 +483,13 @@ an ordering requirement no path-based collector can honour.
 
 ## Run history
 
-`history.jsonl` — one JSON line per run, oldest trimmed past 500.
+`history.jsonl` — one JSON line per run, oldest trimmed past 500. Each line
+records the path to that run's own log, which is what lets a list of recent runs
+be navigable rather than decorative.
 
-The rolling log (`~/Library/Logs/computer-setup.log`) is capped at 5000 lines,
-which sounds generous and is about **three days**, because it stores full
-Ansible output. The history stores nine fields, so the same budget covers most
-of a year. It is what makes "when did this machine last actually change
-anything" answerable.
+Nine fields per run, so 500 runs is a few hundred KB and covers most of a year.
+It is what makes "when did this machine last actually change anything"
+answerable, and it survives the logs themselves being pruned.
 
 JSON Lines, not a JSON array: appending to an array means rewriting the whole
 file, and a run that dies mid-write leaves invalid JSON. A truncated last line
@@ -499,6 +499,60 @@ One line per **invocation**, not per play. `ansible-pull` can reach the
 callback's final hook more than once, and since this file is appended rather
 than overwritten, each line is keyed on `CS_RUN_ID` and a repeat of the same id
 replaces the previous line instead of adding one.
+
+## Run logs
+
+One file per run, in `~/Library/Logs/computer-setup/`, named
+`<YYYYmmdd-HHMMSS>-<mode>.log`.
+
+This replaced a single rolling file trimmed to a line count. That held about
+three days, had no per-run boundaries, and recorded only **scheduled** runs — an
+interactive apply printed to the terminal and was kept nowhere. "Open the log
+for that run" had no answer.
+
+Foreground runs are no longer `exec`'d. `exec` replaced the shell, so nothing
+could tee the output or run afterwards — fine while every foreground run had a
+terminal, not fine once the menu bar began launching runs in the background,
+where `exec`'s output would go nowhere and a failure would leave no trace but an
+exit code nobody sees. A run with a TTY still streams to it *and* is kept; one
+without writes only to its log.
+
+**Retention keeps failures.** Successful runs are pruned past
+`drift_correction_log_retention_days`; failed runs never are. Which runs failed
+is read from `history.jsonl` rather than encoded in filenames, so there is one
+source of truth and no rename to get wrong. Pruning happens only after a run
+that itself succeeded — a machine that is failing should not be quietly tidying
+away the evidence.
+
+## Live progress
+
+`progress.jsonl` — a header, one flushed line per task, and an end marker.
+Rewritten from scratch by every run. `computer-setup progress` renders it, and
+so does the menu bar.
+
+Flushed per line, or a reader sees nothing until the run ends — the one moment
+it does not need it. **Truncated rather than appended**, so a reader can never
+see two runs interleaved.
+
+The denominator is the interesting part. Ansible does not know its own task
+count up front — tasks are generated as roles and includes resolve — so
+`history.jsonl` records the count per run and the next run of the **same mode**
+reads it. Mode matters: `check` and `upgrade` differ by more than a hundred
+tasks. It is counted by the callback rather than derived from `totals`, because
+a looped task is one task and many results.
+
+Handlers are counted too: they run after the last ordinary task, so a bar sized
+to the estimate would otherwise sit at 100% through them.
+
+A `launching` marker is written by the runner **before** the layer sync, not by
+the callback. Between invoking a run and its first task there are several
+seconds of git, during which the file would otherwise still describe the
+previous run — so a reader would show "not running" after being asked to run, or
+show the last result as though it were this one.
+
+No end marker does not prove a run is live; it may have been killed. The file's
+mtime is the only evidence either way, so consumers report a stall rather than
+animating a bar for a process that died.
 
 ## Orchestrator primitives
 
@@ -719,7 +773,8 @@ Split by the XDG question — who owns it, and what does losing it cost:
 | `~/.local/state/computer-setup/history.jsonl` | one line per run, ~500 runs | the run history, which no run can reconstruct |
 | `~/.local/state/computer-setup/last-success` | when a scheduled run last succeeded | staleness reads as "never synced" until the next one |
 | `~/.local/state/computer-setup/galaxy-core-version` | which ansible-core the collections were resolved against | a redundant re-resolve |
-| `~/Library/Logs/computer-setup.log` | the rolling log, ~3 days | nothing |
+| `~/.local/state/computer-setup/progress.jsonl` | what the current run is doing | nothing; transient by design |
+| `~/Library/Logs/computer-setup/` | one log per run | failed runs' output, which nothing else keeps |
 
 Both `~/.config` entries are configuration because a HUMAN decided them and no
 run can reconstruct them. `backup.yml` is config despite describing where state
