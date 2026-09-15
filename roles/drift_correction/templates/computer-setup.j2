@@ -272,13 +272,21 @@ state_env() {
 # run afterwards. Fine while every foreground run had a terminal; not fine now
 # that the menu bar launches runs in the background, where exec's output would
 # go nowhere and a failure would leave no trace but an exit code nobody sees.
+# $1 mode, $2 partial (1 when the CALLER passed extra arguments), rest: the
+# ansible-pull arguments.
+#
+# `partial` is taken as a parameter rather than derived from $# here, because by
+# this point the argument list also holds this function's own fixed flags —
+# `--check --diff local.yml` and friends — so `$# > 0` is always true and every
+# run would mark itself partial. That is not cosmetic: a partial run writes no
+# manifest at all, so the inventory would have silently stopped updating.
 run_foreground() {
-    local mode="$1"; shift
+    local mode="$1" partial="$2"; shift 2
     start_run_log "$mode"
     sync_layers || printf '%s\n' "WARN: layer sync failed; continuing with cached content" >&2
     # State is recorded for hand-run modes too, or `status` would describe the
     # 10:00 agent's world rather than the one you just made.
-    state_env "$mode" "$(( $# > 0 ))"
+    state_env "$mode" "$partial"
 
     local rc
     if [[ -t 1 ]]; then
@@ -302,12 +310,12 @@ run_foreground() {
 }
 
 cmd_apply() {
-    run_foreground apply local.yml "$@"
+    run_foreground apply "$(( $# > 0 ))" local.yml "$@"
 }
 
 # ─── Interactive drift check ─────────────────────────────────────────────────
 cmd_check() {
-    run_foreground check -e homebrew_update=false --check --diff local.yml "$@"
+    run_foreground check "$(( $# > 0 ))" -e homebrew_update=false --check --diff local.yml "$@"
 }
 
 # ─── Upgrade managed tools, including casks ──────────────────────────────────
