@@ -104,6 +104,15 @@ STALE_AFTER_DAYS={{ drift_correction_stale_after_days }}
 # cross an ansible-core major on every machine overnight.
 ANSIBLE_PULL="{{ computer_setup_runtime_bin }}/ansible-pull"
 
+# Keeps the log in the order things actually happened. ansible-pull prints its
+# own banner, then runs ansible-playbook as a SUBPROCESS which writes to the
+# same descriptor. Whenever output is not a terminal — a log file, or a pipe
+# into tee — the parent's stdout is block-buffered and only flushes when it
+# exits, so its banner lands AFTER everything the child wrote. The log then
+# ends with "Starting Ansible Pull" instead of the PLAY RECAP, which is exactly
+# backwards for `computer-setup log`, since that tails.
+export PYTHONUNBUFFERED=1
+
 # ─── Mitogen ─────────────────────────────────────────────────────────────────
 # Replaces Ansible's fork+exec per task with a persistent interpreter. Measured
 # on this playbook: 48.6s -> 15.4s, identical results.
