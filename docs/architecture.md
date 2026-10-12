@@ -358,6 +358,10 @@ Two properties are load-bearing:
 Staleness is tracked separately in `last-success`, a plain ISO timestamp written
 only by a scheduled run that reached the repo and finished cleanly. It is not a
 field in the JSON because it has to survive a run that failed.
+`last-success-upgrade` is the same stamp for the scheduled upgrade alone: the
+check runs daily and succeeds, so the shared stamp cannot show an upgrade that
+keeps skipping. `status` reports "BEHIND" once it is 3 days old. The scheduled
+probe retries three times and logs the git error rather than discarding it.
 
 ## The manifest: what this system owns
 
@@ -719,12 +723,12 @@ Declared by layers, alongside `scheduled_agents` and with the same
 
 ```yaml
 logins:
-  - id: opencode-on-dev-tooling
-    desc: "opencode → On dev-tooling"
+  - id: opencode-corp
+    desc: "opencode → corporate tooling"
     requires_capability: opencode
     detect_file: "{{ home_dir }}/.local/share/opencode/auth.json"
-    detect_key: "https://dev-tooling.on.com"     # optional
-    remedy: "opencode auth login https://dev-tooling.on.com"
+    detect_key: "https://tooling.example.com"     # optional
+    remedy: "opencode auth login https://tooling.example.com"
 ```
 
 `detect_file` alone means *existence is the check*, which is all a single-purpose
@@ -772,6 +776,7 @@ Split by the XDG question — who owns it, and what does losing it cost:
 | `~/.local/state/computer-setup/managed-paths.json` | every path this system owns | nothing — but collection loses its memory, so orphans survive. Fails safe |
 | `~/.local/state/computer-setup/history.jsonl` | one line per run, ~500 runs | the run history, which no run can reconstruct |
 | `~/.local/state/computer-setup/last-success` | when a scheduled run last succeeded | staleness reads as "never synced" until the next one |
+| `~/.local/state/computer-setup/last-success-upgrade` | when the scheduled upgrade last succeeded | `status` shows no upgrade line until the next one |
 | `~/.local/state/computer-setup/galaxy-core-version` | which ansible-core the collections were resolved against | a redundant re-resolve |
 | `~/.local/state/computer-setup/progress.jsonl` | what the current run is doing | nothing; transient by design |
 | `~/Library/Logs/computer-setup/` | one log per run | failed runs' output, which nothing else keeps |

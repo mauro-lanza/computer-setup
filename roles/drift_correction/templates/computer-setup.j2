@@ -89,6 +89,9 @@ PROGRESS_FILE="{{ computer_setup_state_dir }}/progress.jsonl"
 # the JSON: it must survive a run that failed, and merging JSON in bash to
 # preserve one field is how you end up with neither.
 LAST_SUCCESS_FILE="{{ computer_setup_state_dir }}/last-success"
+# Same, for the scheduled UPGRADE only. `last-success` is shared with the check,
+# so a daily passing check hides an upgrade that has not run for days.
+UPGRADE_SUCCESS_FILE="{{ computer_setup_state_dir }}/last-success-upgrade"
 # Where this machine's declaration is backed up, and under what name. CONFIG,
 # not state: you choose it, it is hand-editable, and losing it means deciding
 # again. A file of its own rather than a key in machine.yml, because machine.yml
@@ -399,9 +402,10 @@ state_field() {
 # Whole days since the last successful scheduled run; empty if there has never
 # been one. `date -j -f` is BSD date — macOS only, which this whole system is.
 days_since_success() {
-    [[ -f "$LAST_SUCCESS_FILE" ]] || return 0
+    local file="${1:-$LAST_SUCCESS_FILE}"
+    [[ -f "$file" ]] || return 0
     local stamp then_ts now
-    stamp="$(tr -d '[:space:]' < "$LAST_SUCCESS_FILE")"
+    stamp="$(tr -d '[:space:]' < "$file")"
     [[ -n "$stamp" ]] || return 0
     then_ts=$(date -j -f '%Y-%m-%dT%H:%M:%S%z' "$stamp" '+%s' 2>/dev/null) || return 0
     now=$(date '+%s')
@@ -428,6 +432,7 @@ cmd_status() {
         printf '  "last_success": "%s",\n' "$(cat "$LAST_SUCCESS_FILE" 2>/dev/null | tr -d '[:space:]')"
         printf '  "days_since_success": %s,\n' "${days:-null}"
         printf '  "stale": %s,\n' "$( [[ -n "$days" && "$days" -ge "$STALE_AFTER_DAYS" ]] && echo true || echo false )"
+        printf '  "days_since_upgrade_success": %s,\n' "$(days_since_success "$UPGRADE_SUCCESS_FILE" | grep . || echo null)"
         printf '  "last_run": '
         if [[ -f "$STATE_FILE" ]]; then cat "$STATE_FILE"; else printf 'null\n'; fi
         printf '}\n'
@@ -492,6 +497,13 @@ cmd_status() {
         echo "Sync:      STALE — last successful scheduled run was ${days} day(s) ago"
     else
         echo "Sync:      ok — last successful scheduled run ${days} day(s) ago"
+    fi
+    # Only when the upgrade has a record and it is behind: a machine that never
+    # had the agent should not be nagged.
+    local up_days
+    up_days="$(days_since_success "$UPGRADE_SUCCESS_FILE")"
+    if [[ -n "$up_days" && "$up_days" -ge 3 ]]; then
+        echo "Upgrade:   BEHIND — last successful scheduled upgrade was ${up_days} day(s) ago (see \`computer-setup log --list\`)"
     fi
 }
 
@@ -756,7 +768,19 @@ run_scheduled() {
     # "check failed" notification indistinguishable from a real breakage. A
     # closed laptop, a blocked port and an expired key are all "can't work right
     # now", not "your config is broken".
-    if ! git ls-remote --exit-code "$REPO_URL" "$REPO_BRANCH" >/dev/null 2>&1; then
+    # Retried: at 09:00 the network is often not up yet (wake, VPN). The first
+    # failure's stderr is kept in the log, because a bare "unreachable" cannot be
+    # diagnosed afterwards.
+    local probe_try probe_err reachable=0
+    for probe_try in 1 2 3; do
+        if probe_err=$(git ls-remote --exit-code "$REPO_URL" "$REPO_BRANCH" 2>&1 >/dev/null); then
+            reachable=1
+            break
+        fi
+        log "probe ${probe_try}/3 failed: ${probe_err:-no output}"
+        if [[ $probe_try -lt 3 ]]; then sleep "${PROBE_RETRY_DELAY:-20}"; fi
+    done
+    if [[ $reachable -ne 1 ]]; then
         log "RESULT: skipped — ${REPO_URL} unreachable (offline, port 22 blocked, or SSH key unavailable)"
         exit 0
     fi
@@ -808,6 +832,9 @@ run_scheduled() {
     # Only a run that actually reached the repo and finished gets here, which is
     # exactly what "still syncing" means.
     date '+%Y-%m-%dT%H:%M:%S%z' > "$LAST_SUCCESS_FILE" 2>/dev/null || true
+    if [[ "$mode" == "upgrade" ]]; then
+        date '+%Y-%m-%dT%H:%M:%S%z' > "$UPGRADE_SUCCESS_FILE" 2>/dev/null || true
+    fi
     prune_logs
 
     if [[ "$mode" == "check" ]]; then
