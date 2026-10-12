@@ -1,0 +1,116 @@
+---
+# Two role fixes that only misbehave on a machine in a particular state, so a
+# converged one never shows them (a recurring lesson here):
+#   * git: `include.path` was written with git_config's default add_mode
+#     (replace-all), which deleted every OTHER include.path on each run.
+#   * docker: a zero-byte ~/.docker/config.json slurps to content '', which
+#     `default()` does not replace, so from_json crashed the play.
+# Driven against a scratch HOME; the real ~/.gitconfig is never read.
+- name: Role robustness against pre-existing user state
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    computer_setup_active_capabilities: [docker-cli]
+    homebrew_prefix: /opt/homebrew
+  tasks:
+    - name: Create a scratch HOME
+      ansible.builtin.tempfile:
+        state: directory
+      register: scratch
+
+    - name: Run both roles against it
+      vars:
+        home_dir: "{{ scratch.path }}"
+      environment:
+        HOME: "{{ scratch.path }}"
+        GIT_CONFIG_GLOBAL: "{{ scratch.path }}/.gitconfig"
+      block:
+        - name: Ensure ~/.docker exists
+          ansible.builtin.file:
+            path: "{{ scratch.path }}/.docker"
+            state: directory
+            mode: "0700"
+
+        - name: Seed a user-owned include
+          community.general.git_config:
+            name: include.path
+            scope: global
+            value: "{{ scratch.path }}/mine.gitconfig"
+
+        - name: Seed an empty Docker config
+          ansible.builtin.copy:
+            content: ""
+            dest: "{{ scratch.path }}/.docker/config.json"
+            mode: "0600"
+
+        - name: Apply the roles twice
+          ansible.builtin.include_role:
+            name: "{{ item.0 }}"
+          loop: "{{ ['git', 'docker'] | product([1, 2]) | list }}"
+          loop_control:
+            label: "{{ item.0 }} run {{ item.1 }}"
+
+        - name: Read back every include.path
+          community.general.git_config_info:
+            name: include.path
+            scope: global
+          register: includes
+
+        - name: Slurp the Docker config
+          ansible.builtin.slurp:
+            src: "{{ scratch.path }}/.docker/config.json"
+          register: docker_cfg
+
+        - name: Assert both survived and nothing was duplicated
+          ansible.builtin.assert:
+            that:
+              - (includes.config_values["include.path"]) | length == 2
+              - (scratch.path ~ '/mine.gitconfig') in (includes.config_values["include.path"])
+              - (scratch.path ~ '/.config/git/computer-setup.gitconfig') in (includes.config_values["include.path"])
+              - (docker_cfg.content | b64decode | from_json).cliPluginsExtraDirs == ['/opt/homebrew/lib/docker/cli-plugins']
+            fail_msg: "includes={{ includes.config_values }} docker={{ docker_cfg.content | b64decode }}"
+  post_tasks:
+    - name: Remove the scratch HOME
+      ansible.builtin.file:
+        path: "{{ scratch.path }}"
+        state: absent
+
+# A wrong `type:` in an app-conditional default must not abort the play: the
+# role promises one bad default never stops the later roles. A plist PATH is
+# accepted as the domain, so the scratch file stands in for a real app's.
+- name: A bad conditional default does not abort the play
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Create a scratch plist holding a string
+      ansible.builtin.tempfile:
+        state: directory
+      register: scratch
+
+    - name: Seed key with a string value
+      ansible.builtin.command: defaults write {{ scratch.path }}/t.plist K -string hello
+      changed_when: true
+
+    - name: Apply a conditional default declaring the wrong type
+      vars:
+        macos_defaults: []
+        computer_setup_bin_dir: "{{ scratch.path }}/bin"
+        home_dir: "{{ scratch.path }}"
+        macos_conditional_defaults:
+          - app: "{{ scratch.path }}"
+            defaults:
+              - {domain: "{{ scratch.path }}/t.plist", key: K, type: int, value: 1}
+      ansible.builtin.include_role:
+        name: macos
+
+    - name: The role reached the end and recorded the failure
+      ansible.builtin.assert:
+        that:
+          - macos_conditional_results.results | selectattr('failed', 'defined') | selectattr('failed') | list | length == 1
+
+    - name: Remove the scratch dir
+      ansible.builtin.file:
+        path: "{{ scratch.path }}"
+        state: absent

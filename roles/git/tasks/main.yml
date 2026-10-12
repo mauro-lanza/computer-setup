@@ -81,4 +81,5 @@
   community.general.git_config:
     name: include.path
     scope: global
+    add_mode: add
     value: "{{ git_managed_config_path }}"

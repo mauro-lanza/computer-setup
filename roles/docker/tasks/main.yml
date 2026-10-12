@@ -38,7 +38,7 @@
   ansible.builtin.copy:
     content: >-
       {{
-        ((docker_config_raw.content | default('e30=')) | b64decode | from_json)
+        ((docker_config_raw.content | default('e30=', true)) | b64decode | from_json)
         | combine({'cliPluginsExtraDirs': docker_cli_plugins_extra_dirs}, list_merge='replace')
         | to_nice_json
       }}
