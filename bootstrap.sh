@@ -258,7 +258,7 @@ install_runtime() {
     fi
 
     if [[ -x "$RUNTIME_BIN/ansible-pull" ]] \
-       && "$RUNTIME_BIN/ansible" --version 2>/dev/null | grep -q "core $core_version"; then
+       && "$RUNTIME_BIN/ansible" --version 2>/dev/null | grep -qF "core ${core_version}]"; then
         ok "Engine runtime already pinned (ansible-core $core_version)"
         return
     fi

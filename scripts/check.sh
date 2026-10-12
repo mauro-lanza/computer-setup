@@ -146,6 +146,7 @@ ansible-playbook --syntax-check local.yml
 ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook --syntax-check tests/contract.yml
 ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook --syntax-check tests/scheduled-agents.yml
 ansible-playbook --syntax-check tests/truncation.yml
+ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook --syntax-check tests/robustness.yml
 ansible-playbook --syntax-check tests/orphans.yml
 ansible-playbook --syntax-check tests/failure.yml
 ansible-playbook --syntax-check tests/manifest.yml
@@ -641,6 +642,17 @@ rm -rf -- "$cs_tdir" "$cs_tscratch"
 # how a jq-style `if/then/else` shipped — yq here is mikefarah's, which has no
 # such construct. Lifted out of the template rather than duplicated, so the
 # thing under test is the thing that runs.
+# Roles against pre-existing user state, and the rendered runner's scheduled path
+# with git/ansible-pull stubbed. Output is captured and re-printed on failure.
+echo "==> Role robustness"
+rb_out="$(ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook tests/robustness.yml 2>&1)" || {
+    printf '%s\n' "$rb_out" >&2
+    exit 1
+}
+echo "  ok  git includes survive, empty docker config, bad conditional default"
+echo "==> Scheduled runner"
+./tests/runner.sh
+
 echo "==> History rendering"
 hist_expr="$(sed -n "s/.*| yq -p json -r '\(.*\)' \\\\$/\1/p" \
     roles/drift_correction/templates/computer-setup.j2)"
@@ -754,6 +766,22 @@ expect_layer_failure machine-tier "defines reserved key"
 # Capabilities, questions and presets refer to each other by id, and every one of
 # those references fails SILENTLY when wrong — a preset naming a capability that
 # does not exist just selects nothing. The linter makes them loud.
+# A manifest repo URL starting with '-' would be parsed by `git clone` as an
+# option. Reject it before any git call; capture the output (no pipe into grep -q).
+echo "==> Layer sync (hostile manifest repo)"
+_hm="$(mktemp -d)"
+printf 'layers:\n  - name: evil\n    repo: "--upload-pack=touch %s/pwned"\n    priority: 10\n' "$_hm" > "$_hm/manifest.yml"
+sync_out="$(./scripts/computer-setup-layers sync --manifest "$_hm/manifest.yml" --cache "$_hm/cache" 2>&1)" && {
+    echo "ERROR: a manifest repo starting with '-' was ACCEPTED" >&2
+    exit 1
+}
+[[ "$sync_out" == *"must not start with '-'"* ]] && [[ ! -e "$_hm/pwned" ]] || {
+    echo "ERROR: hostile manifest repo rejected for the wrong reason: $sync_out" >&2
+    exit 1
+}
+rm -rf "$_hm"
+echo "  ok  repo URL starting with '-' rejected"
+
 echo "==> Layer lint (reference layer)"
 ./scripts/computer-setup-layers lint --layer examples/example-layer
 

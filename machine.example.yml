@@ -42,4 +42,4 @@ answers:
 # the same reason as answers: which layer provides an id can change.
 selected_capabilities:
   - nvm
-  - uv
+  - ripgrep

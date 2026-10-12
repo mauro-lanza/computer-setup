@@ -60,7 +60,7 @@
     runtime_python_missing: >-
       {{ ('cpython-' ~ runtime_pins.python) not in (runtime_pythons.stdout | default('')) }}
     runtime_core_wrong: >-
-      {{ ('core ' ~ runtime_pins.ansible_core) not in (runtime_installed.stdout | default('')) }}
+      {{ ('core ' ~ runtime_pins.ansible_core ~ ']') not in (runtime_installed.stdout | default('')) }}
     runtime_mitogen_wrong: >-
       {{ runtime_pins.mitogen != (runtime_mitogen.stdout | default('') | trim) }}
 

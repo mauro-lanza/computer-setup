@@ -309,7 +309,7 @@ animating a bar for a process that died.
 
 ```
 Drift:     1 task(s) would change:
-  - Check for each declared credential  →  opencode-on-dev-tooling
+  - Check for each declared credential  →  opencode-corp
 ```
 
 Run `computer-setup apply` **from a terminal** to be prompted through it. The
