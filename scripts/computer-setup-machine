@@ -107,6 +107,9 @@ cmd_init() {
     printf "Name for THIS machine [%s]: " "$default_name"
     read -r machine
     [[ -z "$machine" ]] && machine="$default_name"
+    # Becomes machines/<name>.yml in the backup repo.
+    [[ "$machine" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] \
+        || die "Machine name '$machine' is invalid — use letters, digits, '.', '_', '-'"
 
     if ! gh repo view "$slug" >/dev/null 2>&1; then
         log ""
@@ -193,6 +196,7 @@ cmd_names() {
 cmd_pull() {
     local name="${1:-}" out="${2:-}"
     [[ -n "$name" ]] || die "Usage: computer-setup machine pull <name> [outfile]"
+    [[ "$name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] || die "Invalid machine name '${name}'"
     load_config
     sync_clone
 

@@ -75,6 +75,9 @@ validate_manifest_entry() {
         || die "Layer name '$name' is invalid — use letters, digits, '.', '_', '-' (must not start with '.' or '-')"
     [[ "$name" != *".."* ]] || die "Layer name '$name' must not contain '..'"
     [[ -n "$repo" ]] || die "Layer '$name' is missing repo"
+    # Passed to `git clone`, where a leading '-' would be read as an option
+    # (e.g. --upload-pack=...). Also guarded with `--` at the clone sites.
+    [[ "$repo" != -* ]] || die "Layer '$name' repo must not start with '-'"
     [[ "$priority" =~ ^[0-9]+$ ]] || die "Layer '$name' priority must be a number"
     [[ "$seen_names" != *" $name "* ]] || die "Duplicate layer name in manifest: $name"
 }
@@ -141,7 +144,7 @@ sync_layers() {
                 # cheap and unambiguously correct for a cache.
                 warn "Layer '$name': cache HEAD is detached — re-cloning"
                 rm -rf "$dest"
-                git clone --depth 1 "$repo" "$dest"
+                git clone --depth 1 -- "$repo" "$dest"
             else
                 # Explicit refspec: without it `git fetch origin <branch>` may
                 # only write FETCH_HEAD, leaving refs/remotes/origin/<branch>
@@ -164,7 +167,7 @@ sync_layers() {
                 rm -rf "$dest"
             fi
             log "Cloning layer '$name' from $repo..."
-            git clone --depth 1 "$repo" "$dest"
+            git clone --depth 1 -- "$repo" "$dest"
         fi
 
         validate_layer "$name" "$dest" "$schema_version_max"
