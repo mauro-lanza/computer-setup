@@ -41,6 +41,7 @@ jobs:
         run: |
           set -euo pipefail
           body="Newer upstream versions exist than runtime.yml pins:"$'\n\n'"${REPORT}"$'\n'"Bump deliberately: edit runtime.yml, run ./scripts/check.sh."
+          gh label create pin-bump --description "Runtime pins behind upstream" --color fbca04 2>/dev/null || true
           num="$(gh issue list --label pin-bump --state open --json number -q '.[0].number // empty')"
           if [[ -n "$num" ]]; then
             gh issue comment "$num" --body "$body"
