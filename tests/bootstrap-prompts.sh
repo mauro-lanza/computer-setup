@@ -653,9 +653,11 @@ echo "==> bootstrap owner override"
 fork="$(BOOTSTRAP_OWNER=acme BOOTSTRAP_BRANCH=v9 bash -c 'source "$1"; printf "%s|%s" "$REPO_URL" "$RAW_BASE"' _ "$REPO_ROOT/bootstrap.sh")"
 assert_eq "a fork owner and ref reach every URL" \
     "git@github.com:acme/computer-setup.git|https://raw.githubusercontent.com/acme/computer-setup/v9" "$fork"
+# shellcheck disable=SC2016 # the single-quoted program is for the inner bash, which expands it
 dflt="$(env -u BOOTSTRAP_OWNER -u BOOTSTRAP_BRANCH bash -c 'source "$1"; printf "%s" "$REPO_URL"' _ "$REPO_ROOT/bootstrap.sh")"
 assert_eq "no override keeps the default owner" "git@github.com:mauro-lanza/computer-setup.git" "$dflt"
 # The value must also reach the play, or the scheduled agents would keep following the original repo.
+# shellcheck disable=SC2016 # a literal pattern: the ${...} must NOT expand here
 if grep -qF -- '-e "computer_setup_repo_url=${REPO_URL}"' "$REPO_ROOT/bootstrap.sh"; then
     pass "the repo URL is passed to the play"
 else
