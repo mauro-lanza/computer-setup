@@ -1,0 +1,41 @@
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    # Apple Silicon: the engine asserts Darwin + arm64 and a /opt/homebrew prefix.
+    runs-on: macos-14
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install gate prerequisites
+        run: brew install yq shellcheck ansible-lint uv
+
+      # The same pins bootstrap.sh installs, read from runtime.yml so the two
+      # cannot disagree. Neither directory goes on PATH; check.sh finds them.
+      - name: Install the pinned runtime
+        run: |
+          set -euo pipefail
+          py="$(yq -r '.python' runtime.yml)"
+          core="$(yq -r '.ansible_core' runtime.yml)"
+          mitogen="$(yq -r '.mitogen' runtime.yml)"
+          rt="$HOME/.local/share/computer-setup/runtime"
+          uv python install "$py"
+          UV_TOOL_DIR="$rt/tools" UV_TOOL_BIN_DIR="$rt/bin" \
+            uv tool install --force --python "$py" --with "mitogen==${mitogen}" "ansible-core==${core}"
+          "$rt/bin/ansible-galaxy" collection install -r requirements.yml
+
+      # Tests that commit to scratch repos need an identity.
+      - name: Configure git identity
+        run: |
+          git config --global user.name ci
+          git config --global user.email ci@example.invalid
+
+      - name: Run the gate
+        run: ./scripts/check.sh

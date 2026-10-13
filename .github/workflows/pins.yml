@@ -1,0 +1,49 @@
+name: pins
+
+# Weekly canary for the pinned runtime. It does not change anything: it reports
+# when the newest ansible-core / mitogen exist, so a bump is a deliberate act
+# (see runtime.yml) instead of something found out at 09:00.
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+jobs:
+  newer:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compare pins with PyPI
+        id: cmp
+        run: |
+          set -euo pipefail
+          report=""
+          for pkg in ansible-core mitogen; do
+            key="${pkg//-/_}"
+            pinned="$(grep -E "^${key}:" runtime.yml | sed -E 's/^[a-z_]+:[[:space:]]*"?([^"#]+)"?.*/\1/' | tr -d ' ')"
+            latest="$(curl -fsSL "https://pypi.org/pypi/${pkg}/json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["info"]["version"])')"
+            if [[ "$pinned" != "$latest" ]]; then
+              report+="- ${pkg}: pinned ${pinned}, latest ${latest}"$'\n'
+            fi
+          done
+          {
+            echo "report<<EOF"
+            echo "$report"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+      - name: Open or update an issue
+        if: steps.cmp.outputs.report != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPORT: ${{ steps.cmp.outputs.report }}
+        run: |
+          set -euo pipefail
+          body="Newer upstream versions exist than runtime.yml pins:"$'\n\n'"${REPORT}"$'\n'"Bump deliberately: edit runtime.yml, run ./scripts/check.sh."
+          num="$(gh issue list --label pin-bump --state open --json number -q '.[0].number // empty')"
+          if [[ -n "$num" ]]; then
+            gh issue comment "$num" --body "$body"
+          else
+            gh issue create --title "Runtime pins are behind upstream" --label pin-bump --body "$body"
+          fi
