@@ -44,6 +44,7 @@ STUB
 cat > "$T/bin/ansible-pull" <<STUB
 #!/bin/bash
 echo x >> "$T/pull-calls"
+printf '%s\\n' "\$*" > "$T/pull-args"
 exit 0
 STUB
 chmod +x "$T/bin/git" "$T/bin/ansible-pull"
@@ -121,3 +122,10 @@ out="$(run _scheduled-check)" || fail "young pid-less lock must exit 0"
 touch -t 202001010000 "$T/state/run.lock"
 run apply >/dev/null 2>&1 || fail "an old pid-less lock was not cleared"
 echo "  ok  pid-less lock: respected when young, cleared when old"
+
+# 7. The play must be told which repo and ref this runner follows, or it re-renders
+#    the runner from local.yml's defaults and silently un-forks it.
+args="$(cat "$T/pull-args")"
+[[ "$args" == *"-e computer_setup_repo_url=git@example.invalid:o/r.git"* ]] || fail "repo url not passed to the play: $args"
+[[ "$args" == *"-e computer_setup_repo_branch=main"* ]] || fail "repo branch not passed to the play: $args"
+echo "  ok  the play is told the repo url and branch"

@@ -646,6 +646,22 @@ touch "$HALF/scripts/computer-setup-layers"
 assert_eq "a directory without local.yml is not a checkout" "" \
     "$(resolve_script_dir "$HALF/bootstrap.sh")"
 
+# ─── Running a fork ──────────────────────────────────────────────────────────
+# BOOTSTRAP_OWNER must move the clone URL, the raw-download base and the branch
+# together; a half-applied override would clone one repo and fetch from another.
+echo "==> bootstrap owner override"
+fork="$(BOOTSTRAP_OWNER=acme BOOTSTRAP_BRANCH=v9 bash -c 'source "$1"; printf "%s|%s" "$REPO_URL" "$RAW_BASE"' _ "$REPO_ROOT/bootstrap.sh")"
+assert_eq "a fork owner and ref reach every URL" \
+    "git@github.com:acme/computer-setup.git|https://raw.githubusercontent.com/acme/computer-setup/v9" "$fork"
+dflt="$(env -u BOOTSTRAP_OWNER -u BOOTSTRAP_BRANCH bash -c 'source "$1"; printf "%s" "$REPO_URL"' _ "$REPO_ROOT/bootstrap.sh")"
+assert_eq "no override keeps the default owner" "git@github.com:mauro-lanza/computer-setup.git" "$dflt"
+# The value must also reach the play, or the scheduled agents would keep following the original repo.
+if grep -qF -- '-e "computer_setup_repo_url=${REPO_URL}"' "$REPO_ROOT/bootstrap.sh"; then
+    pass "the repo URL is passed to the play"
+else
+    fail "the repo URL is passed to the play" "extra_args lost computer_setup_repo_url"
+fi
+
 echo
 if [[ "$FAILURES" -gt 0 ]]; then
     echo "bootstrap prompt tests: ${FAILURES} failure(s)" >&2

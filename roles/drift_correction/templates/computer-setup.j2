@@ -155,7 +155,11 @@ REPOS_BASE_DIR="{{ repositories_base_dir | expanduser }}"
 # hostname, which on a Mac changes with the network (an mDNS `.home` suffix), so
 # each network would get its own clone and each would be stale until that
 # network came back.
-ARGS=(-U "$REPO_URL" -C "$REPO_BRANCH" -d "$PULL_DIR")
+# The URL and branch are ALSO handed to the play: it re-renders this very script
+# from them, so without -e a fork (BOOTSTRAP_OWNER) or a pinned ref would be
+# written back to the defaults in local.yml by the next apply.
+ARGS=(-U "$REPO_URL" -C "$REPO_BRANCH" -d "$PULL_DIR"
+      -e "computer_setup_repo_url=${REPO_URL}" -e "computer_setup_repo_branch=${REPO_BRANCH}")
 # One file, so one -e @ and one path var. `layers` rides along into play scope
 # as an extra-var, which is why core reserves the name against layer vars.
 [[ -f "$MACHINE_FILE" ]] && ARGS+=(-e "@${MACHINE_FILE}" -e "computer_setup_machine_file=${MACHINE_FILE}")
