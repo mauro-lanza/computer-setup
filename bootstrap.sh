@@ -9,7 +9,7 @@ set -euo pipefail
 #
 #   Phase 0  Prerequisites + GitHub auth (no repo access required)
 #   Phase 1  Layer selection & fetch (define manifest, clone to layer cache)
-#   Phase 2  Build preferences (merge capabilities → prompts → ~/.config/computer-setup/prefs.yml)
+#   Phase 2  Build preferences (merge capabilities → prompts → ~/.config/computer-setup/machine.yml)
 #   Phase 3  Run Ansible (ansible-pull the orchestrator with merged input)
 #
 # Usage: curl -fsSL <raw-url>/bootstrap.sh | bash
@@ -47,7 +47,8 @@ HOMEBREW_PREFIX="/opt/homebrew"
 
 # Orchestrator repo. Bootstrap authenticates GitHub before cloning layers or
 # running ansible-pull, so GitHub repos are accessed over SSH consistently.
-ORCH_OWNER="mauro-lanza"
+# Overridable so a team can run its own fork: BOOTSTRAP_OWNER=acme bash bootstrap.sh
+ORCH_OWNER="${BOOTSTRAP_OWNER:-mauro-lanza}"
 ORCH_NAME="computer-setup"
 REPO_URL="git@github.com:${ORCH_OWNER}/${ORCH_NAME}.git"
 REPO_BRANCH="${BOOTSTRAP_BRANCH:-main}"
@@ -623,7 +624,7 @@ order_capabilities_by_requires() {
 
 # Merged capabilities. Columns:
 #   id  desc  type  packages  requires  adopt_if_present
-# `id` is the capability token written to ~/.config/computer-setup/prefs.yml as a selection.
+# `id` is the capability token written to ~/.config/computer-setup/machine.yml as a selection.
 load_capabilities() {
     MERGED_CAPABILITIES_FILE="$(mktemp)"
 
@@ -675,7 +676,7 @@ load_questions() {
 
 # ─── Presets ─────────────────────────────────────────────────────────────────
 # A named bundle of answers + capability selections, and a PURE PREFILL: it only
-# seeds the prompts and is never recorded in the prefs file. Presets live
+# seeds the prompts and is never recorded in machine.yml. Presets live
 # entirely here; the engine has no concept of them. See "Presets" in
 # docs/architecture.md.
 PRESET_ID=""
@@ -766,7 +767,7 @@ choose_preset() {
 
 # ─── Non-interactive answers (zero-touch rebuild) ────────────────────────────
 # `--answers <file>` skips every prompt and takes the whole preference set from a
-# file with the same shape write_machine emits, so a previous machine's prefs.yml
+# file with the same shape write_machine emits, so a previous machine's machine.yml
 # works directly. Nothing in it is required: unknown answers are dropped and
 # unanswered questions fall back to their layer default, so a partial file is
 # valid and an empty one means "take every layer default".
@@ -803,8 +804,8 @@ usage() {
 Usage: bootstrap.sh [--answers <file>] [--help]
 
   --answers <file>  Take every preference from <file> and skip all prompts.
-                    Same shape as ~/.config/computer-setup/prefs.yml, so a previous machine's
-                    prefs file can be used directly.
+                    Same shape as ~/.config/computer-setup/machine.yml, so a previous machine's
+                    machine.yml can be used directly.
 USAGE
 }
 
@@ -978,7 +979,7 @@ gather_optional_tools() {
 }
 
 # ─── Questions (single-select / free-text decisions) ─────────────────────────
-# Answers are written to the prefs file as `answers:`. The engine turns them into
+# Answers are written to machine.yml as `answers:`. The engine turns them into
 # play-scope vars via each question's `set_var:` / each option's `set:` payload.
 ANSWER_IDS=()
 ANSWER_VALUES=()
@@ -1015,7 +1016,7 @@ gather_answers() {
                 ;;
             bool)
                 # Stored as the strings true/false so the engine's `| bool`
-                # filter reads them, and so the prefs file stays valid YAML.
+                # filter reads them, and so machine.yml stays valid YAML.
                 if [[ "$default" == "true" ]]; then
                     ask_yn "  ${prompt}?" "y" && reply=true || reply=false
                 else
@@ -1214,6 +1215,7 @@ run_playbook() {
         -e "@${MACHINE_FILE}"
         -e "computer_setup_layer_cache=${LAYER_CACHE}"
         -e "computer_setup_machine_file=${MACHINE_FILE}"
+        -e "computer_setup_repo_url=${REPO_URL}"
         -e "computer_setup_repo_branch=${REPO_BRANCH}"
     )
 
@@ -1331,7 +1333,7 @@ main() {
         load_answers_file "$ANSWERS_FILE"
     else
         if $HAS_PRIOR_PREFS; then
-            ok "Found existing prefs at ${MACHINE_FILE} — using prior answers as defaults"
+            ok "Found existing machine declaration at ${MACHINE_FILE} — using prior answers as defaults"
             echo
         fi
         choose_preset

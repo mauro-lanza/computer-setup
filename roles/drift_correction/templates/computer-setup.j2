@@ -167,6 +167,44 @@ notify() {
 
 log() { printf '%s\n' "$*" >> "${RUN_LOG:-/dev/null}"; }
 
+# ONE run at a time. The apply, the upgrade and both LaunchAgents share the pull
+# checkout, the runtime venv, the Galaxy directory, the layer cache and the state
+# files, and launchd runs a missed job at wake — so a 09:xx upgrade and the 10:00
+# check can genuinely overlap. A directory is the lock because mkdir is atomic;
+# the pid inside lets a crashed run's lock be recognised and cleared. A run
+# suspended by sleep still has a live pid, which is correct: it still owns things.
+LOCK_DIR="{{ computer_setup_state_dir }}/run.lock"
+
+# Returns 0 with the lock held, 1 with the holder's pid in LOCK_HOLDER.
+acquire_lock() {
+    mkdir -p "$(dirname "$LOCK_DIR")" 2>/dev/null || true
+    # Twice: the second pass is after clearing a dead holder's lock.
+    local pass
+    for pass in 1 2; do
+        : "$pass"
+        if mkdir "$LOCK_DIR" 2>/dev/null; then
+            echo "$$" > "$LOCK_DIR/pid"
+            trap 'rm -rf -- "$LOCK_DIR"' EXIT
+            return 0
+        fi
+        LOCK_HOLDER="$(cat "$LOCK_DIR/pid" 2>/dev/null || true)"
+        # An empty pid is a holder caught between mkdir and the write: treat as live.
+        if [[ -n "$LOCK_HOLDER" ]] && ! kill -0 "$LOCK_HOLDER" 2>/dev/null; then
+            rm -rf -- "$LOCK_DIR"
+            continue
+        fi
+        return 1
+    done
+    return 1
+}
+
+# Interactive callers refuse, and say who holds it.
+require_lock() {
+    acquire_lock && return 0
+    printf '%s\n' "computer-setup: another run is in progress (pid ${LOCK_HOLDER:-unknown}). Wait for it, or see \`computer-setup progress\`." >&2
+    return 1
+}
+
 # Opens this run's log and claims the progress file. Called FIRST, before
 # anything else can log — including the connectivity probe that may exit early,
 # because a run that skipped is still a run someone may ask about.
@@ -294,6 +332,7 @@ state_env() {
 # manifest at all, so the inventory would have silently stopped updating.
 run_foreground() {
     local mode="$1" partial="$2"; shift 2
+    require_lock || return 1
     start_run_log "$mode"
     sync_layers || printf '%s\n' "WARN: layer sync failed; continuing with cached content" >&2
     # State is recorded for hand-run modes too, or `status` would describe the
@@ -378,15 +417,21 @@ cmd_upgrade() {
     [[ -n "$sudo_pw" ]] && export CS_SUDO_PASSWORD="$sudo_pw"
     unset sudo_pw
 
+    # Taken after the prompts so a refusal does not waste the confirmation, and
+    # logged like every other run: this is the one most likely to fail (casks),
+    # and used to leave nothing behind.
+    require_lock || { unset CS_SUDO_PASSWORD; return 1; }
+    start_run_log upgrade
     sync_layers || printf '%s\n' "WARN: layer sync failed; continuing with cached content" >&2
     # Always partial: this runs `--tags upgrade`, so it says nothing about
     # whether the rest of the machine matches its configuration.
     state_env upgrade 1
     "$ANSIBLE_PULL" "${ARGS[@]}" --tags upgrade \
-        -e computer_setup_upgrade_assume_yes=true local.yml "$@"
-    local rc=$?
+        -e computer_setup_upgrade_assume_yes=true local.yml "$@" 2>&1 | tee -a "$RUN_LOG"
+    local rc=${PIPESTATUS[0]}
     unset CS_SUDO_PASSWORD
-    return $rc
+    [[ $rc -eq 0 ]] && prune_logs
+    return "$rc"
 }
 
 # ─── Run state ───────────────────────────────────────────────────────────────
@@ -747,6 +792,12 @@ cmd_repos() {
 # Logged, notified, and guarded on connectivity. Never interactive.
 run_scheduled() {
     local mode="$1"; shift
+    # Before start_run_log: that claims the progress file, which would clobber
+    # the live run's. A skipped-busy run leaves no log of its own on purpose.
+    if ! acquire_lock; then
+        echo "computer-setup ${mode}: skipped, another run is in progress (pid ${LOCK_HOLDER:-unknown})"
+        exit 0
+    fi
     start_run_log "$mode"
 
     {

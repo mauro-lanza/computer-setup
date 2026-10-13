@@ -90,3 +90,25 @@ out="$(run status)"
 [[ "$out" == *"BEHIND — last successful scheduled upgrade was 5 day(s) ago"* ]] || fail "BEHIND missing: $out"
 [[ "$(run status --json | yq -p json '.days_since_upgrade_success')" == 5 ]] || fail "status --json lacks days_since_upgrade_success"
 echo "  ok  status reports a stale upgrade"
+
+# 5. One run at a time. A live holder makes a scheduled run skip (exit 0, no
+#    ansible-pull, progress file untouched) and an interactive one refuse
+#    (non-zero, names the pid). A dead holder's lock is cleared, and the lock is
+#    released when a run ends.
+rm -f "$T/pull-calls" "$T/git-calls"
+mkdir "$T/state/run.lock"; sleep 30 & holder=$!; echo "$holder" > "$T/state/run.lock/pid"
+printf '{"event":"sentinel"}\n' > "$T/state/progress.jsonl"
+out="$(run _scheduled-check)" || fail "a busy scheduled run must exit 0"
+[[ "$out" == *"another run is in progress (pid $holder)"* ]] || fail "busy skip not explained: $out"
+[[ ! -e "$T/pull-calls" ]] || fail "ansible-pull ran while the lock was held"
+[[ "$(cat "$T/state/progress.jsonl")" == '{"event":"sentinel"}' ]] || fail "a skipped run clobbered the live run's progress"
+if err="$(run apply 2>&1)"; then fail "an interactive run was not refused"; fi
+[[ "$err" == *"pid $holder"* ]] || fail "refusal does not name the holder: $err"
+[[ ! -e "$T/pull-calls" ]] || fail "ansible-pull ran while refused"
+echo "  ok  live lock: scheduled skips, interactive refuses, progress untouched"
+
+kill "$holder"; wait "$holder" 2>/dev/null || true
+run apply >/dev/null 2>&1 || fail "a dead holder's lock was not cleared"
+[[ -e "$T/pull-calls" ]] || fail "run did not proceed past a stale lock"
+[[ ! -e "$T/state/run.lock" ]] || fail "lock not released after the run"
+echo "  ok  stale lock cleared, lock released on exit"

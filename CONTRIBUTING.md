@@ -47,7 +47,7 @@ Extend the tests when you touch what they cover:
   bug; only driving the loop with scripted answers can.
 - **`tests/contract.yml`** — the merge logic. Confirm list vars append, scalar
   vars take the highest-priority value, capability ids collide correctly, and
-  machine-local prefs stay out of layer `vars.yml`.
+  machine-local settings stay out of layer `vars.yml`.
 - **`tests/negative.yml`** — the guards (reserved keys, reserved prefixes,
   `schema_version`, malformed `capabilities.yml`). These assert a bad layer is
   *rejected for the stated reason*, so a guard cannot silently degrade into a
