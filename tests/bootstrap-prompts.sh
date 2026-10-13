@@ -562,8 +562,10 @@ echo "==> bootstrap machine restore"
 # A real bare repo with one backup in it, so `names` and `pull` are exercised
 # for real rather than stubbed.
 RBACKUP="$WORK/restore"; mkdir -p "$RBACKUP/cfg"
-git init -q --bare "$RBACKUP/remote.git"
-git init -q "$RBACKUP/seed"
+# -b main: the push below targets main, and a bare repo's HEAD follows
+# init.defaultBranch, so on a host that defaults to master the clone gets nothing.
+git init -q -b main --bare "$RBACKUP/remote.git"
+git init -q -b main "$RBACKUP/seed"
 (
     cd "$RBACKUP/seed"
     mkdir -p machines

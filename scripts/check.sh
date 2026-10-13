@@ -233,8 +233,9 @@ CSPY
 echo "==> Machine backup round-trip"
 cs_m_tmp="$(mktemp -d)"
 mkdir -p "$cs_m_tmp/cfg"
-git init -q --bare "$cs_m_tmp/remote.git"
-git init -q "$cs_m_tmp/seed"
+# -b main: see tests/bootstrap-prompts.sh; the host's init.defaultBranch must not matter.
+git init -q -b main --bare "$cs_m_tmp/remote.git"
+git init -q -b main "$cs_m_tmp/seed"
 (
     cd "$cs_m_tmp/seed"
     echo "# state" > README.md
