@@ -653,6 +653,32 @@ echo "  ok  git includes survive, empty docker config, bad conditional default"
 echo "==> Scheduled runner"
 ./tests/runner.sh
 
+# The macOS failure report lives in local.yml, which no test plays. Lift the real
+# task out and feed it fake failures from BOTH sources, so a variable the message
+# uses but the task does not define (it happened) fails here rather than at the
+# one moment a default is wrong.
+echo "==> macOS defaults failure report"
+mr_dir="$(mktemp -d)"
+yq '[.[0].post_tasks[] | select(.name == "Report macOS defaults that could not be applied")]' local.yml > "$mr_dir/task.yml"
+yq -n '[{"hosts":"localhost","connection":"local","gather_facts":false,"vars":{
+  "macos_defaults_results":{"results":[{"failed":true,"msg":"mismatch-A","item":{"domain":"dom1","key":"key1","type":"bool"}}]},
+  "macos_conditional_results":{"results":[
+    {"failed":true,"msg":"mismatch-B","item":[{"app":"/x"},{"domain":"dom2","key":"key2","type":"int"}]},
+    {"failed":false,"item":[{"app":"/y"},{"domain":"fine","key":"fine","type":"int"}]}]}},
+  "tasks":[]}]' > "$mr_dir/pb.yml"
+yq -i ".[0].tasks = load(\"$mr_dir/task.yml\")" "$mr_dir/pb.yml"
+mr_out="$(ansible-playbook "$mr_dir/pb.yml" 2>&1 || true)"
+rm -rf -- "$mr_dir"
+for expect in "2 macOS default(s)" "dom1 key1 (declared bool): mismatch-A" "dom2 key2 (declared int): mismatch-B"; do
+    [[ "$mr_out" == *"$expect"* ]] || {
+        echo "ERROR: the macOS failure report is missing '$expect'" >&2
+        printf '%s\n' "$mr_out" >&2
+        exit 1
+    }
+done
+[[ "$mr_out" != *"fine fine"* ]] || { echo "ERROR: a SUCCESSFUL default was reported as failed" >&2; exit 1; }
+echo "  ok  both failure sources reported, successes not"
+
 echo "==> History rendering"
 hist_expr="$(sed -n "s/.*| yq -p json -r '\(.*\)' \\\\$/\1/p" \
     roles/drift_correction/templates/computer-setup.j2)"

@@ -179,21 +179,24 @@ LOCK_DIR="{{ computer_setup_state_dir }}/run.lock"
 acquire_lock() {
     mkdir -p "$(dirname "$LOCK_DIR")" 2>/dev/null || true
     # Twice: the second pass is after clearing a dead holder's lock.
-    local pass
-    for pass in 1 2; do
-        : "$pass"
+    for _ in 1 2; do
         if mkdir "$LOCK_DIR" 2>/dev/null; then
             echo "$$" > "$LOCK_DIR/pid"
             trap 'rm -rf -- "$LOCK_DIR"' EXIT
             return 0
         fi
         LOCK_HOLDER="$(cat "$LOCK_DIR/pid" 2>/dev/null || true)"
-        # An empty pid is a holder caught between mkdir and the write: treat as live.
-        if [[ -n "$LOCK_HOLDER" ]] && ! kill -0 "$LOCK_HOLDER" 2>/dev/null; then
-            rm -rf -- "$LOCK_DIR"
-            continue
+        if [[ -n "$LOCK_HOLDER" ]]; then
+            kill -0 "$LOCK_HOLDER" 2>/dev/null && return 1
+        else
+            # No pid yet: a holder between mkdir and the write (milliseconds), or
+            # one that died in that gap. Only the second is ever older than a
+            # minute, and without this it would block every run forever.
+            local age
+            age=$(( $(date +%s) - $(stat -f %m "$LOCK_DIR" 2>/dev/null || date +%s) ))
+            (( age > 60 )) || return 1
         fi
-        return 1
+        rm -rf -- "$LOCK_DIR"
     done
     return 1
 }

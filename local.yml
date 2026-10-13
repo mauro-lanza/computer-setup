@@ -156,10 +156,7 @@
           {{ ((homebrew_adopt_results | default({})).get('results', [])
               + (homebrew_fresh_results | default({})).get('results', []))
              | selectattr('failed', 'defined') | selectattr('failed') | list }}
-        _failed_cond: >-
-          {{ (macos_conditional_results | default({})).get('results', [])
-             | selectattr('failed', 'defined') | selectattr('failed') | list }}
-      when: (_failed | length > 0) or (_failed_cond | length > 0)
+      when: _failed | length > 0
       tags: [homebrew]
 
     # Same reason as the casks above: osx_defaults refuses to change a key's
@@ -187,7 +184,10 @@
         _failed: >-
           {{ (macos_defaults_results | default({})).get('results', [])
              | selectattr('failed', 'defined') | selectattr('failed') | list }}
-      when: _failed | length > 0
+        _failed_cond: >-
+          {{ (macos_conditional_results | default({})).get('results', [])
+             | selectattr('failed', 'defined') | selectattr('failed') | list }}
+      when: (_failed | length > 0) or (_failed_cond | length > 0)
       tags: [macos]
 
     - name: Check GitHub CLI auth status

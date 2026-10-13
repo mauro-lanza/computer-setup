@@ -112,3 +112,12 @@ run apply >/dev/null 2>&1 || fail "a dead holder's lock was not cleared"
 [[ -e "$T/pull-calls" ]] || fail "run did not proceed past a stale lock"
 [[ ! -e "$T/state/run.lock" ]] || fail "lock not released after the run"
 echo "  ok  stale lock cleared, lock released on exit"
+
+# 6. A lock that never got a pid (holder died between mkdir and the write) is
+#    cleared once it is old, but respected while young.
+mkdir "$T/state/run.lock"
+out="$(run _scheduled-check)" || fail "young pid-less lock must exit 0"
+[[ "$out" == *"another run is in progress"* ]] || fail "young pid-less lock was not respected: $out"
+touch -t 202001010000 "$T/state/run.lock"
+run apply >/dev/null 2>&1 || fail "an old pid-less lock was not cleared"
+echo "  ok  pid-less lock: respected when young, cleared when old"
