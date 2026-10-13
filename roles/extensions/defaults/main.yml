@@ -17,5 +17,5 @@ extension_managers: []
 # selected capabilities of `type: extension`, keyed by manager id. There is
 # deliberately no "always install these" list beside it: a capability that should
 # always apply is one a preset always selects, which keeps the selection visible
-# in the prefs file rather than as invisible layer state.
+# in machine.yml rather than as invisible layer state.
 extension_optional: {}

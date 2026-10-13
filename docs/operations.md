@@ -400,3 +400,30 @@ applied.
 The prompt is skipped when it would be wrong: a non-interactive run, an explicit
 `--answers`, an already-declared machine, or no backup repo configured. It is
 also never fatal — an unreachable backup repo warns and setup continues.
+
+## Removing computer-setup
+
+There is no uninstall command, and nothing it installed is removed for you
+(see "Non-destructive guarantees"). To stop and remove the engine itself:
+
+```bash
+for l in check upgrade; do
+  launchctl bootout "gui/$(id -u)/com.computer-setup.$l" 2>/dev/null
+  rm -f ~/Library/LaunchAgents/com.computer-setup.$l.plist
+done
+rm -rf ~/.local/share/computer-setup ~/.local/state/computer-setup \
+       ~/Library/Logs/computer-setup ~/.ansible/pull/computer-setup
+rm -f ~/.local/bin/computer-setup*
+# Keep ~/.config/computer-setup/machine.yml if you may come back: it is the
+# declaration. Layer-declared agents (e.g. com.computer-setup.*) are in the manifest.
+```
+
+Managed files (`~/.zshrc`, `~/.zsh/`, `~/.config/git/`) stay on disk; list them with
+`computer-setup manifest` before deleting the state directory.
+
+## Running your own fork
+
+`BOOTSTRAP_OWNER=<github-user-or-org> bash bootstrap.sh` clones the engine from
+`<owner>/computer-setup` instead, and the choice is passed to the play so the
+scheduled agents follow the same repo. `BOOTSTRAP_BRANCH=<branch|tag|sha>` pins
+the engine to a ref the same way.

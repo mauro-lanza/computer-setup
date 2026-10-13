@@ -17,15 +17,15 @@
 #   priority: merge order (higher wins scalars)
 layers:
   - name: public
-    repo: git@github.com:mauro-lanza/computer-setup-layer-public.git
+    repo: git@github.com:your-org/computer-setup-layer-public.git
     priority: 10
 
   - name: personal
-    repo: git@github.com:mauro-lanza/computer-setup-layer-personal.git
+    repo: git@github.com:your-org/computer-setup-layer-personal.git
     priority: 20
 
   - name: work
-    repo: git@github.com:mauro-lanza/computer-setup-layer-work.git
+    repo: git@github.com:your-org/computer-setup-layer-work.git
     priority: 30
 
 # ── answers ──────────────────────────────────────────────────────────────────

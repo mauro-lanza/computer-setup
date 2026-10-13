@@ -18,7 +18,7 @@
 #   - `post_clone` runs once, only on a fresh clone, from inside the repo.
 repositories:
   - folder: "{{ repositories_base_dir }}/oss/computer-setup"
-    remote: "git@github.com:mauro-lanza/computer-setup.git"
+    remote: "git@github.com:your-org/your-repo.git"
 
   - folder: "{{ repositories_base_dir }}/work/analytics"
     remote: "git@github.com:example-org/analytics.git"

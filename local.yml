@@ -18,7 +18,7 @@
 
     # ─── Content layers ───────────────────────────────────────────────────────
     # Every piece of machine-local state lives under one directory: the layer
-    # manifest, the prefs file, and the optional repository override. One
+    # manifest, machine.yml, and the optional repository override. One
     # literal, so "back up this machine's answers" is a single `cp -r` and the
     # paths cannot drift apart. Overridable with -e for testing.
     computer_setup_config_dir: "{{ home_dir }}/.config/computer-setup"

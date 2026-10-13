@@ -15,7 +15,7 @@
 #   type:     select | bool | text | path
 #   desc:     label shown in the bootstrap prompt
 #   default:  answer used when unanswered (fresh machine, or a question added
-#             after this machine's prefs file was written)
+#             after this machine's machine.yml was written)
 #   set_var:  (optional) assign the raw answer to this variable
 #   validate: (optional, text/path only) a regex the answer must match. It is
 #             checked by TWO different regex engines, so only their common

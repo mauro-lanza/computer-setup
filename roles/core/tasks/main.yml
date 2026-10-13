@@ -66,7 +66,7 @@
     # Individual keys a layer may never define.
     #
     # INVARIANT: this list holds only names that are PUBLIC INTERFACE — the
-    # prefs-file keys, the machine tier, and the play vars layers legitimately
+    # machine.yml keys, the machine tier, and the play vars layers legitimately
     # template against. Everything engine-owned is covered by a prefix above,
     # so adding an engine var never requires editing this list.
     computer_setup_reserved_layer_keys:
