@@ -33,7 +33,7 @@ python: "3.14"
 # but explicitly NOT for Ansible, and 3.14 is the version Homebrew ships, so it
 # is also the one anything else on the machine will be built against.
 
-ansible_core: "2.21.3"
+ansible_core: "2.21.5"
 
 # Mitogen replaces Ansible's per-task fork+exec with a persistent interpreter.
 # Measured on this playbook: 48.6s -> 15.4s, identical results (167 ok, 0
@@ -53,4 +53,4 @@ ansible_core: "2.21.3"
 #     at all
 #   - bus factor of one maintainer: mitigated by the pin, and by the fact that
 #     turning it off is a single variable
-mitogen: "0.3.53"
+mitogen: "0.3.54"
