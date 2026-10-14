@@ -793,6 +793,56 @@ expect_layer_failure machine-tier "defines reserved key"
 # Capabilities, questions and presets refer to each other by id, and every one of
 # those references fails SILENTLY when wrong — a preset naming a capability that
 # does not exist just selects nothing. The linter makes them loud.
+# A pinned layer must stay put while origin moves, and unpinning must return it
+# to the branch. Real local repos, no network. Captured, never piped into grep -q.
+echo "==> Layer sync (pinned ref)"
+_pd="$(mktemp -d)"
+git init -q -b main "$_pd/src"
+printf 'name: pinme\nschema_version: 1\n' > "$_pd/src/layer.yml"
+echo one > "$_pd/src/marker"
+git -C "$_pd/src" add -A
+git -C "$_pd/src" -c user.email=t@t -c user.name=t commit -qm one
+git -C "$_pd/src" tag v1
+_pd_sha="$(git -C "$_pd/src" rev-parse HEAD)"
+pin_manifest() { printf 'layers:\n  - name: pinme\n    repo: "%s"\n    priority: 10\n%b' "$_pd/src" "${1:-}" > "$_pd/m.yml"; }
+pin_sync() { ./scripts/computer-setup-layers sync --manifest "$_pd/m.yml" --cache "$_pd/cache" 2>&1; }
+# For the cases that must succeed: show why when they do not.
+pin_ok() { pin_out="$(pin_sync)" || { echo "ERROR: pinned sync failed: $pin_out" >&2; exit 1; }; }
+pin_manifest '    ref: v1\n'; pin_ok
+echo two > "$_pd/src/marker"
+git -C "$_pd/src" -c user.email=t@t -c user.name=t commit -qam two
+pin_ok
+[[ "$(cat "$_pd/cache/pinme/marker")" == one ]] || { echo "ERROR: a tag-pinned layer moved with origin" >&2; exit 1; }
+pin_manifest "    ref: $_pd_sha\n"; pin_ok
+[[ "$(cat "$_pd/cache/pinme/marker")" == one ]] || { echo "ERROR: a sha-pinned layer moved with origin" >&2; exit 1; }
+pin_manifest ''; pin_ok
+[[ "$(cat "$_pd/cache/pinme/marker")" == two ]] || { echo "ERROR: unpinning did not return the layer to the branch" >&2; exit 1; }
+pin_manifest '    ref: v1\n'; pin_ok
+[[ "$(cat "$_pd/cache/pinme/marker")" == one ]] || { echo "ERROR: re-pinning a followed layer did not take" >&2; exit 1; }
+pin_manifest '    ref: "--upload-pack=x"\n'
+pin_out="$(pin_sync)" && { echo "ERROR: a ref starting with '-' was ACCEPTED" >&2; exit 1; }
+[[ "$pin_out" == *"is invalid"* ]] || { echo "ERROR: bad ref rejected for the wrong reason: $pin_out" >&2; exit 1; }
+pin_manifest '    ref: no-such-tag\n'
+pin_out="$(pin_sync)" && { echo "ERROR: an unknown ref was ACCEPTED" >&2; exit 1; }
+[[ "$pin_out" == *"could not fetch ref"* ]] || { echo "ERROR: unknown ref failed for the wrong reason: $pin_out" >&2; exit 1; }
+rm -rf "$_pd"
+echo "  ok  tag and sha pins hold, unpin follows the branch, bad refs rejected"
+
+# `lint --machine`: an unknown selected id is an error, a known one is not.
+echo "==> Layer lint (machine selections)"
+./scripts/computer-setup-layers lint --cache tests/fixtures/layers_cache \
+    --machine tests/fixtures/machine.yml >/dev/null 2>&1 && {
+    echo "ERROR: lint --machine accepted the fixture's ghost" >&2
+    exit 1
+}
+lm_out="$(./scripts/computer-setup-layers lint --cache tests/fixtures/layers_cache \
+    --machine tests/fixtures/machine.yml 2>&1 || true)"
+[[ "$lm_out" == *"selected_capabilities names 'ghost'"* && "$lm_out" != *"names 'nvm'"* ]] || {
+    echo "ERROR: lint --machine reported the wrong ids: $lm_out" >&2
+    exit 1
+}
+echo "  ok  unknown selection rejected, known ones accepted"
+
 # A manifest repo URL starting with '-' would be parsed by `git clone` as an
 # option. Reject it before any git call; capture the output (no pipe into grep -q).
 echo "==> Layer sync (hostile manifest repo)"

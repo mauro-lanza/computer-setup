@@ -15,6 +15,10 @@
 #             git@github.com:owner/repo.git — a bare `github.com:owner/repo`
 #             is completed to that form.
 #   priority: merge order (higher wins scalars)
+#   ref:      optional. A tag, branch or commit sha to hold the layer at. Without
+#             it the layer follows the repo's default branch, so every push to it
+#             reaches this machine at the next sync (the 09:00 agent included).
+#             A layer is code that runs as you; pin one you do not control.
 layers:
   - name: public
     repo: git@github.com:your-org/computer-setup-layer-public.git

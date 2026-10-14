@@ -249,6 +249,25 @@
     loop_var: _layer
     label: "{{ _layer.name }}"
 
+- name: Find selected capabilities no layer declares
+  # Dropped by the registry lookups below, so a capability removed or renamed in
+  # a layer would otherwise just stop being installed. A fact so a test can read it.
+  ansible.builtin.set_fact:
+    computer_setup_unknown_selections: >-
+      {{ (selected_capabilities | default([], true))
+         | reject('in', computer_setup_capability_registry) | list }}
+
+- name: Warn about them
+  # A warning, not a failure: a layer that briefly failed to load must not stop
+  # the rest of the run.
+  ansible.builtin.debug:
+    msg: >-
+      machine.yml selects capability id(s) no layer declares, so they are
+      ignored: {{ computer_setup_unknown_selections | join(', ') }}. Check the
+      id, or whether the layer that provided it is still listed.
+      `computer-setup layers lint` reports the same.
+  when: computer_setup_unknown_selections | length > 0
+
 - name: Fold capability implications from the answers into the selection
   # A `select` option may declare `implies: [id, ...]`, the generic dependency
   # edge: choosing an editor selects the capability that installs it.

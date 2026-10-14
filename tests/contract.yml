@@ -183,6 +183,8 @@
           - contract_unanswered_var == 'fallback-value'
           # `implies:` is the generic dependency edge, replacing requires_vscode.
           - "'implied-cap' in selected_capabilities"
+          # A selection no layer declares is reported.
+          - computer_setup_unknown_selections == ['ghost']
           - "'implied-cap' in computer_setup_active_capabilities"
           # ORDERING, both directions. A layer var templates against an answer
           # (answers applied BEFORE the merge)...

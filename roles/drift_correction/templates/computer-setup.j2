@@ -937,6 +937,15 @@ cmd_layers() {
             && args=(--manifest "$MACHINE_FILE" "${args[@]+"${args[@]}"}")
     fi
 
+    # Lint also checks this machine's own selections, unless pointed at one layer.
+    if [[ "$sub" == "lint" && -f "$MACHINE_FILE" ]]; then
+        local has_scope=0 a
+        for a in "${args[@]+"${args[@]}"}"; do
+            [[ "$a" == "--layer" || "$a" == "--machine" ]] && has_scope=1
+        done
+        [[ $has_scope -eq 0 ]] && args+=(--machine "$MACHINE_FILE")
+    fi
+
     exec "$LAYER_SYNC" "$sub" "${args[@]+"${args[@]}"}"
 }
 

@@ -7,7 +7,7 @@ usage() {
     cat <<'EOF'
 Usage:
   computer-setup-layers sync --manifest PATH --cache DIR [--schema-version N]
-  computer-setup-layers lint (--cache DIR | --layer DIR)
+  computer-setup-layers lint (--cache DIR | --layer DIR) [--machine FILE]
 
 sync  Synchronize content layers from a manifest into the layer cache. Repo URLs
       are used as written; a scheme-less github.com:owner/repo becomes SSH.
@@ -17,7 +17,9 @@ lint  Check that a layer's cross-references resolve. Capabilities, questions and
       SILENTLY when it is wrong: a preset naming a capability that does not exist
       selects nothing, and an `implies:` naming one installs nothing. --cache
       lints the whole merged set (ids resolve across layers, as at runtime);
-      --layer lints one directory on its own.
+      --layer lints one directory on its own. --machine also checks that every
+      selected_capabilities id in a machine.yml exists in the lint set; an
+      unknown one is otherwise dropped without a word.
 EOF
 }
 
@@ -79,6 +81,12 @@ validate_manifest_entry() {
     # (e.g. --upload-pack=...). Also guarded with `--` at the clone sites.
     [[ "$repo" != -* ]] || die "Layer '$name' repo must not start with '-'"
     [[ "$priority" =~ ^[0-9]+$ ]] || die "Layer '$name' priority must be a number"
+    # Optional pin: a tag, branch or commit sha. Passed to `git fetch`, so it gets
+    # the same leading-dash rule as the repo URL.
+    local ref
+    ref="$(yq -r ".layers[$index].ref // \"\"" "$manifest")"
+    [[ -z "$ref" || "$ref" =~ ^[A-Za-z0-9][A-Za-z0-9._/-]*$ ]] \
+        || die "Layer '$name' ref '$ref' is invalid — use a tag, branch or commit sha"
     [[ "$seen_names" != *" $name "* ]] || die "Duplicate layer name in manifest: $name"
 }
 
@@ -109,13 +117,39 @@ sync_layers() {
 
     mkdir -p "$cache"
 
-    local i name repo dest branch seen_names=" "
+    local i name repo dest branch ref seen_names=" "
     for ((i = 0; i < n; i++)); do
         validate_manifest_entry "$manifest" "$i" "$seen_names"
         name="$(yq -r ".layers[$i].name" "$manifest")"
         seen_names="${seen_names}${name} "
         repo="$(normalize_repo_url "$(yq -r ".layers[$i].repo" "$manifest")")"
         dest="$cache/$name"
+        ref="$(yq -r ".layers[$i].ref // \"\"" "$manifest")"
+
+        # PINNED: the layer is held at one tag/branch/sha instead of following
+        # origin's default branch, so a later push to the layer repo reaches this
+        # machine only when the pin is edited in machine.yml. Always a detached
+        # checkout, which is why the unpinned path below would re-clone it.
+        if [[ -n "$ref" ]]; then
+            if [[ -e "$dest" && ! -d "$dest/.git" ]]; then
+                warn "Layer '$name': '$dest' exists but is not a git checkout — replacing it"
+                rm -rf "$dest"
+            fi
+            log "Pinning layer '$name' to $ref..."
+            git init -q "$dest"
+            if git -C "$dest" remote get-url origin >/dev/null 2>&1; then
+                git -C "$dest" remote set-url origin "$repo"
+            else
+                git -C "$dest" remote add origin "$repo"
+            fi
+            git -C "$dest" fetch -q --depth 1 origin "$ref" \
+                || die "Layer '$name': could not fetch ref '$ref' from $repo"
+            git -C "$dest" reset -q --hard FETCH_HEAD \
+                || die "Layer '$name': could not check out ref '$ref'"
+            git -C "$dest" clean -ffdq 2>/dev/null || true
+            validate_layer "$name" "$dest" "$schema_version_max"
+            continue
+        fi
 
         # The layer cache is a CACHE, not a working copy — nothing is ever
         # authored here, so the only correct end state is "byte-identical to
@@ -221,9 +255,10 @@ lint_has()   { printf '%s\n' "$2" | grep -qxF -- "$1"; }
 lint_count() { printf '%s\n' "$1" | grep -cv '^$' || true; }
 
 lint_layers() {
-    local cache="" single=""
+    local cache="" single="" machine=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
+            --machine) machine="$2"; shift 2 ;;
             --cache) cache="$2"; shift 2 ;;
             --layer) single="$2"; shift 2 ;;
             --manifest) shift 2 ;;   # accepted and ignored: lint reads the cache
@@ -352,6 +387,16 @@ lint_layers() {
     if [[ -n "$uncovered" ]]; then
         printf '  note:  %s capability(ies) in no preset: %s\n' \
             "$(lint_count "$uncovered")" "$(printf '%s' "$uncovered" | tr '\n' ' ')"
+    fi
+
+    if [[ -n "$machine" ]]; then
+        [[ -f "$machine" ]] || die "No such machine file: $machine"
+        local sel
+        while IFS= read -r sel; do
+            [[ -n "$sel" ]] || continue
+            lint_has "$sel" "$all_caps" \
+                || lint_err "[machine] selected_capabilities names '$sel', which no layer declares"
+        done <<< "$(yq -r '.selected_capabilities[]?' "$machine")"
     fi
 
     if [[ "$lint_fail_count" -gt 0 ]]; then

@@ -33,6 +33,22 @@ changing that contract in a breaking way. They cannot import from each other, so
 Not to be confused with the `schema_version` on the run-state file below, which
 is machine-local and not yet a contract.
 
+### Trust, and pinning a layer
+
+A layer is code that runs as you, not configuration. It can add shell snippets
+that execute at every shell start, `post_clone` commands, and LaunchAgents, so it
+can already do anything its path-based limits would try to forbid. That is why
+`dest` is not confined to `$HOME`: it would only catch typos, and would read as
+a security boundary it is not. The boundaries that do hold are the reserved keys
+and the machine tier (see below), which stop a layer reaching the engine itself.
+
+What a layer repo is trusted *not to do* is change under you. By default a layer
+follows its repo's default branch, hard-reset on every sync, so a push reaches
+every machine at the next 09:00 run. For a layer you do not control, set `ref:`
+in its `machine.yml` entry (a tag, branch or commit sha). The cache is then held
+at exactly that commit and moves only when the `ref:` is edited. A pinned layer
+is always a detached checkout, so unpinning returns it to the branch.
+
 ## Merge rules
 
 Layers are applied in ascending priority order, so higher-priority layers merge
