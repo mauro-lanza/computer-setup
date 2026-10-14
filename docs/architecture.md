@@ -225,8 +225,8 @@ playbook:
 
 ```yaml
 python:       "3.14"
-ansible_core: "2.21.3"
-mitogen:      "0.3.53"
+ansible_core: "2.21.5"
+mitogen:      "0.3.54"
 ```
 
 A standalone file rather than play vars, because bootstrap has to install this
