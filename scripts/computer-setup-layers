@@ -146,6 +146,10 @@ sync_layers() {
                 || die "Layer '$name': could not fetch ref '$ref' from $repo"
             git -C "$dest" reset -q --hard FETCH_HEAD \
                 || die "Layer '$name': could not check out ref '$ref'"
+            # Detached, whatever init.defaultBranch named the unborn branch: the
+            # unpinned path treats a detached HEAD as "re-clone", which is what
+            # returns a formerly pinned layer to following the branch.
+            git -C "$dest" checkout -q --detach
             git -C "$dest" clean -ffdq 2>/dev/null || true
             validate_layer "$name" "$dest" "$schema_version_max"
             continue
