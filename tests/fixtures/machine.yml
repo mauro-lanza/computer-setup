@@ -1,8 +1,7 @@
 ---
 # A machine declaration: layers + answers + selections in ONE file, the
-# shape bootstrap.sh writes and the engine reads. Formerly two fixtures
-# (layers.yml + prefs.yml), which let a test pair a layer set with answers
-# that no real machine would have had.
+# shape bootstrap.sh writes and the engine reads, so a test never pairs a layer
+# set with answers no real machine would have had.
 layers:
   - name: base
     repo: git@github.com:example/base.git

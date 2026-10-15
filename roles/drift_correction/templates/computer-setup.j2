@@ -46,9 +46,8 @@ set -uo pipefail
 REPO_URL="{{ computer_setup_repo_url }}"
 REPO_BRANCH="{{ computer_setup_repo_branch }}"
 # THE machine declaration: layers + answers + capability selections in one
-# file. Previously two (prefs.yml and layers.yml), which meant a backup could
-# be half a machine — the capability ids are meaningless without the layer
-# registry that defines them.
+# file, so a backup is never half a machine (capability ids are meaningless
+# without the layer registry that defines them).
 MACHINE_FILE="{{ computer_setup_machine_file }}"
 LAYER_CACHE="{{ computer_setup_layer_cache }}"
 # ONE LOG PER RUN, in a directory of their own. Previously every scheduled run

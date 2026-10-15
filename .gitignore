@@ -14,11 +14,6 @@ __pycache__/
 .idea/
 *.swp
 
-# Cross-session working notes for AI agents. Deliberately NOT tracked
-#
-# CAUTION: `git clean -fdx` deletes ignored files. This one is the only copy of
-# several sessions of context — see the note at the top of it.
-# Moved to computer-setup-layer-personal/docs/learnings.md (private, tracked,
-# backed up). The rule stays so a stray copy here is never committed to a public
-# repo by accident.
+# Agent notes live in the private personal layer (docs/learnings.md); ignore a
+# stray copy so it never reaches this public repo.
 docs/learnings.md
