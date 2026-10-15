@@ -148,6 +148,8 @@ ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook --syntax-check tests/scheduled-
 ansible-playbook --syntax-check tests/truncation.yml
 ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook --syntax-check tests/robustness.yml
 ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook --syntax-check tests/repositories.yml
+ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook --syntax-check tests/upgrade.yml
+ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook --syntax-check tests/logins.yml
 ansible-playbook --syntax-check tests/orphans.yml
 ansible-playbook --syntax-check tests/failure.yml
 ansible-playbook --syntax-check tests/manifest.yml
@@ -658,6 +660,14 @@ rp_out="$(ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook tests/repositories.ym
     exit 1
 }
 echo "  ok  clone once, hook once, local work untouched, inactive skipped"
+echo "==> Logins and upgrade roles"
+for t in logins upgrade; do
+    lu_out="$(ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook "tests/$t.yml" 2>&1)" || {
+        printf '%s\n' "$lu_out" >&2
+        exit 1
+    }
+done
+echo "  ok  logins detect/remedy gating, upgrade preview queries only managed packages"
 echo "==> Scheduled runner"
 ./tests/runner.sh
 

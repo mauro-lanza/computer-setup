@@ -1,0 +1,79 @@
+---
+# The upgrade role's PREVIEW path (assume_yes false) with a stub `brew` first on
+# PATH that records its argv. Proves: only managed packages are queried, excluded
+# casks are left out, casks are skipped when include_casks is false, and a brew
+# error is reported as CHECK FAILED rather than "up to date". The apply path
+# needs real Homebrew modules and is not exercised here.
+- name: Upgrade role preview
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Scratch dir
+      ansible.builtin.tempfile:
+        state: directory
+      register: s
+
+    - name: Stub brew
+      ansible.builtin.copy:
+        dest: "{{ s.path }}/brew"
+        mode: "0755"
+        content: |
+          #!/bin/bash
+          echo "$*" >> "{{ s.path }}/calls"
+          if [[ "$*" == *"--formula"* && -n "${BREW_FAIL:-}" ]]; then echo "Error: No available formula" >&2; exit 1; fi
+          [[ "$*" == "outdated --formula"* ]] && echo "gitx (1.0) < 2.0"
+          exit 0
+
+    - name: Preview with casks, one excluded
+      vars:
+        homebrew_baseline_formulae: [gitx]
+        homebrew_optional_formulae: [rg]
+        homebrew_baseline_casks: [appa, appb]
+        homebrew_optional_casks: []
+        upgrade_casks_exclude: [appb]
+        runtimes_nvm_default_node: lts/*
+        computer_setup_state_dir: "{{ s.path }}/state"
+      environment:
+        PATH: "{{ s.path }}:{{ lookup('env', 'PATH') }}"
+      block:
+        - name: Run
+          ansible.builtin.include_role:
+            name: upgrade
+        - name: Read calls
+          ansible.builtin.slurp:
+            src: "{{ s.path }}/calls"
+          register: calls1
+        - name: Run with casks off and brew failing
+          environment:
+            PATH: "{{ s.path }}:{{ lookup('env', 'PATH') }}"
+            BREW_FAIL: "1"
+          block:
+            - name: Run
+              ansible.builtin.include_role:
+                name: upgrade
+              vars:
+                computer_setup_upgrade_include_casks: false
+        - name: Read calls again
+          ansible.builtin.slurp:
+            src: "{{ s.path }}/calls"
+          register: calls2
+
+    - name: Assert
+      vars:
+        c: "{{ calls1.content | b64decode }}"
+      ansible.builtin.assert:
+        that:
+          - "'outdated --formula --verbose gitx rg' in c"
+          - "'outdated --cask --verbose appa' in c"
+          - "'appb' not in c"
+          - "'upgrade' not in c"
+          # Second run: casks off means no new --cask query, and a failing brew
+          # did not abort the preview.
+          - (calls2.content | b64decode).count('--cask') == c.count('--cask')
+          - (calls2.content | b64decode).count('--formula') == 2
+
+    - name: Cleanup
+      ansible.builtin.file:
+        path: "{{ s.path }}"
+        state: absent

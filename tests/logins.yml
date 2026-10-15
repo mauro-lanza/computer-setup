@@ -1,0 +1,74 @@
+---
+# The logins role: detection of present/absent/empty/wrong-key credential
+# stores, the remedy running only when interactive, and the report otherwise.
+# Remedies are `touch` commands on scratch paths, so nothing real is signed in.
+- name: Logins role behaviour
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Scratch dir
+      ansible.builtin.tempfile:
+        state: directory
+      register: s
+
+    - name: Seed stores
+      ansible.builtin.copy:
+        content: "{{ item.c }}"
+        dest: "{{ s.path }}/{{ item.n }}"
+        mode: "0600"
+      loop:
+        - {n: has-key.json, c: '{"https://x": {}}'}
+        - {n: wrong-key.json, c: '{"other": 1}'}
+        - {n: empty.json, c: ''}
+        - {n: bad.json, c: 'not json'}
+
+    - name: Run unattended
+      vars:
+        computer_setup_interactive: false
+        computer_setup_active_capabilities: [cap-on]
+        logins: &defs
+          - {id: ok, desc: ok, detect_file: "{{ s.path }}/has-key.json", detect_key: "https://x", remedy: "touch {{ s.path }}/ran-ok"}
+          - {id: wrongkey, desc: wrongkey, detect_file: "{{ s.path }}/wrong-key.json", detect_key: "https://x", remedy: "touch {{ s.path }}/ran-wrongkey"}
+          - {id: empty, desc: empty, detect_file: "{{ s.path }}/empty.json", remedy: "touch {{ s.path }}/ran-empty"}
+          - {id: bad, desc: bad, detect_file: "{{ s.path }}/bad.json", detect_key: "k", remedy: "touch {{ s.path }}/ran-bad"}
+          - {id: absent, desc: absent, detect_file: "{{ s.path }}/nope", remedy: "touch {{ s.path }}/ran-absent"}
+          - {id: gated, desc: gated, requires_capability: cap-off, detect_file: "{{ s.path }}/nope", remedy: "touch {{ s.path }}/ran-gated"}
+      ansible.builtin.include_role:
+        name: logins
+
+    - name: Nothing may have run unattended
+      ansible.builtin.find:
+        paths: "{{ s.path }}"
+        patterns: "ran-*"
+      register: ran_unattended
+
+    - name: Only the four unsatisfied, non-gated logins are missing
+      ansible.builtin.assert:
+        that:
+          - ran_unattended.matched == 0
+          - _logins_missing | map(attribute='id') | sort == ['absent', 'bad', 'empty', 'wrongkey']
+
+    - name: Run interactively
+      vars:
+        computer_setup_interactive: true
+        computer_setup_active_capabilities: [cap-on]
+        logins: *defs
+      ansible.builtin.include_role:
+        name: logins
+
+    - name: Which remedies ran
+      ansible.builtin.find:
+        paths: "{{ s.path }}"
+        patterns: "ran-*"
+      register: ran
+
+    - name: Exactly the missing ones, not the satisfied or gated
+      ansible.builtin.assert:
+        that:
+          - ran.files | map(attribute='path') | map('basename') | sort == ['ran-absent', 'ran-bad', 'ran-empty', 'ran-wrongkey']
+
+    - name: Cleanup
+      ansible.builtin.file:
+        path: "{{ s.path }}"
+        state: absent
