@@ -122,7 +122,7 @@ so the scheduled agents and everything you type by hand can never drift apart.
   `defaults` against the values declared by your layers and emits paste-ready
   YAML, so a setting you tweaked in System Settings can be adopted back into a
   layer. `computer-setup capture --domain <domain>` dumps every key in a domain.
-- `computer-setup layers sync …` — refresh the content-layer cache.
+- `computer-setup layers sync …` — refresh the content-layer cache. `layers lint` checks references (and `machine.yml` selections); `layers new NAME` scaffolds a layer. Fork the engine with `BOOTSTRAP_OWNER` (see `docs/operations.md`).
 
 `computer-setup` with no arguments prints this list.
 

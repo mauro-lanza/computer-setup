@@ -45,6 +45,8 @@ Extend the tests when you touch what they cover:
   capability menu that selected nothing at all, silently, because the prompt and
   the capability list were both reading stdin. `bash -n` cannot see that class of
   bug; only driving the loop with scripted answers can.
+- **`tests/runner.sh`** — the rendered runner with `git`/`ansible-pull` stubbed: connectivity retry, run lock, success stamps, `status`, `layers new`.
+- **`tests/{robustness,repositories,logins,upgrade}.yml`** — roles against scratch HOME/repos and a stub `brew`.
 - **`tests/contract.yml`** — the merge logic. Confirm list vars append, scalar
   vars take the highest-priority value, capability ids collide correctly, and
   machine-local settings stay out of layer `vars.yml`.
