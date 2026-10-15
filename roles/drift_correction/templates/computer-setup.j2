@@ -274,6 +274,7 @@ computer-setup — operate this machine's configuration.
   capture [args]   Diff live macOS defaults against the declared values.
   layers sync      Refresh the content-layer cache.
   layers lint      Check that layer cross-references actually resolve.
+  layers new NAME [DIR]  Scaffold a layer from the reference example (DIR defaults to ./NAME).
 
 To clone repositories that are missing:  computer-setup apply --tags repositories
 EOF
@@ -924,6 +925,20 @@ cmd_layers() {
     local sub="${1:-}"
     [[ $# -gt 0 ]] && shift
     local -a args=("$@")
+
+    if [[ "$sub" == "new" ]]; then
+        local lname="${1:-}" ldir="${2:-}" src="${PULL_DIR}/examples/example-layer"
+        [[ "$lname" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] \
+            || { echo "Usage: computer-setup layers new NAME [DIR]  (NAME: letters, digits, . _ -)" >&2; return 64; }
+        [[ -n "$ldir" ]] || ldir="./${lname}"
+        [[ -d "$src" ]] || { echo "No reference layer at ${src}; run \`computer-setup apply\` first." >&2; return 1; }
+        [[ ! -e "$ldir" ]] || { echo "${ldir} already exists." >&2; return 1; }
+        cp -R "$src" "$ldir" || return 1
+        # Only the name line: the layer's name must match its manifest entry.
+        yq -i ".name = \"${lname}\"" "$ldir/layer.yml" || return 1
+        echo "Created ${ldir}. Edit it, git init + push, then add it to machine.yml (see machine.example.yml)."
+        return 0
+    fi
 
     if [[ "$sub" == "sync" || "$sub" == "lint" ]]; then
         local has_manifest=0 has_cache=0 a

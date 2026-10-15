@@ -129,3 +129,13 @@ args="$(cat "$T/pull-args")"
 [[ "$args" == *"-e computer_setup_repo_url=git@example.invalid:o/r.git"* ]] || fail "repo url not passed to the play: $args"
 [[ "$args" == *"-e computer_setup_repo_branch=main"* ]] || fail "repo branch not passed to the play: $args"
 echo "  ok  the play is told the repo url and branch"
+
+# 8. `layers new` scaffolds a lintable layer named as asked, and refuses to overwrite.
+mkdir -p "$T/pull/examples"
+cp -R "$OLDPWD/examples/example-layer" "$T/pull/examples/example-layer" 2>/dev/null || cp -R examples/example-layer "$T/pull/examples/example-layer"
+(cd "$T" && run layers new acme >/dev/null) || fail "layers new failed"
+[[ "$(yq -r '.name' "$T/acme/layer.yml")" == acme ]] || fail "scaffold not renamed"
+"$OLDPWD/scripts/computer-setup-layers" lint --layer "$T/acme" >/dev/null 2>&1 || ./scripts/computer-setup-layers lint --layer "$T/acme" >/dev/null || fail "scaffold does not lint"
+(cd "$T" && run layers new acme >/dev/null 2>&1) && fail "layers new overwrote an existing dir"
+(cd "$T" && run layers new ../x >/dev/null 2>&1) && fail "layers new accepted a bad name"
+echo "  ok  layers new scaffolds a lintable layer, refuses overwrite and bad names"

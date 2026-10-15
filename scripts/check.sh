@@ -147,6 +147,7 @@ ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook --syntax-check tests/contract.y
 ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook --syntax-check tests/scheduled-agents.yml
 ansible-playbook --syntax-check tests/truncation.yml
 ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook --syntax-check tests/robustness.yml
+ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook --syntax-check tests/repositories.yml
 ansible-playbook --syntax-check tests/orphans.yml
 ansible-playbook --syntax-check tests/failure.yml
 ansible-playbook --syntax-check tests/manifest.yml
@@ -651,6 +652,12 @@ rb_out="$(ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook tests/robustness.yml 
     exit 1
 }
 echo "  ok  git includes survive, empty docker config, bad conditional default"
+echo "==> Repositories role"
+rp_out="$(ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook tests/repositories.yml 2>&1)" || {
+    printf '%s\n' "$rp_out" >&2
+    exit 1
+}
+echo "  ok  clone once, hook once, local work untouched, inactive skipped"
 echo "==> Scheduled runner"
 ./tests/runner.sh
 

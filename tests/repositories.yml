@@ -1,0 +1,71 @@
+---
+# The repositories role against LOCAL repos in a scratch dir: missing ones are
+# cloned and their post_clone hook runs once; an existing checkout with local
+# work is never touched and its hook is not re-run; active:false is skipped.
+- name: Repositories role behaviour
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  tasks:
+    - name: Scratch dir
+      ansible.builtin.tempfile:
+        state: directory
+      register: s
+
+    - name: Build a source repo
+      ansible.builtin.shell: |
+        set -e
+        git init -q -b main "{{ s.path }}/src"
+        echo one > "{{ s.path }}/src/f"
+        git -C "{{ s.path }}/src" add -A
+        git -C "{{ s.path }}/src" -c user.email=t@t -c user.name=t commit -qm one
+      changed_when: true
+
+    - name: Apply the role twice, dirtying the clone in between
+      vars:
+        repositories_base_dir: "{{ s.path }}/base"
+        computer_setup_config_dir: "{{ s.path }}/cfg"
+        repositories:
+          - folder: "{{ s.path }}/base/a"
+            remote: "{{ s.path }}/src"
+            post_clone: ["echo hook >> hook.log"]
+          - folder: "{{ s.path }}/base/skipped"
+            remote: "{{ s.path }}/src"
+            active: false
+      block:
+        - name: Run 1
+          ansible.builtin.include_role:
+            name: repositories
+        - name: Dirty the checkout
+          ansible.builtin.copy:
+            content: mine
+            dest: "{{ s.path }}/base/a/f"
+            mode: "0644"
+        - name: Run 2
+          ansible.builtin.include_role:
+            name: repositories
+
+    - name: Read results
+      ansible.builtin.slurp:
+        src: "{{ item }}"
+      loop:
+        - "{{ s.path }}/base/a/f"
+        - "{{ s.path }}/base/a/hook.log"
+      register: got
+
+    - name: Check
+      ansible.builtin.stat:
+        path: "{{ s.path }}/base/skipped"
+      register: skipped
+
+    - name: Assert
+      ansible.builtin.assert:
+        that:
+          - got.results[0].content | b64decode == 'mine'
+          - got.results[1].content | b64decode == 'hook\n'
+          - not skipped.stat.exists
+
+    - name: Cleanup
+      ansible.builtin.file:
+        path: "{{ s.path }}"
+        state: absent
