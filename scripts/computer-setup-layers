@@ -96,9 +96,9 @@ sync_layers() {
     local manifest="" cache="" schema_version_max=1
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --manifest) manifest="$2"; shift 2 ;;
-            --cache) cache="$2"; shift 2 ;;
-            --schema-version) schema_version_max="$2"; shift 2 ;;
+            --manifest) manifest="${2:?--manifest needs a value}"; shift 2 ;;
+            --cache) cache="${2:?--cache needs a value}"; shift 2 ;;
+            --schema-version) schema_version_max="${2:?--schema-version needs a value}"; shift 2 ;;
             -h|--help) usage; exit 0 ;;
             *) die "Unknown argument: $1" ;;
         esac
@@ -262,9 +262,9 @@ lint_layers() {
     local cache="" single="" machine=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --machine) machine="$2"; shift 2 ;;
-            --cache) cache="$2"; shift 2 ;;
-            --layer) single="$2"; shift 2 ;;
+            --machine) machine="${2:?--machine needs a FILE}"; shift 2 ;;
+            --cache) cache="${2:?--cache needs a DIR}"; shift 2 ;;
+            --layer) single="${2:?--layer needs a DIR}"; shift 2 ;;
             --manifest) shift 2 ;;   # accepted and ignored: lint reads the cache
             -h|--help) usage; exit 0 ;;
             *) die "Unknown argument: $1" ;;
