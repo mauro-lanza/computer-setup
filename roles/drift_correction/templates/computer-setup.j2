@@ -450,7 +450,7 @@ state_task_list() {
 }
 
 cmd_status() {
-    local days changed result mode finished dur
+    local days changed result mode finished dur partial truncated failed_n
     days="$(days_since_success)"
 
     if [[ "${1:-}" == "--json" ]]; then
@@ -472,19 +472,18 @@ cmd_status() {
         return 0
     fi
 
-    mode="$(state_field '.mode')"
-    result="$(state_field '.result')"
-    finished="$(state_field '.finished')"
-    dur="$(state_field '.duration_seconds')"
-    # The LENGTH of the recorded list, not `.totals.changed`: Ansible counts a
-    # looped task once however many items changed, so a task that found three
-    # missing credentials would announce "1" and then list three.
-    changed="$(state_field '.changed | length')"
+    # One yq call, `|`-delimited: a whitespace delimiter would collapse empty fields.
+    # `changed` is the LENGTH of the recorded list, not `.totals.changed`: Ansible
+    # counts a looped task once however many items changed, so a task that found
+    # three missing credentials would announce "1" and then list three.
+    IFS='|' read -r mode result finished dur changed partial truncated failed_n < <(
+        yq -r '[.mode // "", .result // "", .finished // "", .duration_seconds // "", (.changed | length), .partial // "", .truncated // "", .totals.failed // ""] | join("|")' "$LAST_RUN_FILE" 2>/dev/null
+    ) || true
 
     echo "Last run:  ${mode:-?} — ${result:-?} at ${finished:-?}${dur:+ (${dur}s)}"
     # Without this line a tag-limited run reads as a verdict on the whole
     # machine, which is the most misleading thing this file could say.
-    if [[ "$(state_field '.partial')" == "true" ]]; then
+    if [[ "$partial" == "true" ]]; then
         echo "           (partial run — only part of the configuration was evaluated)"
     fi
 
@@ -495,13 +494,11 @@ cmd_status() {
             echo "Changed:   ${changed} task(s):"
         fi
         state_task_list ".changed"
-        [[ "$(state_field '.truncated')" == "true" ]] && echo "  … list truncated"
+        [[ "$truncated" == "true" ]] && echo "  … list truncated"
     else
         echo "Drift:     none"
     fi
 
-    local failed_n
-    failed_n="$(state_field '.totals.failed')"
     if [[ "${failed_n:-0}" -gt 0 ]]; then
         echo "Failed:    ${failed_n} task(s):"
         state_task_list ".failed"
