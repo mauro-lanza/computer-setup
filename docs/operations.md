@@ -11,7 +11,7 @@ failures with known causes and recovery steps, see [findings.md](findings.md).
 
 ```bash
 # Reconcile now
-computer-setup apply
+computer-setup apply          # args pass through to ansible-pull; --check is refused, use `check`
 
 # What would change, without changing it (the same check the 10:00 agent runs)
 computer-setup check

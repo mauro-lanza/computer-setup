@@ -269,6 +269,19 @@ rc=0; err="$(run log -1 2>&1)" || rc=$?
 [[ "$err" == *"log: expected a number, got '-1'"* ]] || fail "log -1 not rejected: $err"
 echo "  ok  log: empty, latest, n, --list, bad n rejected"
 
+# 13b. apply refuses --check (64) before the lock, sync or any run; --diff is fine.
+rm -f "$T/pull-calls" "$T/git-calls"
+for args in "--check" "--tags x --check"; do
+    read -r -a argv <<< "$args"
+    rc=0; err="$(run apply "${argv[@]}" 2>&1)" || rc=$?
+    [[ "$rc" == 64 ]] || fail "apply $args exit $rc, want 64"
+    [[ "$err" == *"apply: --check is a dry run; use 'computer-setup check'"* ]] || fail "apply $args not explained: $err"
+done
+[[ ! -e "$T/pull-calls" && ! -e "$T/git-calls" && ! -e "$T/state/run.lock" ]] || fail "refused apply ran or locked"
+[[ "$(printf '%s\n' "$T"/logs/*.log | wc -l | tr -d ' ')" == 2 ]] || fail "refused apply wrote a log"
+run apply --diff >/dev/null 2>&1 || fail "apply --diff was refused"
+echo "  ok  apply refuses --check, allows --diff"
+
 # 14. manifest: counts and sections from a fixture; missing file is a message.
 [[ "$(run manifest)" == "No manifest yet. Run \`computer-setup check\` to populate it." ]] || fail "missing manifest message changed"
 cat > "$T/state/managed-paths.json" <<'JSON'

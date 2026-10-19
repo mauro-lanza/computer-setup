@@ -280,6 +280,12 @@ run_foreground() {
 }
 
 cmd_apply() {
+    local a
+    for a in "$@"; do
+        [[ "$a" == --check ]] || continue
+        printf '%s\n' "apply: --check is a dry run; use 'computer-setup check' (it accepts the same args)" >&2
+        return 64
+    done
     run_foreground apply "$(( $# > 0 ))" local.yml "$@"
 }
 
