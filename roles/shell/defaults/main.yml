@@ -1,23 +1,14 @@
 ---
-# The shell role holds no shell content — aliases, functions, integrations, the
-# prompt, and ~/.zshrc all come from content layers. These are the only knobs:
+# Layers supply all shell content; these are the only knobs.
 
-# Directory of managed zsh snippets. A layer-provided ~/.zshrc sources
-# everything in here (e.g. `for f in ~/.zsh/*.zsh(N); do source $f; done`).
+# Directory of managed zsh snippets, sourced by a layer-provided ~/.zshrc.
 shell_zsh_config_dir: "{{ home_dir }}/.zsh"
 
-# Zero-padding width for the layer-priority prefix on deployed snippets. Sourcing
-# is a lexical glob, so the prefix must sort lexically the way it sorts
-# numerically: at width 2, priority 100 renders "100-" and sorts BEFORE "20-",
-# silently inverting load order. 3 digits covers priorities 0-999.
+# Zero-padding of the layer-priority prefix: sourcing is a lexical glob, so at width 2 priority 100 would sort before 20. 3 covers 0-999.
 shell_priority_width: 3
 
-# Tracks layer snippets created by this role. Cleanup only removes paths listed
-# here from a previous run, so user-created files in ~/.zsh are never inferred as
-# managed based on their filename alone.
+# Paths created by this role; cleanup removes only these, never user files in ~/.zsh.
 shell_snippet_manifest_path: "{{ shell_zsh_config_dir }}/.computer-setup-snippets"
 
-# Whole-file shell configs, set by layers.
-#
-# Item schema: { key: <layer file key>, dest: <path>, backup?: bool }
+# Whole-file shell configs, set by layers. Item schema: { key: <layer file key>, dest: <path>, backup?: bool }
 shell_config_files: []

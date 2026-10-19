@@ -28,51 +28,28 @@
     computer_setup_active_layers: []
     computer_setup_capability_registry: {}
     computer_setup_question_registry: {}
-    # Whole namespaces a layer's vars.yml may never touch. Reserved by PREFIX,
-    # not enumeration, so a newly added engine var is protected automatically.
+    # Namespaces a layer's vars.yml may never touch; by prefix so new engine vars are covered.
     computer_setup_reserved_layer_prefixes:
       - computer_setup_
       - drift_correction_
-      # Ansible's own execution controls. A prefix, not the five names that
-      # used to be listed: `ansible_become_password`, `ansible_ssh_common_args`
-      # and friends decide what runs and as whom, and were all reachable.
-      # A layer supplies DATA; it never has business naming an ansible_ var.
       - ansible_
-      # Engine-internal scratch facts (deploy_layer_file's _cs_tpl_src,
-      # _cs_file_src, _cs_deploy_src, _cs_deploy_as_template). Short-lived, but
-      # a layer defining one would be shadowing an engine variable, which is
-      # exactly what "reserved by prefix" is supposed to make impossible.
+      # deploy_layer_file's scratch facts
       - _cs_
-    # The machine tier: keys a QUESTION may set although a layer's vars.yml may
-    # not. An enumeration, not a prefix — widening it is a security decision and
-    # must require an edit here. See "The machine tier" in docs/architecture.md.
+    # Keys a question may set but a layer var may not; see "The machine tier" in docs/architecture.md.
     computer_setup_machine_tier_keys:
       - repositories_base_dir
       - drift_correction_enabled
       - drift_correction_schedule_hour
       - drift_correction_upgrade_schedule_hour
-      # Also in the reserved list below, deliberately: a layer PROPOSES identity
-      # via a question default, it never sets it.
       - git_user_name
       - git_user_email
-    # Individual keys a layer may never define.
-    #
-    # INVARIANT: this list holds only names that are PUBLIC INTERFACE — the
-    # machine.yml keys, the machine tier, and the play vars layers legitimately
-    # template against. Everything engine-owned is covered by a prefix above,
-    # so adding an engine var never requires editing this list.
+    # Public-interface names only (machine.yml keys, machine tier, play vars layers template against); engine-owned vars are covered by the prefixes.
     computer_setup_reserved_layer_keys:
-      # Machine-local declaration — belong in computer_setup_machine_file.
       - selected_capabilities
       - answers
-      # Same file, same reason: this machine's layer list is not layer data.
-      # Reserved explicitly because it has no engine prefix to hide behind, and
-      # `-e @machine.yml` puts it in play scope where a layer could shadow it.
       - layers
-      # Machine tier — proposable by a question, never by a layer var.
       - git_user_name
       - git_user_email
-      # Play vars layers template against, so they cannot be prefixed away.
       - home_dir
       - homebrew_prefix
       - repositories_base_dir
@@ -91,10 +68,8 @@
              | sort(attribute='priority') }}
 
     # ─── Questions and answers ────────────────────────────────────────────────
-    # ORDER MATTERS and is not the obvious one: answers are applied TWICE, once
-    # before the layer var merge (so a layer's vars.yml can template against an
-    # answer) and once after (so an answer outranks a layer var of the same
-    # name). See "Resolution order" in docs/architecture.md.
+    # Answers are applied twice, before and after the layer var merge; see
+    # "Resolution order" in docs/architecture.md.
     - name: Merge each layer's questions.yml into the question registry
       ansible.builtin.include_tasks: merge_layer_questions.yml
       loop: "{{ computer_setup_active_layers }}"
@@ -103,10 +78,7 @@
         label: "{{ _layer.name }}"
 
     - name: Resolve the answer to every registered question
-      # An unanswered question falls back to its declared default, so a machine file
-      # written before the question existed still yields a complete answer set. An
-      # answer to a question no layer declares any more is dropped rather than
-      # carried as a phantom var.
+      # Unanswered falls back to the declared default; answers to undeclared questions are dropped.
       ansible.builtin.set_fact:
         computer_setup_answers: "{{ _defaults | combine(_given_known) }}"
       vars:
@@ -135,9 +107,7 @@
         label: "{{ item.key }}"
 
     - name: Assert every answer satisfies its question's validate pattern
-      # Bootstrap enforces this at the prompt, but the machine file is a plain
-      # YAML file a human may edit, and an --answers file comes from anywhere.
-      # Catch it here rather than render a malformed value into a config file.
+      # Bootstrap checks at the prompt; machine.yml and --answers files are not.
       ansible.builtin.assert:
         that:
           - computer_setup_answers[item.key] | string is match(item.value.validate)
@@ -175,9 +145,7 @@
           {{ (_chosen | first).set | default({}) if _chosen | length > 0 else {} }}
 
     - name: Expose the answers' variable payloads as play scope
-      # These land exactly as a layer var does, and cleared the same reserved-key
-      # guard at merge time. They run after the layer var merge, so an answer
-      # outranks a layer's proposal.
+      # First application, before the layer var merge; re-applied after it.
       ansible.builtin.set_fact:
         "{{ item.key }}": "{{ item.value }}"
       loop: "{{ computer_setup_answer_vars | default({}) | dict2items }}"
@@ -199,9 +167,7 @@
         label: "{{ item.key }}"
 
     - name: Re-apply the answers over the merged layer vars
-      # Second application (see the ordering note above): the first let layer
-      # vars template against an answer; this one makes the answer win when a
-      # layer defines the same key.
+      # Second application: makes the answer win over a layer var of the same name.
       ansible.builtin.set_fact:
         "{{ item.key }}": "{{ item.value }}"
       loop: "{{ computer_setup_answer_vars | default({}) | dict2items }}"
@@ -225,16 +191,14 @@
     label: "{{ _layer.name }}"
 
 - name: Find selected capabilities no layer declares
-  # Dropped by the registry lookups below, so a capability removed or renamed in
-  # a layer would otherwise just stop being installed. A fact so a test can read it.
+  # Dropped by the registry lookups below, so a removed or renamed capability would silently stop installing. A fact so a test can read it.
   ansible.builtin.set_fact:
     computer_setup_unknown_selections: >-
       {{ (selected_capabilities | default([], true))
          | reject('in', computer_setup_capability_registry) | list }}
 
 - name: Warn about them
-  # A warning, not a failure: a layer that briefly failed to load must not stop
-  # the rest of the run.
+  # A warning: a layer that briefly failed to load must not stop the run.
   ansible.builtin.debug:
     msg: >-
       machine.yml selects capability id(s) no layer declares, so they are
@@ -281,28 +245,20 @@
 
 - name: Derive the role interface from capabilities
   ansible.builtin.set_fact:
-    # Packages come from SELECTED capabilities (install what you picked); config
-    # and reminders from ACTIVE ones (also manage what is already present).
+    # Packages from SELECTED capabilities; config and reminders from ACTIVE ones.
     homebrew_optional_formulae: >-
       {{ _selected_entries | selectattr('type', 'eq', 'formula')
          | map(attribute='packages') | map('split') | flatten | list }}
     homebrew_optional_casks: >-
       {{ _selected_entries | selectattr('type', 'eq', 'cask')
          | map(attribute='packages') | map('split') | flatten | list }}
-    # Extensions, grouped by the manager that installs them. A capability says
-    # `type: extension` plus `manager: <id>`; the manager itself is layer data,
-    # so the engine names no editor.
+    # Extensions grouped by manager (`type: extension`, `manager: <id>`).
     extension_optional: >-
       {{ dict(_ext_grouped | map(attribute=0)
               | zip(_ext_grouped | map(attribute=1)
                     | map('map', attribute='packages')
                     | map('join', ' ') | map('split') | list)) }}
-    # Third-party Homebrew taps required by SELECTED capabilities. A package
-    # named `owner/tap/formula` is unresolvable until its tap is added, and on a
-    # machine where someone once ran `brew tap` by hand that is invisible — the
-    # install just works, so the dependency goes unrecorded until a fresh Mac
-    # fails on it. Derived from the same selection as the packages themselves,
-    # so a tap is added exactly when something needs it.
+    # Third-party taps for SELECTED capabilities: a hand-run `brew tap` hides the dependency.
     homebrew_optional_taps: >-
       {{ (_selected_entries | selectattr('tap', 'defined')
           | map(attribute='tap') | list) | unique | list }}
@@ -323,8 +279,7 @@
     _active_entries: >-
       {{ _active | select('in', computer_setup_capability_registry)
          | map('extract', computer_setup_capability_registry) | list }}
-    # groupby gives [(manager, [entries]), …]; each group's `packages` strings
-    # are joined and re-split, so several capabilities may feed one manager.
+    # [(manager, [entries])]; packages are joined and re-split so several capabilities feed one manager.
     _ext_grouped: >-
       {{ _selected_entries | selectattr('type', 'eq', 'extension')
          | groupby('manager') }}

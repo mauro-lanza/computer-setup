@@ -1,22 +1,12 @@
 ---
-# Converge the engine's own runtime on the versions pinned in runtime.yml.
-#
-# This role runs UNDER the runtime it manages. That is less circular than it
-# looks: replacing the files of a running interpreter is safe (the process holds
-# its inodes), and the current run simply finishes on the old version — the NEXT
-# run picks up the new one. `brew upgrade ansible`, which this replaces, had
-# exactly the same property.
+# Converges the engine runtime on runtime.yml; runs under the runtime it manages, so the current run finishes on the old version.
 - name: Ensure the runtime directory exists
   ansible.builtin.file:
     path: "{{ computer_setup_runtime_dir }}"
     state: directory
     mode: "0755"
 
-# ─── Probe ───────────────────────────────────────────────────────────────────
-# `check_mode: false` because these only READ. Without it Ansible skips every
-# `command` under --check, the conditions below evaluate against nothing, and a
-# drift check would report a machine as converged while its runtime is on the
-# wrong ansible-core entirely.
+# Read-only probes; see "Probes under --check" in docs/architecture.md.
 - name: Read the interpreters uv has installed
   ansible.builtin.command:
     argv: ["{{ homebrew_prefix }}/bin/uv", "python", "list", "--only-installed"]
@@ -30,9 +20,7 @@
     argv:
       - "{{ computer_setup_runtime_tools }}/ansible-core/bin/python"
       - -c
-      # Normalised here rather than compared as a tuple: mitogen exposes
-      # __version__ as (0, 3, 53), and picking that apart in Jinja against a
-      # pin that is undefined until include_vars runs is unlintable.
+      # mitogen.__version__ is a tuple; normalised here because Jinja cannot compare it against the pin.
       - "import mitogen; print('.'.join(str(p) for p in mitogen.__version__))"
   register: runtime_mitogen
   changed_when: false
@@ -49,9 +37,7 @@
 
 - name: Decide what the runtime needs
   ansible.builtin.set_fact:
-    # uv names them `cpython-<version>-<platform>`; matching on the minor is
-    # deliberate, since uv keeps a stable path across patch releases and that
-    # stability is the whole reason for not using Homebrew's Python.
+    # uv names them `cpython-<version>-<platform>`; matching on the minor keeps uv's stable path across patches.
     runtime_python_missing: >-
       {{ ('cpython-' ~ computer_setup_runtime_pins.python) not in (runtime_pythons.stdout | default('')) }}
     runtime_core_wrong: >-
@@ -84,10 +70,7 @@
   changed_when: true
   when: (runtime_core_wrong | bool) or (runtime_mitogen_wrong | bool)
 
-# A `command` never executes under --check, so the two tasks above would report
-# nothing and the run would look converged. This says so instead: `check` is the
-# only thing that ever reports drift, and a runtime on the wrong ansible-core is
-# the most consequential drift there is — everything else is judged by it.
+# Check mode skips the install tasks above; this reports the drift instead.
 - name: Report a runtime that does not match the pin
   ansible.builtin.debug:
     msg: >-

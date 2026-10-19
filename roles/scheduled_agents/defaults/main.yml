@@ -1,67 +1,33 @@
 ---
-# Generic scheduled-job primitive: turns a DATA list of agent definitions into
-# user LaunchAgents, and owns the launchctl lifecycle that plain file
-# deployment cannot.
+# Turns the `scheduled_agents` data list into user LaunchAgents and owns the
+# launchctl lifecycle that `capability_configs` cannot: launchd ignores a
+# rewritten plist and keeps running a deleted one.
+# Layers may write this list; `drift_correction_` is reserved only for the
+# engine's own agents, and a layer could already ship an executable and a plist.
 #
-# WHY THIS IS A ROLE AND NOT A CAPABILITY `config:` ENTRY
-# A LaunchAgent is "just a plist file", which by the litmus test in
-# CONTRIBUTING.md would make it data, not a role. The exception is the
-# lifecycle: launchd does not notice a rewritten plist, and it keeps running an
-# orphaned job across reboots after the plist is deleted. Something has to run
-# `bootout`/`bootstrap`, and `capability_configs` has no handler. That — and
-# only that — is what this role adds.
-#
-# WHY LAYERS MAY WRITE THIS LIST
-# `drift_correction_` is a reserved prefix precisely so a layer cannot retask
-# the engine's own agents. This list is deliberately NOT reserved, because it
-# grants a layer no reach it did not already have: a layer can already ship an
-# executable to ~/.local/bin and a plist to ~/Library/LaunchAgents through an
-# ordinary capability `config:` entry. It just never got reloaded.
-#
-# Entry schema (label + program + hour + minute required):
+# Entry schema (label, program, hour, minute required):
 #   - label: com.example.job          # also names the plist and its logs
 #     program: /path/to/executable
 #     args: ["--flag"]                # optional
 #     hour: 8                         # 0-23
 #     minute: 30                      # 0-59
 #     enabled: true                   # optional, default true
-#     requires_capability: some-id    # optional; skipped unless that
-#                                     # capability is active on this machine
+#     requires_capability: some-id    # optional; skipped unless active
 scheduled_agents: []
 
-# Global kill switch, independent of the per-entry `enabled` flag.
 scheduled_agents_enabled: true
 
-# Whether to actually load and unload jobs in launchd, as opposed to only
-# writing and removing the plists. Always true in production — a plist that is
-# not loaded does nothing, and one that is not unloaded keeps running.
-#
-# It exists because the launchd GUI domain is MACHINE-GLOBAL: there is no
-# scratch launchd the way there is a scratch HOME, so a test that exercised the
-# real teardown would bootstrap and bootout jobs in the developer's own session.
-# Setting this false lets the file-level reconcile be tested honestly, and
-# leaves the launchctl calls as the part that is only ever exercised for real.
+# False only in tests: the launchd GUI domain is machine-global, so teardown would touch the developer's own session.
 scheduled_agents_activate: true
 
 scheduled_agents_log_dir: "{{ home_dir }}/Library/Logs"
 
-# Labels this role deployed on the previous run, one per line. Kept beside the
-# plists it tracks (launchd only loads `*.plist`, so a dotfile here is inert),
-# mirroring the shell role's snippet manifest. Without it an agent DELETED from
-# a layer is unreachable: nothing declares it, so nothing can name it, and its
-# plist stays loaded across reboots.
+# Labels deployed on the previous run, so an agent deleted from a layer can still be unloaded. A dotfile, so launchd ignores it.
 scheduled_agents_manifest_path: "{{ home_dir }}/Library/LaunchAgents/.computer-setup-agents"
 
-# The engine's OWN agents, in the same shape as the list above — there is one
-# LaunchAgent implementation, not a second one inside `drift_correction`. Kept
-# separate from `scheduled_agents` (which layers write) so a layer cannot
-# retask, reschedule, or delete them by redeclaring the list; the knobs they
-# read carry the reserved `drift_correction_` prefix for the same reason.
-#
-# Staggered so the upgrade finishes before the check reports on its results —
-# otherwise a morning upgrade would look like drift for an hour. These are
-# gated by `drift_correction_enabled`, not `scheduled_agents_enabled`, so the
-# two kill switches stay independent.
+# The engine's own agents, kept apart from `scheduled_agents` so a layer cannot
+# retask them; gated by `drift_correction_enabled`. Upgrade runs before the check
+# so its results do not look like drift.
 scheduled_agents_engine:
   - label: com.computer-setup.upgrade
     program: "{{ computer_setup_command_path }}"

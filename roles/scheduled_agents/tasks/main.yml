@@ -1,18 +1,10 @@
 ---
-# Split the declared agents into those that should exist on this machine and
-# those that should not. Computed once so the deploy and the teardown below can
-# never disagree about which is which — a plist that fell out of the "wanted"
-# set must be actively booted out, not merely left unwritten.
-#
-# Two sources, two independent kill switches: the engine's own agents (gated by
-# `drift_correction_enabled`) and the layer-declared ones (gated by
-# `scheduled_agents_enabled`). `_declared` is the union regardless, so an agent
-# that either switch just turned off still gets torn down rather than orphaned.
+# Computed once so deploy and teardown agree. `_declared` is the union of both
+# sources, so an agent a kill switch just turned off is torn down, not orphaned.
 - name: Resolve which scheduled agents apply to this machine
   ansible.builtin.set_fact:
     _scheduled_agents_wanted: "{{ _wanted }}"
-    # Compared by label, not with the `difference` filter: these are dicts, and
-    # set-based difference on unhashable items is not something to rely on.
+    # By label: set difference on dicts is unreliable.
     _scheduled_agents_unwanted: >-
       {{ _declared
          | rejectattr('label', 'in', _wanted | map(attribute='label') | list)
@@ -52,9 +44,7 @@
     loop_var: agent
     label: "{{ agent.label | default('<no label>') }}"
 
-# Match macOS default permissions for pre-existing system directories.
-# Unconditional: the `computer-setup` runner appends to a log in here on every
-# scheduled run, so the directory must exist even when no agent is installed.
+# Where agent stdout/stderr go; the runner's own logs use `computer_setup_log_dir`.
 - name: Ensure log directory exists
   ansible.builtin.file:
     path: "{{ scheduled_agents_log_dir }}"
@@ -79,27 +69,12 @@
     label: "{{ agent.label }} (@ {{ agent.hour }}:{{ '%02d' | format(agent.minute | int) }})"
   notify: Reload scheduled user agents
 
-# ─── Reconcile ───────────────────────────────────────────────────────────────
-# Turning an agent off must actually stop it, not just stop rewriting the plist.
-# An orphaned plist stays loaded across reboots, so the job keeps running long
-# after the machine said no.
-#
-# `_scheduled_agents_unwanted` covers an agent still DECLARED but disabled — by
-# `enabled: false`, a kill switch, or a capability going away. It cannot cover an
-# agent whose entry was DELETED from a layer outright: nothing declares it, so
-# nothing names it, and its plist was orphaned and left loaded forever. That is
-# what the manifest below fixes.
-#
-# Beside the plists it tracks, exactly as the shell role keeps
-# `.computer-setup-snippets` beside its snippets. launchd only loads `*.plist`,
-# so a dotfile here is inert. It records LABELS, not paths, because unloading
-# needs the label and the path is derived from it.
-#
-# This role reaps its own agents rather than leaving them to a generic file
-# collector for a reason that will not go away: an agent is not just a file.
-# Deleting the plist without `launchctl bootout` leaves the job running until
-# the next reboot, so removal has an ordering requirement no path-based
-# collector can honour.
+# Turning an agent off must stop it (an orphaned plist stays loaded across
+# reboots). `_scheduled_agents_unwanted` covers declared-but-disabled agents; the
+# manifest covers agents deleted from a layer outright. It records labels, not
+# paths, because unloading needs the label. This role reaps its own agents since
+# `launchctl bootout` must precede deleting the plist, which a path-based
+# collector cannot honour.
 - name: Resolve scheduled agents to tear down
   ansible.builtin.set_fact:
     _scheduled_agents_previous: "{{ _previous }}"
@@ -131,9 +106,8 @@
     state: absent
   loop: "{{ _scheduled_agents_stale }}"
 
-# Written last, and only from what is actually wanted, so a run that failed
-# before deploying does not record agents it never wrote. Zero agents must write
-# an EMPTY file rather than "\n" — see the same trap in the shell role.
+# Written last and only from what is wanted, so a failed run records nothing it
+# did not write. Zero agents writes an EMPTY file, not "\n" (same trap as the shell role).
 - name: Write the current scheduled agent manifest
   ansible.builtin.copy:
     dest: "{{ scheduled_agents_manifest_path }}"
@@ -141,8 +115,5 @@
     content: "{{ (_labels | sort | join('\n') ~ '\n') if _labels | length > 0 else '' }}"
   vars:
     _labels: "{{ _scheduled_agents_wanted | map(attribute='label') | list }}"
-  # The directory above is only created when something is wanted. A machine that
-  # has never had an agent has nothing to record and no directory to record it
-  # in; one that had them keeps the directory, so the empty manifest still
-  # lands and the next run knows the reaping is done.
+  # The LaunchAgents directory exists only once something was wanted; once agents existed, the empty manifest still lands.
   when: _scheduled_agents_wanted | length > 0 or _scheduled_agents_previous | length > 0

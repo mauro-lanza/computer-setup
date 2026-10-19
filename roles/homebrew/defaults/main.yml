@@ -1,33 +1,22 @@
 ---
-# Whether to run `brew update` before installing formulae.
-# Set to false (e.g. via -e homebrew_update=false) to skip on re-runs.
-homebrew_update: true
-
-# Safe empty defaults — the real baseline is layer content (list-append):
+# Layer content (list-append) supplies the baseline; empty here.
 #   homebrew_baseline_formulae — formulae always installed
 #   homebrew_baseline_casks    — casks always installed
-#   homebrew_adopt_casks       — casks safe to `--adopt` when already present.
-#                                Not every cask is: see "Casks with protected
-#                                payloads" in docs/findings.md.
-#
-# Engine prerequisites (git, gh, yq, ansible) are installed by bootstrap.sh in
-# Phase 0, before any layer is cloned — they are not listed here.
-# Third-party taps. `homebrew_baseline_taps` is layer content (list-append) for
-# taps needed regardless of selection; `homebrew_optional_taps` is derived by
-# the engine from the `tap:` field of selected capabilities.
-homebrew_baseline_taps: []
-homebrew_optional_taps: []
-
+#   homebrew_adopt_casks       — casks safe to `--adopt`; see "Casks with protected payloads" in docs/findings.md
 homebrew_baseline_formulae: []
 homebrew_baseline_casks: []
 homebrew_adopt_casks: []
 
-# Optional formulae/casks are resolved from ~/.config/computer-setup/machine.yml
-# by the core role (which keeps the machine file format short).
+# Skip `brew update` on re-runs with -e homebrew_update=false.
+homebrew_update: true
+
+# `homebrew_optional_*` are derived by core from selected capabilities (including their `tap:` field).
+homebrew_baseline_taps: []
+homebrew_optional_taps: []
 homebrew_optional_formulae: []
 homebrew_optional_casks: []
 
-# What the homebrew and upgrade roles both act on, derived once.
+# What the homebrew and upgrade roles both act on.
 homebrew_managed_taps: "{{ (homebrew_baseline_taps + homebrew_optional_taps) | unique | list }}"
 homebrew_managed_formulae: "{{ homebrew_baseline_formulae + homebrew_optional_formulae }}"
 homebrew_managed_casks: "{{ homebrew_baseline_casks + homebrew_optional_casks }}"

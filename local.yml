@@ -5,80 +5,42 @@
   become: false
 
   vars:
-    # SSH, not HTTPS: drift runs pull this repo non-interactively and HTTPS can
-    # prompt for keychain credentials.
+    # SSH: scheduled pulls are non-interactive and HTTPS can prompt for keychain credentials.
     computer_setup_repo_url: "git@github.com:mauro-lanza/computer-setup.git"
     computer_setup_repo_branch: main
     homebrew_prefix: /opt/homebrew
     home_dir: "{{ ansible_facts['env']['HOME'] }}"
 
-    # Play-scoped, not just a role default: the layer merge in pre_tasks
-    # templates repository entries that reference it.
+    # Play-scoped because the layer merge templates repository entries against it.
     repositories_base_dir: "{{ home_dir }}/Projects"
 
-    # ─── Content layers ───────────────────────────────────────────────────────
-    # Every piece of machine-local state lives under one directory: the layer
-    # manifest, machine.yml, and the optional repository override. One
-    # literal, so "back up this machine's answers" is a single `cp -r` and the
-    # paths cannot drift apart. Overridable with -e for testing.
+    # All machine-local state: machine.yml, layer manifest, repository override. Overridable with -e.
     computer_setup_config_dir: "{{ home_dir }}/.config/computer-setup"
-    # Written by bootstrap.sh. Absent = run standalone on empty defaults.
-    # THE machine declaration: which layers this machine uses, the answers to
-    # their questions, and the capability selections. One file because it is one
-    # decision — a restored machine needs all three or none, and two files meant
-    # a backup could be half a machine.
+    # Written by bootstrap.sh; absent means a standalone run on empty defaults.
     computer_setup_machine_file: "{{ computer_setup_config_dir }}/machine.yml"
-    # Cache lives outside this checkout so the drift re-clone cannot wipe it.
-    # Each layer is <cache>/<name>/ with layer.yml + vars.yml + capabilities.yml
-    # + files/.
     computer_setup_data_dir: "{{ home_dir }}/.local/share/computer-setup"
+    # Outside this checkout so the drift re-clone cannot wipe it.
     computer_setup_layer_cache: "{{ computer_setup_data_dir }}/layers"
-    # Clone of the private repo holding each machine's declaration. In
-    # `share`, not `cache`, for a concrete reason: a push that fails leaves a
-    # local commit here, so deleting it can lose work. Beside the layer cache
-    # but emphatically NOT a layer — `computer-setup-layers sync` force-syncs
-    # layers with a hard reset, which would destroy exactly those commits.
+    # Not a layer and not a cache: it can hold unpushed commits, which a layer sync hard-reset would destroy.
     computer_setup_backup_repo_dir: "{{ computer_setup_data_dir }}/backups"
-    # Where ansible-pull keeps its checkout of THIS repo. Pinned, because the
-    # default is `~/.ansible/pull/<hostname>` and a Mac's hostname is not
-    # stable — joining a network that appends an mDNS suffix silently starts a
-    # SECOND checkout, which then sits stale until that network comes back.
-    # The hostname is in the default so hosts sharing an NFS home don't collide;
-    # a per-user macOS home has no such sharing, so the segment buys nothing and
-    # costs a duplicate clone per network. Stays under `~/.ansible/` — the tool
-    # already looks there, per "What this system puts in $HOME".
+    # Pinned: the ansible-pull default is hostname-keyed, and a changing mDNS suffix starts a second checkout.
     computer_setup_pull_dir: "{{ home_dir }}/.ansible/pull/computer-setup"
-    # The engine's pinned runtime (see runtime.yml and roles/runtime). `share`,
-    # not `state`: fully regenerable but the working set every run executes
-    # from, and ~/.cache is somewhere cleaners delete from under a running job.
-    # uv's tool venvs and shims sit inside it; NEITHER is on PATH.
+    # The pinned runtime (runtime.yml, roles/runtime); neither its tools nor its shims are on PATH.
     computer_setup_runtime_dir: "{{ computer_setup_data_dir }}/runtime"
     computer_setup_runtime_bin: "{{ computer_setup_runtime_dir }}/bin"
     computer_setup_runtime_tools: "{{ computer_setup_runtime_dir }}/tools"
-    # One read of runtime.yml, shared by the runtime role and the runner's path
-    # to the mitogen strategy plugin, so neither can name a different python.
+    # Shared by the runtime role and the runner's mitogen path so neither can name a different python.
     computer_setup_runtime_pins: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/runtime.yml') | from_yaml }}"
     computer_setup_python_version: "{{ computer_setup_runtime_pins.python }}"
-    # Where this system installs the executables it owns (the runner, the layer
-    # sync helper, macos-capture, and any capability shipping a script). One
-    # play var because three roles create and write into it; two independent
-    # role defaults for the same directory could drift apart silently.
+    # Where the engine installs its executables; three roles write here.
     computer_setup_bin_dir: "{{ home_dir }}/.local/bin"
-    # Machine-local state this system WRITES (as opposed to config it reads):
-    # the run-state file the callback plugin emits, and the marker recording
-    # which ansible-core the Galaxy collections were resolved against. One play
-    # var for the same reason as bin_dir — more than one role writes in here.
+    # Machine-local state the engine writes (run-state, galaxy marker); more than one role writes here.
     computer_setup_state_dir: "{{ home_dir }}/.local/state/computer-setup"
-    # Whether a PERSON is present. False for both scheduled modes, which is what
-    # keeps an interactive `auth login` out of a LaunchAgent that has no TTY to
-    # answer it. Same split as casks in the upgrade role.
+    # False for both scheduled modes, so no interactive `auth login` runs without a TTY.
     computer_setup_interactive: true
-    # The single entry point for operating this machine: every ansible-pull goes
-    # through it, and the scheduled agents invoke its internal modes. Play-scoped
-    # because drift_correction deploys it and the agents reference it.
+    # Entry point for every ansible-pull; deployed by drift_correction, invoked by the agents.
     computer_setup_command_path: "{{ computer_setup_bin_dir }}/computer-setup"
-    # Rolling log the scheduled modes append to and `computer-setup log` tails.
-    # One log per run, in a directory of their own — see LOG_DIR in the runner.
+    # One log per run; see LOG_DIR in the runner.
     computer_setup_log_dir: "{{ home_dir }}/Library/Logs/computer-setup"
     # Highest layer schema_version this orchestrator understands.
     computer_setup_schema_version: 1
@@ -90,55 +52,34 @@
       tags: [always]
 
   roles:
-    # FIRST. Everything after this runs under the interpreter it pins, and a
-    # machine whose runtime has drifted from runtime.yml should converge before
-    # anything else is judged against it. Cheap on a converged machine: two
-    # commands that report "already installed".
+    # First: everything after runs under the interpreter it pins.
     - { role: runtime, tags: [runtime] }
     - { role: homebrew, tags: [homebrew] }
     - { role: git, tags: [git] }
     - { role: shell, tags: [shell] }
-    # Editor extensions + editor settings, for whatever managers the layers
-    # declare. No editor is named here: the role loops over `extension_managers`
-    # and each manager carries its own capability gate.
+    # Loops over layer-declared `extension_managers`; no editor is named here.
     - { role: extensions, tags: [extensions] }
-    # Deploys the `config:` bundles of every active capability. Tagged only with
-    # its own name — it is one loop over all bundles, so a per-tool tag would
-    # deploy every other tool's config too.
+    # One loop over all bundles, so it has no per-tool tag.
     - { role: capability_configs, tags: [capability_configs] }
     - { role: macos, tags: [macos] }
     - { role: runtimes, tags: [runtimes] }
-    # Merges cliPluginsExtraDirs into ~/.docker/config.json so `docker compose`
-    # finds Homebrew's plugin — the file otherwise holds auths/credsStore/
-    # currentContext this orchestrator must not own outright. See the docker
-    # role's tasks/main.yml and "path_helper can defeat the PATH snippet's own
-    # prepend logic" in docs/findings.md.
+    # Merges into ~/.docker/config.json, which holds auths/credsStore this orchestrator must not own;
+    # see "path_helper can defeat the PATH snippet's own prepend logic" in docs/findings.md.
     - { role: docker, tags: [docker] }
-    # `never`: the daily drift check must not clone repos, and bootstrap must not
-    # try before SSH auth exists. Run with `computer-setup apply --tags repositories`.
+    # `never`: the drift check must not clone repos, and bootstrap runs before SSH auth exists.
     - { role: repositories, tags: [repositories, never] }
-    # `never`: only `--tags upgrade` runs it, via the `computer-setup upgrade` helper.
+    # `never`: runs only via `computer-setup upgrade`.
     - { role: upgrade, tags: [upgrade, never] }
-    # Deploys the `computer-setup` command; the two agents that invoke it are
-    # ordinary `scheduled_agents` entries, so there is one LaunchAgent
-    # implementation rather than a private second copy here.
-    # After capability_configs (a credential store may be created by a config
-    # deploy) and before the agents, so a machine that just signed in reports
-    # clean on the very next check rather than one run later.
+    # After capability_configs (a config deploy may create the credential store).
     - { role: logins, tags: [logins] }
+    # Deploys the `computer-setup` command the agents invoke.
     - { role: drift_correction, tags: [drift_correction] }
-    # Last, and after drift_correction, which deploys the program its own two
-    # agents invoke. It runs late for the same reason drift_correction does:
-    # the plists it writes are what keep unattended work happening, so nothing
-    # that can fail should stand between here and the end of the play. Layer
-    # agents invoke programs deployed by capability_configs above, so it must
-    # follow that too.
+    # Last, after drift_correction and capability_configs, whose programs the agents invoke;
+    # see "Partial failures are reported at the end of the play" in docs/findings.md.
     - { role: scheduled_agents, tags: [scheduled_agents] }
 
   post_tasks:
-    # Reported HERE, not in the homebrew role, so every role runs first. Raising
-    # a cask failure inside homebrew — the first role — would deny the machine
-    # its version managers and its scheduled agents over one unavailable app.
+    # Reported here so every role runs first; see "Partial failures are reported at the end of the play" in docs/findings.md.
     - name: Report casks that could not be installed
       ansible.builtin.fail:
         msg: |-
@@ -162,9 +103,7 @@
       when: _failed | length > 0
       tags: [homebrew]
 
-    # Same reason as the casks above: osx_defaults refuses to change a key's
-    # type, so one wrong `type:` in layer data is a hard failure — and macos
-    # runs before runtimes and scheduled_agents.
+    # Same reason as the casks: osx_defaults fails hard on a wrong `type:`.
     - name: Report macOS defaults that could not be applied
       ansible.builtin.fail:
         msg: |-
@@ -192,10 +131,7 @@
       register: gh_auth
       changed_when: false
       failed_when: false
-      # Read-only, so run it under --check too. `command` is skipped in check
-      # mode, leaving gh_auth.rc undefined — which silently dropped the "run gh
-      # auth login" line from every dry run, including bootstrap's own preview
-      # on a fresh unauthenticated Mac.
+      # Read-only; see "Probes under --check" in docs/architecture.md.
       check_mode: false
       tags: [always]
 

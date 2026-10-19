@@ -176,8 +176,7 @@
             path: "{{ runtimes_nvm_script_path }}"
           register: upgrade_nvm_script
 
-        # Version spec is quoted: the default is `lts/*` and zsh's NOMATCH makes an
-        # unmatched glob a fatal error before nvm is ever invoked.
+        # Quoted: `lts/*` is a glob to a shell (see findings.md).
         - name: Upgrade default Node.js to newest via nvm ({{ upgrade_nvm_node }})
           ansible.builtin.shell: |
             export NVM_DIR="$HOME/.nvm"

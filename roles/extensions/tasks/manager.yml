@@ -5,9 +5,7 @@
     path: "{{ _mgr.binary }}"
   register: _mgr_stat
 
-# Everything below is skipped when the editor is not installed. The manager may
-# be active because its capability was selected in the same run, in which case
-# Homebrew has already installed it (the homebrew role runs first).
+# Skipped when the editor is not installed (its capability may have been selected in this run; homebrew runs first).
 - name: "[{{ _mgr.id }}] Manage extensions and settings"
   when: _mgr_stat.stat.exists
   block:
@@ -16,8 +14,7 @@
         argv: "{{ [_mgr.binary] + (_mgr.list_args | default(['--list-extensions'])) }}"
       register: _mgr_installed
       changed_when: false
-      # Read-only, and needed under --check too: otherwise the list is empty and
-      # the drift agent reports every managed extension as missing.
+      # Read-only probe; see "Probes under --check" in docs/architecture.md.
       check_mode: false
 
     - name: "[{{ _mgr.id }}] Resolve which managed extensions are missing"
@@ -28,9 +25,7 @@
              | reject('in', _mgr_installed.stdout_lines | default([]))
              | list }}
 
-    # `command` is skipped under --check, so the install task can never report
-    # drift. This check-mode-only task supplies that signal; on a real apply the
-    # install task reports the change itself.
+    # Check mode skips `command`; this supplies the drift signal the install task cannot.
     - name: "[{{ _mgr.id }}] Report missing extensions as drift"
       ansible.builtin.debug:
         msg: >-

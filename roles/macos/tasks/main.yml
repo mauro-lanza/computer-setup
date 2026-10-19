@@ -1,22 +1,11 @@
 ---
-# One bad default must not abort the play. `osx_defaults` refuses to change a
-# key's TYPE, so a single wrong `type:` in layer data is a hard failure — and
-# this role runs before `runtimes` and `drift_correction`. On the first real
-# fresh-machine bootstrap that is exactly what happened: a trackpad setting
-# declared `bool` where macOS stores `int` aborted the run, and the machine got
-# no version managers and no scheduled agents because of a tap-to-click
-# preference.
+# Failures are collected and reported from local.yml post_tasks, not here; see
+# "Partial failures are reported at the end of the play" in docs/findings.md.
 #
-# Failures are collected here and reported by a post_task in local.yml — NOT at
-# the end of this role, which would still abort before `runtimes` and
-# `drift_correction`. The whole point is that every role gets to run first.
-#
-# `host` is optional and defaults to omitted. A handful of preferences (menu bar
-# / Control Center item visibility, screensaver) are stored per-machine under
-# ~/Library/Preferences/ByHost and are invisible to a plain `defaults read`;
-# those entries declare `host: currentHost`.
-# App-conditional defaults. The app paths are layer data: the engine names no
-# application, so swapping one app for another needs no engine change.
+# `host: currentHost` on an entry targets per-machine ByHost preferences (menu
+# bar / Control Center visibility, screensaver) that a plain `defaults read`
+# does not show.
+# App-conditional defaults; app paths are layer data.
 - name: Check which conditional-defaults apps are installed
   ansible.builtin.stat:
     path: "{{ item.app }}"

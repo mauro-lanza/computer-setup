@@ -1,19 +1,6 @@
 ---
-# Report credentials a person still has to obtain, and offer to obtain them when
-# a person is actually there.
-#
-# WHY THIS IS NOT JUST A COMMAND TASK
-# The remedy is interactive — typically a CLI `auth login` command — opens
-# a browser or prompt, with no token flag. Running one from the
-# 10:00 LaunchAgent would hang it with no TTY and nobody watching, which is the
-# same trap as `sudo` in an unattended task (see docs/findings.md). So the two
-# halves are split: DETECTION always runs, including under --check, and the
-# REMEDY runs only when `computer_setup_interactive` says a person is present.
-#
-# The detection task is the one that carries `changed_when`, so a missing
-# credential shows up as ordinary drift — by name, in `computer-setup status` —
-# instead of being invisible until someone reads a reminder they stopped seeing
-# months ago.
+# Report credentials a person still has to obtain; the remedy runs only when
+# `computer_setup_interactive`. See "Logins" in docs/architecture.md.
 
 - name: Resolve which logins apply to this machine
   ansible.builtin.set_fact:
@@ -27,8 +14,7 @@
   vars:
     _eligible: "{{ logins if (logins_enabled | bool) else [] }}"
 
-# Layer data, so it is wrong in a layer repo rather than here. An entry missing
-# `remedy` would detect a problem and be unable to say what to do about it.
+# Layer data, so it is wrong in a layer repo rather than here.
 - name: Validate login definitions
   ansible.builtin.assert:
     that:
@@ -44,27 +30,15 @@
   loop_control:
     label: "{{ item.id | default('(no id)') }}"
 
-# `check_mode: false` because this is READ-ONLY and must run under --check —
-# otherwise the drift check could never see a missing credential, which is the
-# entire point. `changed_when` on the probe's exit code is what turns "not
-# signed in" into a drift entry naming the thing to sign in to.
-#
-# The probe prints nothing from the file, so no token is ever registered here.
+# Read-only (see "Probes under --check" in docs/architecture.md); the exit code
+# becomes drift naming the missing login.
 - name: Check for each declared credential
   ansible.builtin.command:
     argv: >-
       {{ ['python3', '-c', _logins_probe_src, item.detect_file]
          + ([item.detect_key] if item.detect_key is defined else []) }}
   vars:
-    # Inline, NOT a script deployed to ~/.local/bin. A deployed probe would have
-    # to exist before it could be used, so the first `--check` on a machine —
-    # before any apply had placed it — would report every credential missing.
-    # Deploying it during --check to avoid that would mean a check that mutates,
-    # which is the one thing check must never do.
-    #
-    # Prints NOTHING from the file. These are token stores, so the exit code is
-    # the entire result and no credential reaches Ansible's memory, a -v
-    # transcript, or the run-state file.
+    # Inline, not deployed; prints nothing from the file. See "Logins" in docs/architecture.md.
     _logins_probe_src: |
       import json, os, sys
       path = os.path.expanduser(sys.argv[1])
@@ -93,8 +67,7 @@
          | selectattr('rc', 'defined') | selectattr('rc', 'ne', 0)
          | map(attribute='item') | list }}
 
-# Interactive only. `computer_setup_interactive` is false for both scheduled
-# modes, so an unattended run reports below and never blocks.
+# Interactive only; scheduled modes report below instead.
 - name: Sign in to each missing credential
   ansible.builtin.command: "{{ item.remedy }}"
   loop: "{{ _logins_missing }}"
@@ -102,8 +75,7 @@
     label: "{{ item.desc }}"
   when: computer_setup_interactive | bool
   changed_when: true
-  # A person may cancel a browser flow, and that must not fail the play: the
-  # credential is simply still missing and the next run says so again.
+  # A cancelled browser flow must not fail the play; the next run reports it again.
   failed_when: false
 
 - name: Report credentials that still need a person

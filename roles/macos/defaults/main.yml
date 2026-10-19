@@ -1,19 +1,10 @@
 ---
-# Applies whatever `defaults` a layer declares. Empty here so the orchestrator
-# changes no system setting on its own.
-#
-# Item schema: { domain, key, type, value, notify? }. Use
-# `notify: Restart Dock and Finder` for entries affecting Dock/Finder UI.
+# Item schema: { domain, key, type, value, host?, notify? }. Empty so the
+# orchestrator changes no setting itself; `notify: Restart Dock and Finder` for Dock/Finder entries.
 macos_defaults: []
 
-# Defaults applied only when a given app is installed. Pure layer data, so
-# app-conditional defaults (e.g. a window manager's preferences) need
-# no engine change.
-#
-# Item schema: { app: <path>, defaults: [ {domain, key, type, value, notify?} ] }
+# Applied only when the app exists. Item schema: { app: <path>, defaults: [ {domain, key, type, value, notify?} ] }
 macos_conditional_defaults: []
 
-# Read-only helper that diffs live defaults against the declared values and
-# emits paste-ready YAML. Installed into the engine-owned bin dir (a play var —
-# this role deliberately declares no alias for it, so the two cannot drift).
+# Read-only helper that diffs live defaults against declared values and emits paste-ready YAML.
 macos_capture_path: "{{ computer_setup_bin_dir }}/macos-capture"
