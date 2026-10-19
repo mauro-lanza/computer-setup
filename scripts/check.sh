@@ -32,10 +32,16 @@ fi
 LOG="$(mktemp "${TMPDIR:-/tmp}/computer-setup-check.XXXXXX")"
 echo "log: $LOG"
 
+# All scratch lives here so one EXIT trap in the main shell cleans up after a
+# failed section. The log stays outside: its path is for reading afterwards.
+CS_TMP="$(mktemp -d)"
+preamble_log=""
+trap 'rc=$?; if (( rc != 0 )) && [[ -n "$preamble_log" ]]; then tail -n 40 "$preamble_log" >&2; echo "log: $LOG" >&2; fi; rm -rf -- "$CS_TMP"' EXIT
+
 # Plain command, not under if/||: those disable set -e inside the section.
 run_section() {
     local name="$1" sec_log rc
-    sec_log="$(mktemp)"
+    sec_log="$(mktemp "$CS_TMP/section.XXXXXX")"
     set +e
     if [[ "$verbose" == 1 ]]; then
         ( set -e; "section_${name//-/_}" ) 2>&1 | tee "$sec_log"
@@ -57,6 +63,51 @@ run_section() {
     fi
     rm -f "$sec_log"
     echo "==> $name ... ok"
+}
+
+# Fixed path that tests/manifest.yml and tests/orphans.yml write to.
+cs_mscratch=/tmp/cs-manifest-contract
+
+# cs_run MODE PARTIAL ID [VAR=VAL...] playbook [args]: quiet ansible-playbook with
+# the run env scoped to this one call.
+cs_run() {
+    local mode="$1" partial="$2" id="$3" envs=()
+    shift 3
+    while [[ "${1:-}" == [A-Z]*=* ]]; do envs+=("$1"); shift; done
+    env CS_RUN_MODE="$mode" CS_RUN_PARTIAL="$partial" CS_RUN_ID="$id" \
+        ${envs[@]+"${envs[@]}"} ansible-playbook "$@" >/dev/null
+}
+
+# run_quiet ERROR_MSG cmd...: output kept in RQ_OUT, re-printed (with ERROR_MSG
+# when non-empty) on failure. An `assert` failure prints on STDOUT, so
+# `>/dev/null` would leave a failing gate showing nothing.
+run_quiet() {
+    local msg="$1"
+    shift
+    RQ_OUT="$("$@" 2>&1)" || {
+        printf '%s\n' "$RQ_OUT" >&2
+        [[ -z "$msg" ]] || echo "ERROR: $msg" >&2
+        return 1
+    }
+}
+
+# cs_py DIR_OR_FILE [args]: the python snippet on stdin, run after a shared
+# prelude (d = argv[1] absolute, load/jsonl readers, mode0600). Heredocs stay quoted.
+CS_PY_PRELUDE='
+import json, os, stat, sys
+d = os.path.abspath(sys.argv[1])
+def load(name):
+    return json.load(open(os.path.join(d, name)))
+def jsonl(name):
+    return [json.loads(l) for l in open(os.path.join(d, name)).read().splitlines() if l.strip()]
+def mode0600(path):
+    mode = stat.S_IMODE(os.stat(path).st_mode)
+    assert mode == 0o600, oct(mode)
+'
+cs_py() {
+    local body
+    body="$(cat)"
+    "$CS_PY" -c "$CS_PY_PRELUDE$body" "$@"
 }
 
 # Test the pinned runtime, not whatever `ansible` is on PATH: another core hides production breakage.
@@ -105,8 +156,7 @@ CS_PY="$(head -1 "$(command -v ansible)" | sed 's/^#!//')"
 [[ -x "$CS_PY" ]] || CS_PY=python3
 }
 
-preamble_log="$(mktemp)"
-trap 'rc=$?; if (( rc != 0 )) && [[ -n "$preamble_log" ]]; then tail -n 40 "$preamble_log" >&2; echo "log: $LOG" >&2; fi' EXIT
+preamble_log="$(mktemp "$CS_TMP/preamble.XXXXXX")"
 if [[ "$verbose" == 1 ]]; then
     preamble
 else
@@ -147,20 +197,17 @@ section_templates() {
 echo "==> Templated script syntax"
 check_template_syntax() {
     local src="$1" shell="$2" tmp
-    tmp="$(mktemp)"
+    tmp="$(mktemp "$CS_TMP/template.XXXXXX")"
     sed -e 's/{{[^}]*}}/PLACEHOLDER/g' -e '/{%.*%}/d' "$src" > "$tmp"
     if ! "$shell" -n "$tmp"; then
-        rm -f "$tmp"
         echo "ERROR: $src does not parse as $shell after de-templating" >&2
         return 1
     fi
     # Only bash templates get shellcheck: it has no zsh mode.
     if [[ "$shell" == "bash" ]] && ! shellcheck -S style -s bash "$tmp"; then
-        rm -f "$tmp"
         echo "ERROR: $src has shellcheck findings after de-templating" >&2
         return 1
     fi
-    rm -f "$tmp"
     echo "  ok  $src"
 }
 check_template_syntax roles/drift_correction/templates/computer-setup.j2 bash
@@ -246,28 +293,17 @@ ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook tests/contract.yml >/dev/null
 # it, and its plist stayed loaded across reboots — the job kept running long
 # after the machine stopped declaring it.
 echo "==> Scheduled agent teardown"
-# Output captured, not discarded: an `assert` failure prints its message on
-# STDOUT, so `>/dev/null` would leave a failing gate showing its heading and
-# nothing else.
-if ! sa_out="$(ANSIBLE_ROLES_PATH="$PWD/roles" \
-        ansible-playbook tests/scheduled-agents.yml 2>&1)"; then
-    printf '%s\n' "$sa_out" >&2
-    echo "ERROR: a scheduled agent deleted from a layer was not torn down" >&2
-    exit 1
-fi
+ANSIBLE_ROLES_PATH="$PWD/roles" run_quiet \
+    "a scheduled agent deleted from a layer was not torn down" \
+    ansible-playbook tests/scheduled-agents.yml
 echo "  ok  an agent deleted from a layer is torn down, not orphaned"
 
 echo "==> Shell snippets"
-sh_scratch="$(mktemp -d)"
+sh_scratch="$(mktemp -d "$CS_TMP/shell.XXXXXX")"
 for sh_phase in 1 2 3; do
-    if ! sh_out="$(ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook tests/shell.yml \
-            -e shell_scratch="$sh_scratch" -e shell_phase="$sh_phase" 2>&1)"; then
-        printf '%s\n' "$sh_out" >&2
-        echo "ERROR: shell snippet test failed in phase $sh_phase" >&2
-        exit 1
-    fi
+    ANSIBLE_ROLES_PATH="$PWD/roles" run_quiet "shell snippet test failed in phase $sh_phase" \
+        ansible-playbook tests/shell.yml -e shell_scratch="$sh_scratch" -e shell_phase="$sh_phase"
 done
-rm -rf -- "$sh_scratch"
 echo "  ok  copy, render, gate, a deleted snippet and a missing directory are handled"
 
 # Two roles declaring the SAME directory with DIFFERENT modes is invisible until
@@ -310,7 +346,7 @@ CSPY
 # in CI. `init` is the only subcommand not covered: it needs an authenticated gh.
 section_machine() {
 echo "==> Machine backup round-trip"
-cs_m_tmp="$(mktemp -d)"
+cs_m_tmp="$(mktemp -d "$CS_TMP/machine.XXXXXX")"
 mkdir -p "$cs_m_tmp/cfg"
 # -b main: see tests/bootstrap-prompts.sh; the host's init.defaultBranch must not matter.
 git init -q -b main --bare "$cs_m_tmp/remote.git"
@@ -386,7 +422,6 @@ done
 # Never clobber: a bad restore must always be recoverable.
 cs_m_expect_failure "Refusing to overwrite" pull alpha "$cs_m_tmp/out.yml" "${cs_m_flags[@]}"
 cs_m_expect_failure "No backup named" pull nonexistent "$cs_m_tmp/x.yml" "${cs_m_flags[@]}"
-rm -rf "$cs_m_tmp"
 echo "  ok  push, idempotent re-push, list, names, pull, and both refusals"
 }
 
@@ -395,16 +430,14 @@ echo "  ok  push, idempotent re-push, list, names, pull, and both refusals"
 section_run_state() {
 echo "==> Run state contract"
 rm -f /tmp/cs-state-contract-template.txt /tmp/cs-state-contract-loop-a.txt /tmp/cs-state-contract-loop-b.txt
-cs_state="$(mktemp -d)/last-run.json"
+cs_state="$(mktemp -d "$CS_TMP/state.XXXXXX")/last-run.json"
 CS_STATE_FILE="$cs_state" CS_RUN_MODE=check \
     ansible-playbook tests/state.yml --check --diff >/dev/null
 if [[ ! -f "$cs_state" ]]; then
     echo "ERROR: the callback plugin wrote no state file" >&2
     exit 1
 fi
-"$CS_PY" - "$cs_state" <<'PY'
-import json, sys, stat, os
-
+cs_py "$cs_state" <<'PY'
 path = sys.argv[1]
 raw = open(path).read()
 d = json.loads(raw)
@@ -455,11 +488,9 @@ for e in d["changed"]:
 assert isinstance(d["duration_seconds"], float), d.get("duration_seconds")
 
 # 0600: it describes this machine's files.
-mode = stat.S_IMODE(os.stat(path).st_mode)
-assert mode == 0o600, oct(mode)
+mode0600(path)
 print("  ok  shape, 0600, and no file contents recorded")
 PY
-rm -rf "$(dirname "$cs_state")"
 }
 
 # The manifest is the basis for deciding a path is no longer managed, so what it
@@ -467,27 +498,20 @@ rm -rf "$(dirname "$cs_state")"
 # would be invisible if it regressed.
 section_manifest() {
 echo "==> Manifest contract"
-cs_mdir="$(mktemp -d)"
-cs_mscratch=/tmp/cs-manifest-contract
+cs_mdir="$(mktemp -d "$CS_TMP/manifest.XXXXXX")"
 rm -rf -- "$cs_mscratch"
-CS_MANIFEST_FILE="$cs_mdir/managed-paths.json" CS_HISTORY_FILE="$cs_mdir/history.jsonl" \
-    CS_RUN_MODE=apply CS_RUN_PARTIAL=0 CS_RUN_ID=contract-1 \
-    ansible-playbook tests/manifest.yml >/dev/null
+cs_run apply 0 contract-1 CS_MANIFEST_FILE="$cs_mdir/managed-paths.json" \
+    CS_HISTORY_FILE="$cs_mdir/history.jsonl" tests/manifest.yml
 # A second run with the SAME run id: ansible-pull can reach the callback's final
 # hook more than once per invocation, and history is appended, so without a key
 # one run would leave two lines.
-CS_MANIFEST_FILE="$cs_mdir/managed-paths.json" CS_HISTORY_FILE="$cs_mdir/history.jsonl" \
-    CS_RUN_MODE=apply CS_RUN_PARTIAL=0 CS_RUN_ID=contract-1 \
-    ansible-playbook tests/manifest.yml >/dev/null
+cs_run apply 0 contract-1 CS_MANIFEST_FILE="$cs_mdir/managed-paths.json" \
+    CS_HISTORY_FILE="$cs_mdir/history.jsonl" tests/manifest.yml
 # A third, with a new id and narrowed — the shape of a `--tags` run.
-CS_MANIFEST_FILE="$cs_mdir/managed-paths.json" CS_HISTORY_FILE="$cs_mdir/history.jsonl" \
-    CS_RUN_MODE=check CS_RUN_PARTIAL=1 CS_RUN_ID=contract-2 \
-    ansible-playbook tests/manifest.yml >/dev/null
-"$CS_PY" - "$cs_mdir" <<'PY'
-import json, os, stat, sys
-
-d = os.path.abspath(sys.argv[1])
-m = json.load(open(os.path.join(d, "managed-paths.json")))
+cs_run check 1 contract-2 CS_MANIFEST_FILE="$cs_mdir/managed-paths.json" \
+    CS_HISTORY_FILE="$cs_mdir/history.jsonl" tests/manifest.yml
+cs_py "$cs_mdir" <<'PY'
+m = load("managed-paths.json")
 base = "/tmp/cs-manifest-contract"
 
 assert m["schema_version"] == 1, m["schema_version"]
@@ -530,14 +554,13 @@ assert m["partial"] is False, m["partial"]
 assert m["mode"] == "apply", "the partial check run clobbered the manifest"
 assert f"{base}/looped-a.conf" in files, "the partial run truncated the inventory"
 
-mode = stat.S_IMODE(os.stat(os.path.join(d, "managed-paths.json")).st_mode)
-assert mode == 0o600, oct(mode)
+mode0600(os.path.join(d, "managed-paths.json"))
 
 # History: appended, one line per RUN and not per play.
-lines = [l for l in open(os.path.join(d, "history.jsonl")).read().splitlines() if l.strip()]
+lines = jsonl("history.jsonl")
 assert len(lines) == 2, f"expected 2 runs, got {len(lines)}: {lines}"
-assert [json.loads(l)["run_id"] for l in lines] == ["contract-1", "contract-2"]
-last = json.loads(lines[-1])
+assert [l["run_id"] for l in lines] == ["contract-1", "contract-2"]
+last = lines[-1]
 for key in ("schema_version", "finished", "mode", "result", "changed", "failed",
             "ok", "duration_seconds"):
     assert key in last, f"history line missing {key}: {last}"
@@ -545,8 +568,7 @@ for key in ("schema_version", "finished", "mode", "result", "changed", "failed",
 # apart can legitimately differ in shape because old ones are never rewritten.
 assert last["schema_version"] == 1, last["schema_version"]
 assert last["partial"] is True, last
-mode = stat.S_IMODE(os.stat(os.path.join(d, "history.jsonl")).st_mode)
-assert mode == 0o600, oct(mode)
+mode0600(os.path.join(d, "history.jsonl"))
 print("  ok  inventory, omissions, backups, partial flag, and one line per run")
 PY
 
@@ -555,15 +577,11 @@ PY
 # result `dest` nor a diff header, so a loop's rendered item is the only thing
 # left that names it. Without that fallback the first manifest a new machine
 # wrote was missing every loop-created file: eight shell snippets among them.
-cs_fresh="$(mktemp -d)"
-CS_MANIFEST_FILE="$cs_fresh/managed-paths.json" CS_RUN_MODE=check CS_RUN_PARTIAL=0 \
-    CS_RUN_ID=fresh-1 ansible-playbook tests/manifest.yml --check \
-    -e "m=$cs_fresh/scratch" >/dev/null
-"$CS_PY" - "$cs_fresh" <<'PYEOF'
-import json, os, sys
-
-d = os.path.abspath(sys.argv[1])
-m = json.load(open(os.path.join(d, "managed-paths.json")))
+cs_fresh="$(mktemp -d "$CS_TMP/fresh.XXXXXX")"
+cs_run check 0 fresh-1 CS_MANIFEST_FILE="$cs_fresh/managed-paths.json" \
+    tests/manifest.yml --check -e "m=$cs_fresh/scratch"
+cs_py "$cs_fresh" <<'PYEOF'
+m = load("managed-paths.json")
 files = {e["path"] for e in m["files"]}
 base = os.path.join(d, "scratch")
 
@@ -572,23 +590,17 @@ for expected in (f"{base}/abs-a.conf", f"{base}/abs-b.conf"):
 assert f"{base}/managed.conf" in files, sorted(files)
 print("  ok  a fresh machine's manifest includes loop-created files")
 PYEOF
-rm -rf -- "$cs_fresh"
 
 # Phase two: a path that STOPS being managed. Same fixture directory, fewer
 # declared files — so what tests/manifest.yml wrote is now unmanaged and still
 # on disk. Report-only; nothing here deletes anything.
-CS_MANIFEST_FILE="$cs_mdir/managed-paths.json" CS_RUN_MODE=apply CS_RUN_PARTIAL=0 \
-    CS_RUN_ID=contract-3 ansible-playbook tests/orphans.yml >/dev/null
+cs_run apply 0 contract-3 CS_MANIFEST_FILE="$cs_mdir/managed-paths.json" tests/orphans.yml
 # Twice, because an orphan must SURVIVE the next run. A naive
 # previous-minus-current diff reports it once and then silently forgets it,
 # while the file is still sitting there.
-CS_MANIFEST_FILE="$cs_mdir/managed-paths.json" CS_RUN_MODE=apply CS_RUN_PARTIAL=0 \
-    CS_RUN_ID=contract-4 ansible-playbook tests/orphans.yml >/dev/null
-"$CS_PY" - "$cs_mdir" <<'PYEOF'
-import json, os, sys
-
-d = os.path.abspath(sys.argv[1])
-m = json.load(open(os.path.join(d, "managed-paths.json")))
+cs_run apply 0 contract-4 CS_MANIFEST_FILE="$cs_mdir/managed-paths.json" tests/orphans.yml
+cs_py "$cs_mdir" <<'PYEOF'
+m = load("managed-paths.json")
 base = "/tmp/cs-manifest-contract"
 orphans = {e["path"]: e for e in m["orphans"]}
 
@@ -620,13 +632,9 @@ PYEOF
 # this the list only ever grows, and a report that never shrinks is one nobody
 # reads. The check is `lexists`, so a broken symlink still counts as present.
 rm -f -- "$cs_mscratch/looped-a.conf"
-CS_MANIFEST_FILE="$cs_mdir/managed-paths.json" CS_RUN_MODE=apply CS_RUN_PARTIAL=0 \
-    CS_RUN_ID=contract-5 ansible-playbook tests/orphans.yml >/dev/null
-"$CS_PY" - "$cs_mdir" <<'PYEOF'
-import json, os, sys
-
-d = os.path.abspath(sys.argv[1])
-m = json.load(open(os.path.join(d, "managed-paths.json")))
+cs_run apply 0 contract-5 CS_MANIFEST_FILE="$cs_mdir/managed-paths.json" tests/orphans.yml
+cs_py "$cs_mdir" <<'PYEOF'
+m = load("managed-paths.json")
 base = "/tmp/cs-manifest-contract"
 orphans = {e["path"] for e in m["orphans"]}
 
@@ -641,18 +649,15 @@ PYEOF
 # would otherwise block every later manifest without a word.
 for cs_garbage in '[]' '{"files": null, "orphans": "x"}'; do
     printf '%s\n' "$cs_garbage" > "$cs_mdir/managed-paths.json"
-    CS_MANIFEST_FILE="$cs_mdir/managed-paths.json" CS_RUN_MODE=apply CS_RUN_PARTIAL=0 \
-        CS_RUN_ID=contract-6 ansible-playbook tests/orphans.yml >/dev/null
-    "$CS_PY" - "$cs_mdir" "$cs_garbage" <<'PYEOF'
-import json, os, sys
-
-m = json.load(open(os.path.join(os.path.abspath(sys.argv[1]), "managed-paths.json")))
+    cs_run apply 0 contract-6 CS_MANIFEST_FILE="$cs_mdir/managed-paths.json" tests/orphans.yml
+    cs_py "$cs_mdir" "$cs_garbage" <<'PYEOF'
+m = load("managed-paths.json")
 assert isinstance(m, dict) and m["files"], \
     f"a previous manifest {sys.argv[2]} blocked the next one: {m}"
 PYEOF
 done
 echo "  ok  a malformed previous manifest does not stop the next one being written"
-rm -rf -- "$cs_mdir" "$cs_mscratch"
+rm -rf -- "$cs_mscratch"
 }
 
 # A progress file is only useful if a reader can distinguish "running" from
@@ -661,24 +666,17 @@ rm -rf -- "$cs_mdir" "$cs_mscratch"
 # wrong: the run still succeeds either way.
 section_progress() {
 echo "==> Live progress"
-cs_pdir="$(mktemp -d)"
-cs_pscratch=/tmp/cs-manifest-contract
-rm -rf -- "$cs_pscratch"
-CS_PROGRESS_FILE="$cs_pdir/progress.jsonl" CS_HISTORY_FILE="$cs_pdir/history.jsonl" \
-    CS_RUN_MODE=apply CS_RUN_PARTIAL=0 CS_RUN_ID=prog-1 \
-    ansible-playbook tests/manifest.yml >/dev/null
+cs_pdir="$(mktemp -d "$CS_TMP/progress.XXXXXX")"
+rm -rf -- "$cs_mscratch"
+cs_run apply 0 prog-1 CS_PROGRESS_FILE="$cs_pdir/progress.jsonl" \
+    CS_HISTORY_FILE="$cs_pdir/history.jsonl" tests/manifest.yml
 # A second run must REPLACE the file, not append to it. Appending would leave a
 # reader seeing the previous run's tasks as this run's, and a progress bar that
 # starts at 100%.
-CS_PROGRESS_FILE="$cs_pdir/progress.jsonl" CS_HISTORY_FILE="$cs_pdir/history.jsonl" \
-    CS_RUN_MODE=apply CS_RUN_PARTIAL=0 CS_RUN_ID=prog-2 \
-    ansible-playbook tests/manifest.yml >/dev/null
-"$CS_PY" - "$cs_pdir" <<'PYEOF'
-import json, os, stat, sys
-
-d = os.path.abspath(sys.argv[1])
-lines = [json.loads(l) for l in
-         open(os.path.join(d, "progress.jsonl")).read().splitlines() if l.strip()]
+cs_run apply 0 prog-2 CS_PROGRESS_FILE="$cs_pdir/progress.jsonl" \
+    CS_HISTORY_FILE="$cs_pdir/history.jsonl" tests/manifest.yml
+cs_py "$cs_pdir" <<'PYEOF'
+lines = jsonl("progress.jsonl")
 
 head = lines[0]
 assert head["event"] == "start", head
@@ -705,34 +703,28 @@ assert head["total_estimate"] == end["tasks"], \
     f"estimate {head['total_estimate']} did not match the previous run's {end['tasks']}"
 
 # It names this machine's tasks and paths.
-mode = stat.S_IMODE(os.stat(os.path.join(d, "progress.jsonl")).st_mode)
-assert mode == 0o600, oct(mode)
+mode0600(os.path.join(d, "progress.jsonl"))
 
 # history carries the count the next run will read.
-hist = [json.loads(l) for l in
-        open(os.path.join(d, "history.jsonl")).read().splitlines() if l.strip()]
+hist = jsonl("history.jsonl")
 assert hist[-1]["tasks"] == end["tasks"], hist[-1]
 print(f"  ok  {len(tasks)} tasks streamed, replaced not appended, end marker present")
 PYEOF
-rm -rf -- "$cs_pdir" "$cs_pscratch"
+rm -rf -- "$cs_mscratch"
 
 # MAX_RECORDED had never executed: the run-state contract asserts
 # `truncated is False` and nothing drove the other side. It matters on exactly
 # the run nobody has watched — a first apply on a fresh machine, where a large
 # loop changes everything at once.
 echo "==> Run state truncation"
-cs_tdir="$(mktemp -d)"
+cs_tdir="$(mktemp -d "$CS_TMP/truncation.XXXXXX")"
 cs_tscratch=/tmp/cs-truncation-contract
 rm -rf -- "$cs_tscratch"
-CS_STATE_FILE="$cs_tdir/last-run.json" CS_MANIFEST_FILE="$cs_tdir/managed-paths.json" \
-    CS_RUN_MODE=apply CS_RUN_PARTIAL=0 CS_RUN_ID=trunc-1 \
-    ansible-playbook tests/truncation.yml >/dev/null
-"$CS_PY" - "$cs_tdir" <<'PY'
-import json, os, sys
-
-d = os.path.abspath(sys.argv[1])
-s = json.load(open(os.path.join(d, "last-run.json")))
-m = json.load(open(os.path.join(d, "managed-paths.json")))
+cs_run apply 0 trunc-1 CS_STATE_FILE="$cs_tdir/last-run.json" \
+    CS_MANIFEST_FILE="$cs_tdir/managed-paths.json" tests/truncation.yml
+cs_py "$cs_tdir" <<'PY'
+s = load("last-run.json")
+m = load("managed-paths.json")
 
 assert s["truncated"] is True, "250 changes did not trip truncation"
 assert len(s["changed"]) == 200, len(s["changed"])
@@ -746,43 +738,30 @@ assert len(files) == 250, f"the manifest was capped at {len(files)}"
 assert m["complete"] is True, m["complete"]
 print("  ok  drift truncates and says so; the inventory does not")
 PY
-rm -rf -- "$cs_tdir" "$cs_tscratch"
+rm -rf -- "$cs_tscratch"
 }
 
 # Roles against pre-existing user state, and the rendered runner's scheduled path
 # with git/ansible-pull stubbed. Output is captured and re-printed on failure.
 section_roles() {
 echo "==> Role robustness"
-rb_out="$(ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook tests/robustness.yml 2>&1)" || {
-    printf '%s\n' "$rb_out" >&2
-    exit 1
-}
+ANSIBLE_ROLES_PATH="$PWD/roles" run_quiet "" ansible-playbook tests/robustness.yml
 echo "  ok  git includes survive, empty docker config, bad conditional default"
 echo "==> Repositories role"
-rp_out="$(ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook tests/repositories.yml 2>&1)" || {
-    printf '%s\n' "$rp_out" >&2
-    exit 1
-}
+ANSIBLE_ROLES_PATH="$PWD/roles" run_quiet "" ansible-playbook tests/repositories.yml
 echo "  ok  clone once, hook once, local work untouched, inactive skipped"
 for ro_case in none empty bare list; do
-    ro_dir="$(mktemp -d)"
+    ro_dir="$(mktemp -d "$CS_TMP/override.XXXXXX")"
     mkdir -p "$ro_dir/cfg"
-    ro_out="$(ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook tests/repositories-override.yml \
-        -e repo_case="$ro_case" -e repo_scratch="$ro_dir" 2>&1)" || {
-        printf '%s\n' "$ro_out" >&2
-        echo "ERROR: repository override case '$ro_case' failed" >&2
-        exit 1
-    }
-    rm -rf -- "$ro_dir"
+    ANSIBLE_ROLES_PATH="$PWD/roles" run_quiet "repository override case '$ro_case' failed" \
+        ansible-playbook tests/repositories-override.yml -e repo_case="$ro_case" -e repo_scratch="$ro_dir"
 done
 echo "  ok  override file wins only when it declares repositories (none, empty, bare key, list)"
 echo "==> Logins and upgrade roles"
 for t in logins upgrade; do
-    lu_out="$(ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook "tests/$t.yml" 2>&1)" || {
-        printf '%s\n' "$lu_out" >&2
-        exit 1
-    }
+    ANSIBLE_ROLES_PATH="$PWD/roles" run_quiet "" ansible-playbook "tests/$t.yml"
 done
+lu_out="$RQ_OUT"
 # The preview names Node only while the nvm capability is active: with it on in
 # the preview run and in the apply run, off in the other two.
 [[ "$(grep -c 'Node\.js lts' <<<"$lu_out")" == 2 ]] || {
@@ -802,7 +781,7 @@ echo "==> Scheduled runner"
 # uses but the task does not define (it happened) fails here rather than at the
 # one moment a default is wrong.
 echo "==> macOS defaults failure report"
-mr_dir="$(mktemp -d)"
+mr_dir="$(mktemp -d "$CS_TMP/macos-report.XXXXXX")"
 yq '[.[0].post_tasks[] | select(.name == "Report macOS defaults that could not be applied")]' local.yml > "$mr_dir/task.yml"
 yq -n '[{"hosts":"localhost","connection":"local","gather_facts":false,"vars":{
   "macos_defaults_results":{"results":[
@@ -812,7 +791,6 @@ yq -n '[{"hosts":"localhost","connection":"local","gather_facts":false,"vars":{
   "tasks":[]}]' > "$mr_dir/pb.yml"
 yq -i ".[0].tasks = load(\"$mr_dir/task.yml\")" "$mr_dir/pb.yml"
 mr_out="$(ansible-playbook "$mr_dir/pb.yml" 2>&1 || true)"
-rm -rf -- "$mr_dir"
 for expect in "2 macOS default(s)" "dom1 key1 (declared bool): mismatch-A" "dom2 key2 (declared int): mismatch-B"; do
     [[ "$mr_out" == *"$expect"* ]] || {
         echo "ERROR: the macOS failure report is missing '$expect'" >&2
@@ -826,7 +804,7 @@ echo "  ok  both failure sources reported, successes not"
 # Same lift for the cask report: the merged install loop registers one result
 # that this task must still collect failures from.
 echo "==> Cask failure report"
-cr_dir="$(mktemp -d)"
+cr_dir="$(mktemp -d "$CS_TMP/cask-report.XXXXXX")"
 yq '[.[0].post_tasks[] | select(.name == "Report casks that could not be installed")]' local.yml > "$cr_dir/task.yml"
 yq -n '[{"hosts":"localhost","connection":"local","gather_facts":false,"vars":{
   "homebrew_cask_results":{"results":[
@@ -836,7 +814,6 @@ yq -n '[{"hosts":"localhost","connection":"local","gather_facts":false,"vars":{
   "tasks":[]}]' > "$cr_dir/pb.yml"
 yq -i ".[0].tasks = load(\"$cr_dir/task.yml\")" "$cr_dir/pb.yml"
 cr_out="$(ansible-playbook "$cr_dir/pb.yml" 2>&1 || true)"
-rm -rf -- "$cr_dir"
 for expect in "2 cask(s) could not be installed" "cask-bad-a: boom-A" "cask-bad-b: boom-B"; do
     [[ "$cr_out" == *"$expect"* ]] || {
         echo "ERROR: the cask failure report is missing '$expect'" >&2
@@ -857,7 +834,7 @@ if [[ -z "$hist_expr" ]]; then
     echo "       (looked for the HISTORY_TSV_EXPR line)" >&2
     exit 1
 fi
-hist_fixture="$(mktemp)"
+hist_fixture="$(mktemp "$CS_TMP/history.XXXXXX")"
 cat > "$hist_fixture" <<'JSONL'
 {"changed":0,"duration_seconds":48.5,"failed":0,"finished":"2026-09-03T21:43:28+0200","mode":"check","ok":163,"partial":false,"result":"ok","run_id":"a"}
 {"changed":2,"duration_seconds":11.4,"failed":1,"finished":"2026-09-03T21:44:54+0200","mode":"apply","ok":78,"partial":true,"result":"failed","run_id":"b"}
@@ -865,7 +842,6 @@ JSONL
 # Captured into a variable, not piped into grep: check.sh runs with pipefail and
 # `grep -q` SIGPIPEs the producer, which racily fails a passing assertion.
 hist_out="$(yq -p json -r "$hist_expr" < "$hist_fixture")"
-rm -f -- "$hist_fixture"
 hist_rows="$(printf '%s\n' "$hist_out" | grep -c . || true)"
 if [[ "$hist_rows" -ne 2 ]]; then
     echo "ERROR: the history expression rendered $hist_rows row(s), expected 2" >&2
@@ -888,22 +864,18 @@ echo "  ok  2 rows, fields in the order awk expects"
 # run that never finished.
 section_negative() {
 echo "==> Failure is reported as failure"
-cs_fdir="$(mktemp -d)"
+cs_fdir="$(mktemp -d "$CS_TMP/failure.XXXXXX")"
 cs_fscratch=/tmp/cs-failure-contract
 rm -rf -- "$cs_fscratch"
-if CS_STATE_FILE="$cs_fdir/last-run.json" CS_MANIFEST_FILE="$cs_fdir/managed-paths.json" \
-   CS_HISTORY_FILE="$cs_fdir/history.jsonl" CS_RUN_MODE=apply CS_RUN_PARTIAL=0 \
-   CS_RUN_ID=fail-1 ansible-playbook tests/failure.yml >/dev/null 2>&1; then
+if cs_run apply 0 fail-1 CS_STATE_FILE="$cs_fdir/last-run.json" \
+    CS_MANIFEST_FILE="$cs_fdir/managed-paths.json" CS_HISTORY_FILE="$cs_fdir/history.jsonl" \
+    tests/failure.yml >/dev/null 2>&1; then
     echo "ERROR: tests/failure.yml was expected to fail and did not" >&2
     exit 1
 fi
-"$CS_PY" - "$cs_fdir" <<'PYEOF'
-import json, os, sys
-
-d = os.path.abspath(sys.argv[1])
-s = json.load(open(os.path.join(d, "last-run.json")))
-h = [json.loads(l) for l in
-     open(os.path.join(d, "history.jsonl")).read().splitlines() if l.strip()]
+cs_py "$cs_fdir" <<'PYEOF'
+s = load("last-run.json")
+h = jsonl("history.jsonl")
 
 assert s["result"] == "failed", f"a failed run reported result={s['result']!r}"
 assert s["totals"]["failed"] == 1, s["totals"]
@@ -923,24 +895,19 @@ PYEOF
 # A state file that cannot be written must not turn a failed run into an ok one:
 # history and the end marker are derived from the same totals.
 : > "$cs_fdir/blocker"
-if CS_STATE_FILE="$cs_fdir/blocker/last-run.json" CS_HISTORY_FILE="$cs_fdir/history.jsonl" \
-   CS_RUN_MODE=apply CS_RUN_PARTIAL=0 CS_RUN_ID=fail-2 \
-   ansible-playbook tests/failure.yml >/dev/null 2>&1; then
+if cs_run apply 0 fail-2 CS_STATE_FILE="$cs_fdir/blocker/last-run.json" \
+    CS_HISTORY_FILE="$cs_fdir/history.jsonl" tests/failure.yml >/dev/null 2>&1; then
     echo "ERROR: tests/failure.yml was expected to fail and did not" >&2
     exit 1
 fi
-"$CS_PY" - "$cs_fdir" <<'PYEOF'
-import json, os, sys
-
-d = os.path.abspath(sys.argv[1])
-h = [json.loads(l) for l in
-     open(os.path.join(d, "history.jsonl")).read().splitlines() if l.strip()]
+cs_py "$cs_fdir" <<'PYEOF'
+h = jsonl("history.jsonl")
 assert h[-1].get("run_id") == "fail-2", h[-1]
 assert h[-1]["result"] == "failed" and h[-1]["failed"] == 1, \
     f"an unwritable state file hid a failed run: {h[-1]}"
 print("  ok  an unwritable state file does not hide a failed run")
 PYEOF
-rm -rf -- "$cs_fdir" "$cs_fscratch"
+rm -rf -- "$cs_fscratch"
 
 # A guard whose expression always evaluates false looks exactly like a passing
 # suite. Assert the run FAILS, and for the right reason.
@@ -991,7 +958,7 @@ expect_layer_failure malformed-machine "YAML parsing failed"
 # to the branch. Real local repos, no network. Captured, never piped into grep -q.
 section_layers() {
 echo "==> Layer sync (pinned ref)"
-_pd="$(mktemp -d)"
+_pd="$(mktemp -d "$CS_TMP/pin.XXXXXX")"
 git init -q -b main "$_pd/src"
 printf 'name: pinme\nschema_version: 1\n' > "$_pd/src/layer.yml"
 echo one > "$_pd/src/marker"
@@ -1020,7 +987,6 @@ pin_out="$(pin_sync)" && { echo "ERROR: a ref starting with '-' was ACCEPTED" >&
 pin_manifest '    ref: no-such-tag\n'
 pin_out="$(pin_sync)" && { echo "ERROR: an unknown ref was ACCEPTED" >&2; exit 1; }
 [[ "$pin_out" == *"could not fetch ref"* ]] || { echo "ERROR: unknown ref failed for the wrong reason: $pin_out" >&2; exit 1; }
-rm -rf "$_pd"
 echo "  ok  tag and sha pins hold, unpin follows the branch, bad refs rejected"
 
 # Cross-references (capability, question and preset ids) fail silently when wrong; the linter makes them loud.
@@ -1042,7 +1008,7 @@ echo "  ok  unknown selection rejected, known ones accepted"
 # A manifest repo URL starting with '-' would be parsed by `git clone` as an
 # option. Reject it before any git call; capture the output (no pipe into grep -q).
 echo "==> Layer sync (hostile manifest repo)"
-_hm="$(mktemp -d)"
+_hm="$(mktemp -d "$CS_TMP/hostile.XXXXXX")"
 printf 'layers:\n  - name: evil\n    repo: "--upload-pack=touch %s/pwned"\n    priority: 10\n' "$_hm" > "$_hm/manifest.yml"
 sync_out="$(./scripts/computer-setup-layers sync --manifest "$_hm/manifest.yml" --cache "$_hm/cache" 2>&1)" && {
     echo "ERROR: a manifest repo starting with '-' was ACCEPTED" >&2
@@ -1052,7 +1018,6 @@ sync_out="$(./scripts/computer-setup-layers sync --manifest "$_hm/manifest.yml" 
     echo "ERROR: hostile manifest repo rejected for the wrong reason: $sync_out" >&2
     exit 1
 }
-rm -rf "$_hm"
 echo "  ok  repo URL starting with '-' rejected"
 
 echo "==> Layer lint (reference layer)"
