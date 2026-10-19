@@ -141,6 +141,18 @@ cp -R "$OLDPWD/examples/example-layer" "$T/pull/examples/example-layer" 2>/dev/n
 (cd "$T" && run layers new ../x >/dev/null 2>&1) && fail "layers new accepted a bad name"
 echo "  ok  layers new scaffolds a lintable layer, refuses overwrite and bad names"
 
+# 8b. `layers sync` and `layers lint` pass the machine file and keep explicit flags.
+printf '#!/bin/bash\necho "$*"\n' > "$T/bin/computer-setup-layers"
+chmod +x "$T/bin/computer-setup-layers"
+[[ "$(run layers sync)" == "sync" ]] || fail "layers sync added args without a machine file"
+touch "$T/none.yml"
+[[ "$(run layers sync)" == "sync --manifest $T/none.yml" ]] || fail "layers sync did not pass the manifest"
+[[ "$(run layers sync --manifest y.yml)" == "sync --manifest y.yml" ]] || fail "layers sync overrode --manifest"
+[[ "$(run layers lint)" == "lint --manifest $T/none.yml --machine $T/none.yml" ]] || fail "layers lint args wrong"
+[[ "$(run layers lint --layer x)" == "lint --manifest $T/none.yml --layer x" ]] || fail "layers lint --layer got --machine"
+rm "$T/none.yml" "$T/bin/computer-setup-layers"
+echo "  ok  layers sync/lint pass the manifest and respect explicit flags"
+
 # 9. Pruning removes old successful logs and never an old failed one. A failed run
 #    is identified by history.jsonl, so the log paths below must match it exactly.
 printf '{"result":"failed","log":"%s"}\n{"result":"ok","log":"%s"}\n' \
@@ -228,7 +240,7 @@ rm "$T/state/history.jsonl"
 [[ "$(run history)" == "No history yet. It is appended to by every run." ]] || fail "empty history message changed"
 echo "  ok  history: rows, n, bad n rejected, empty"
 
-# 13. log: empty dir, newest of two shown, --list newest first, bad n today.
+# 13. log: empty dir, newest of two shown, --list newest first, bad n rejected (64).
 rm -rf "$T/logs"; mkdir "$T/logs"
 [[ "$(run log)" == "No logs yet in $T/logs" ]] || fail "empty log dir message changed"
 [[ "$(run log --list)" == "No logs yet in $T/logs" ]] || fail "empty log --list message changed"
@@ -238,10 +250,10 @@ out="$(run log)"
 [[ "$out" == "── $T/logs/20260102-000000-apply.log"$'\n\nnew1\nnew2\nnew3' ]] || fail "log did not show the latest: $out"
 [[ "$(run log 1)" == *new3 && "$(run log 1)" != *new2* ]] || fail "log 1 is not the last line"
 [[ "$(run log --list)" == "$T/logs/20260102-000000-apply.log"$'\n'"$T/logs/20260101-000000-check.log" ]] || fail "log --list not newest first"
-# Today a bad n is passed straight to tail: the header prints, then tail fails.
-out="$(run log abc 2>&1)" && fail "log abc succeeded"
-[[ "$out" == "── $T/logs/20260102-000000-apply.log"* ]] || fail "log abc: header no longer printed: $out"
-echo "  ok  log: empty, latest, n, --list, bad n fails (via tail)"
+err="$(run log abc 2>&1)" && fail "log abc accepted"
+[[ "$err" == *"log: expected a number, got 'abc'"* ]] || fail "bad log n not explained: $err"
+run log -1 >/dev/null 2>&1 && fail "log -1 accepted"
+echo "  ok  log: empty, latest, n, --list, bad n rejected"
 
 # 14. manifest: counts and sections from a fixture; missing file is a message.
 [[ "$(run manifest)" == "No manifest yet. Run \`computer-setup check\` to populate it." ]] || fail "missing manifest message changed"

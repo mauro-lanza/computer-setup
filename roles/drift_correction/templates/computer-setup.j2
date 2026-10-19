@@ -705,38 +705,22 @@ cmd_machine() {
         "$@"
 }
 
-# Newest-first list of run logs. A glob and a sort rather than `ls -t`: the
-# names are `YYYYmmdd-HHMMSS-<mode>.log`, generated here, so lexical order IS
-# chronological order — and shellcheck is right that parsing `ls` is a habit
-# worth not having.
-run_logs() {
-    local -a found=()
-    local candidate
-    for candidate in "$LOG_DIR"/*.log; do
-        [[ -f "$candidate" ]] && found+=("$candidate")
-    done
-    # Deliberately NOT the shell's array-length form. This file is a Jinja
-    # template, and a brace followed by a hash opens a Jinja comment — so that
-    # syntax makes the template fail to render entirely, with "Missing end of
-    # comment tag". Same reason this comment does not spell it out.
-    [[ -z "${found[*]:-}" ]] && return 1
-    printf '%s\n' "${found[@]}" | sort -r
-}
-
+# Log names are `YYYYmmdd-HHMMSS-<mode>.log`, so lexical order is chronological.
 cmd_log() {
-    local logs
-    if ! logs="$(run_logs)"; then
+    local arg="${1:-100}"
+    set -- "$LOG_DIR"/*.log
+    if [[ ! -f "$1" ]]; then
         echo "No logs yet in $LOG_DIR"
         return 0
     fi
-    if [[ "${1:-}" == "--list" ]]; then
-        printf '%s\n' "$logs"
+    if [[ "$arg" == "--list" ]]; then
+        printf '%s\n' "$@" | sort -r
         return 0
     fi
-    local latest
-    latest="$(printf '%s\n' "$logs" | head -n1)"
+    [[ "$arg" =~ ^[0-9]+$ ]] || { printf '%s\n' "log: expected a number, got '$arg'" >&2; return 64; }
+    local latest="${!#}"
     printf '%s\n\n' "── $latest"
-    tail -n "${1:-100}" "$latest"
+    tail -n "$arg" "$latest"
 }
 
 # ─── Repository list scaffold ────────────────────────────────────────────────
@@ -890,44 +874,45 @@ run_scheduled() {
 # sync" refreshes the cache with no further arguments. An explicit
 # --manifest/--cache on the command line still wins, so overriding for a one-off
 # invocation (e.g. linting a manifest that isn't deployed yet) keeps working.
+has_arg() {
+    local want="$1" a
+    shift
+    for a in "$@"; do
+        [[ "$a" == "$want" ]] && return 0
+    done
+    return 1
+}
+
+cmd_layers_new() {
+    local lname="${1:-}" ldir="${2:-}" src="${PULL_DIR}/examples/example-layer"
+    [[ "$lname" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] \
+        || { echo "Usage: computer-setup layers new NAME [DIR]  (NAME: letters, digits, . _ -)" >&2; return 64; }
+    [[ -n "$ldir" ]] || ldir="./${lname}"
+    [[ -d "$src" ]] || { echo "No reference layer at ${src}; run \`computer-setup apply\` first." >&2; return 1; }
+    [[ ! -e "$ldir" ]] || { echo "${ldir} already exists." >&2; return 1; }
+    cp -R "$src" "$ldir" || return 1
+    # Only the name line: the layer's name must match its manifest entry.
+    yq -i ".name = \"${lname}\"" "$ldir/layer.yml" || return 1
+    echo "Created ${ldir}. Edit it, git init + push, then add it to machine.yml (see machine.example.yml)."
+}
+
 cmd_layers() {
     local sub="${1:-}"
     [[ $# -gt 0 ]] && shift
+    [[ "$sub" == "new" ]] && { cmd_layers_new "$@"; return; }
     local -a args=("$@")
 
-    if [[ "$sub" == "new" ]]; then
-        local lname="${1:-}" ldir="${2:-}" src="${PULL_DIR}/examples/example-layer"
-        [[ "$lname" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] \
-            || { echo "Usage: computer-setup layers new NAME [DIR]  (NAME: letters, digits, . _ -)" >&2; return 64; }
-        [[ -n "$ldir" ]] || ldir="./${lname}"
-        [[ -d "$src" ]] || { echo "No reference layer at ${src}; run \`computer-setup apply\` first." >&2; return 1; }
-        [[ ! -e "$ldir" ]] || { echo "${ldir} already exists." >&2; return 1; }
-        cp -R "$src" "$ldir" || return 1
-        # Only the name line: the layer's name must match its manifest entry.
-        yq -i ".name = \"${lname}\"" "$ldir/layer.yml" || return 1
-        echo "Created ${ldir}. Edit it, git init + push, then add it to machine.yml (see machine.example.yml)."
-        return 0
-    fi
-
     if [[ "$sub" == "sync" || "$sub" == "lint" ]]; then
-        local has_manifest=0 has_cache=0 a
-        for a in "${args[@]+"${args[@]}"}"; do
-            [[ "$a" == "--manifest" ]] && has_manifest=1
-            [[ "$a" == "--cache" ]] && has_cache=1
-        done
-        [[ $has_cache -eq 0 && -n "$LAYER_CACHE" ]] \
-            && args=(--cache "$LAYER_CACHE" "${args[@]+"${args[@]}"}")
-        [[ $has_manifest -eq 0 && -f "$MACHINE_FILE" ]] \
-            && args=(--manifest "$MACHINE_FILE" "${args[@]+"${args[@]}"}")
+        has_arg --cache "${args[@]+"${args[@]}"}" || [[ -z "$LAYER_CACHE" ]] \
+            || args=(--cache "$LAYER_CACHE" "${args[@]+"${args[@]}"}")
+        has_arg --manifest "${args[@]+"${args[@]}"}" || [[ ! -f "$MACHINE_FILE" ]] \
+            || args=(--manifest "$MACHINE_FILE" "${args[@]+"${args[@]}"}")
     fi
 
     # Lint also checks this machine's own selections, unless pointed at one layer.
     if [[ "$sub" == "lint" && -f "$MACHINE_FILE" ]]; then
-        local has_scope=0 a
-        for a in "${args[@]+"${args[@]}"}"; do
-            [[ "$a" == "--layer" || "$a" == "--machine" ]] && has_scope=1
-        done
-        [[ $has_scope -eq 0 ]] && args+=(--machine "$MACHINE_FILE")
+        has_arg --layer "${args[@]+"${args[@]}"}" || has_arg --machine "${args[@]+"${args[@]}"}" \
+            || args+=(--machine "$MACHINE_FILE")
     fi
 
     exec "$LAYER_SYNC" "$sub" "${args[@]+"${args[@]}"}"
