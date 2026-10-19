@@ -3,16 +3,11 @@
 #
 # computer-setup — the single entry point for operating this machine's setup.
 #
-# DELIBERATELY BASH, not zsh, even though zsh is the login shell and this used
-# to be zsh: shellcheck has no zsh mode at all ("Unknown shell: zsh"), and this
-# is the most operationally critical script here — every scheduled run goes
-# through it. Being bash is what puts it under the linter. Nothing here needed
-# zsh; it used `print`/`${var:h}` out of habit. Keep it POSIX-ish bash: macOS
-# ships bash 3.2 and that is what `#!/bin/bash` resolves to.
+# Bash, not zsh: shellcheck has no zsh mode, and every scheduled run goes
+# through this script. Keep it POSIX-ish: macOS ships bash 3.2.
 #
-# Every ansible-pull this machine runs goes through here, so the `-e` argument
-# set (machine declaration, layer cache) is defined exactly once. Add a
-# variable here, not per caller.
+# Every ansible-pull goes through here, so the `-e` argument set is defined
+# once. Add a variable here, not per caller.
 #
 #   Verbs: see usage() below, the one list of them.
 #   `apply` streams to your terminal with no connectivity guard, so you can watch
@@ -29,107 +24,76 @@ set -uo pipefail
 
 REPO_URL="{{ computer_setup_repo_url }}"
 REPO_BRANCH="{{ computer_setup_repo_branch }}"
-# THE machine declaration: layers + answers + capability selections in one
-# file, so a backup is never half a machine (capability ids are meaningless
-# without the layer registry that defines them).
+# Layers, answers and capability selections in one file, so a backup is never
+# half a machine.
 MACHINE_FILE="{{ computer_setup_machine_file }}"
 LAYER_CACHE="{{ computer_setup_layer_cache }}"
-# ONE LOG PER RUN, in a directory of their own, so "open the log for THAT run" is
-# answerable and retention is a policy (see "Run logs" in docs/architecture.md).
+# One log per run, in a directory of its own. Retention: see "Run logs" in
+# docs/architecture.md.
 LOG_DIR="{{ computer_setup_log_dir }}"
-# Successful runs are pruned past this. FAILED RUNS ARE NEVER PRUNED: the whole
-# point of keeping logs is the run that went wrong, and those are exactly the
-# ones you come back to weeks later.
+# Successful runs are pruned past this. Failed runs are never pruned: they are
+# the ones you come back to.
 LOG_RETENTION_DAYS={{ drift_correction_log_retention_days }}
 # Set per run by start_run_log.
 RUN_LOG=""
 STATE_DIR="{{ computer_setup_state_dir }}"
-# Machine-readable run state, written by the computer_setup_state callback
-# plugin (see callback_plugins/). `status` reads it; a UI could too. The plugin
-# is inert unless CS_STATE_FILE is exported, which is why every mode that wants
-# state recorded sets it explicitly.
+# Written by the computer_setup_state callback plugin, which is inert unless
+# CS_STATE_FILE is set. `status` reads it.
 LAST_RUN_FILE="${STATE_DIR}/last-run.json"
-# Every filesystem path this system manages, rewritten each complete run. The
-# basis for auditing what the tool owns, and later for collecting what it has
-# stopped owning. Separate from last-run.json because it answers a different
-# question: that file is what HAPPENED, this is what IS.
+# Every managed path, rewritten on each complete run. Not last-run.json: that is
+# what happened, this is what is.
 MANIFEST_FILE="${STATE_DIR}/managed-paths.json"
 # One short JSON line per run, oldest trimmed; it outlives the pruned run logs.
 HISTORY_FILE="${STATE_DIR}/history.jsonl"
-# LIVE progress, rewritten by every run: one line per task, flushed as it goes.
-# What a UI tails to show a run happening rather than a spinner. Transient by
-# design — the previous run's progress is of no interest to anyone.
+# Rewritten by every run, one flushed line per task, for a UI tailing a run in
+# progress. Transient.
 PROGRESS_FILE="${STATE_DIR}/progress.jsonl"
-# Plain ISO timestamp of the last SCHEDULED run that reached the repo and
-# finished cleanly. Deliberately a separate one-line file rather than a field in
-# the JSON: it must survive a run that failed, and merging JSON in bash to
-# preserve one field is how you end up with neither.
+# Its own file, not a JSON field: a failed run must not clobber it, and merging
+# JSON in bash is fragile.
 LAST_SUCCESS_FILE="${STATE_DIR}/last-success"
-# Same, for the scheduled UPGRADE only. `last-success` is shared with the check,
-# so a daily passing check hides an upgrade that has not run for days.
+# Same for the scheduled upgrade: `last-success` is shared with the check, which
+# would hide a stale upgrade.
 UPGRADE_SUCCESS_FILE="${STATE_DIR}/last-success-upgrade"
-# Where this machine's declaration is backed up, and under what name. CONFIG,
-# not state: you choose it, it is hand-editable, and losing it means deciding
-# again. A file of its own rather than a key in machine.yml, because machine.yml
-# is the thing being backed up — a machine cannot be the place that records
-# where its own backups go.
+# Config, not state. Kept out of machine.yml, which is the thing being backed up.
 BACKUP_CONFIG="{{ computer_setup_config_dir }}/backup.yml"
 BACKUP_REPO_DIR="{{ computer_setup_backup_repo_dir }}"
-# Days without a successful scheduled run before `status` calls it stale. A
-# machine that quietly stopped syncing is the failure this makes visible.
+# Days without a successful scheduled run before `status` reports STALE.
 STALE_AFTER_DAYS={{ drift_correction_stale_after_days }}
-# The engine's PINNED runtime, not whatever `ansible` Homebrew happens to have.
-# See runtime.yml: brew upgrade runs unattended at 09:00 and could otherwise
-# cross an ansible-core major on every machine overnight.
+# Pinned in runtime.yml: an unattended `brew upgrade` must not move ansible-core.
 ANSIBLE_PULL="{{ computer_setup_runtime_bin }}/ansible-pull"
 
-# Keeps the log in the order things actually happened. ansible-pull prints its
-# own banner, then runs ansible-playbook as a SUBPROCESS which writes to the
-# same descriptor. Whenever output is not a terminal — a log file, or a pipe
-# into tee — the parent's stdout is block-buffered and only flushes when it
-# exits, so its banner lands AFTER everything the child wrote. The log then
-# ends with "Starting Ansible Pull" instead of the PLAY RECAP, which is exactly
-# backwards for `computer-setup log`, since that tails.
+# Unbuffered so the log is in event order. When stdout is not a terminal,
+# ansible-pull's own banner would flush after the playbook it spawns, and `log`
+# tails the end.
 export PYTHONUNBUFFERED=1
 
 # ─── Mitogen ─────────────────────────────────────────────────────────────────
-# Replaces Ansible's fork+exec per task with a persistent interpreter. Measured
-# on this playbook: 48.6s -> 15.4s, identical results.
+# A persistent interpreter instead of fork+exec per task (48.6s -> 15.4s here).
 #
-# Enabled only when the strategy plugin is actually present, and skippable with
-# CS_NO_MITOGEN=1. That escape hatch matters more than it looks: mitogen
-# monkey-patches Ansible internals, so a bad interaction breaks ansible-playbook
-# itself — and this runner is also how the machine would PULL the fix. Without a
-# way to run without it, a broken mitogen would leave a machine unable to heal
-# itself. `CS_NO_MITOGEN=1 computer-setup apply` is that way.
+# CS_NO_MITOGEN=1 is the escape hatch: mitogen patches Ansible internals, and
+# this runner is also how a machine pulls its own fix.
 MITOGEN_STRATEGY_DIR="{{ computer_setup_runtime_tools }}/ansible-core/lib/python{{ computer_setup_python_version }}/site-packages/ansible_mitogen/plugins/strategy"
 if [[ "${CS_NO_MITOGEN:-0}" != "1" && -d "$MITOGEN_STRATEGY_DIR" ]]; then
     export ANSIBLE_STRATEGY_PLUGINS="$MITOGEN_STRATEGY_DIR"
     export ANSIBLE_STRATEGY=mitogen_linear
 fi
 # ansible-pull's checkout of the orchestrator. Never edit it by hand: a dirty
-# checkout makes ansible-pull refuse to update (it clones with force=no), and
-# the scheduled agents then run stale code with no visible complaint.
+# checkout makes ansible-pull refuse to update, and scheduled runs go stale
+# silently.
 PULL_DIR="{{ computer_setup_pull_dir }}"
 BIN_DIR="{{ computer_setup_bin_dir }}"
 LAYER_SYNC="${BIN_DIR}/computer-setup-layers"
 MACHINE_SYNC="${BIN_DIR}/computer-setup-machine"
 CONNECTIVITY_TIMEOUT={{ drift_correction_connectivity_timeout }}
-# `| expanduser` because this is the one path here a HUMAN answers, via the
-# repositories-dir question, and "~/Projects" is the natural answer. Ansible
-# expands `~` itself whenever a module consumes a path, so that answer is
-# correct everywhere else in the system — but baked into a shell string it
-# stays literal, and `~` does not expand inside a quoted assignment.
+# expanduser: a human answers this path, and `~` does not expand inside a quoted
+# shell assignment.
 REPOS_BASE_DIR="{{ repositories_base_dir | expanduser }}"
 
 # ─── The pull argument set — single source of truth ──────────────────────────
-# `-d` pins the checkout. Without it ansible-pull derives the directory from the
-# hostname, which on a Mac changes with the network (an mDNS `.home` suffix), so
-# each network would get its own clone and each would be stale until that
-# network came back.
-# The URL and branch are ALSO handed to the play: it re-renders this very script
-# from them, so without -e a fork (BOOTSTRAP_OWNER) or a pinned ref would be
-# written back to the defaults in local.yml by the next apply.
+# `-d` pins the checkout: otherwise ansible-pull derives it from the hostname,
+# which changes with the network.
+# The URL and branch also go to the play, which re-renders this script from
+# them; without -e a fork or pinned ref would be reset by the next apply.
 ARGS=(-U "$REPO_URL" -C "$REPO_BRANCH" -d "$PULL_DIR"
       -e "computer_setup_repo_url=${REPO_URL}" -e "computer_setup_repo_branch=${REPO_BRANCH}")
 # One file, so one -e @ and one path var. `layers` rides along into play scope
@@ -147,12 +111,10 @@ notify_failed() {
 
 log() { printf '%s\n' "$*" >> "${RUN_LOG:-/dev/null}"; }
 
-# ONE run at a time. The apply, the upgrade and both LaunchAgents share the pull
-# checkout, the runtime venv, the Galaxy directory, the layer cache and the state
-# files, and launchd runs a missed job at wake — so a 09:xx upgrade and the 10:00
-# check can genuinely overlap. A directory is the lock because mkdir is atomic;
-# the pid inside lets a crashed run's lock be recognised and cleared. A run
-# suspended by sleep still has a live pid, which is correct: it still owns things.
+# ONE run at a time: runs share the pull checkout, venv, layer cache and state,
+# and launchd can run a missed job at wake. mkdir is the atomic lock; the pid
+# lets a crashed holder's lock be cleared. A run suspended by sleep keeps its
+# pid, correctly.
 LOCK_DIR="${STATE_DIR}/run.lock"
 
 # Returns 0 with the lock held, 1 with the holder's pid in LOCK_HOLDER.
@@ -169,9 +131,8 @@ acquire_lock() {
         if [[ -n "$LOCK_HOLDER" ]]; then
             kill -0 "$LOCK_HOLDER" 2>/dev/null && return 1
         else
-            # No pid yet: a holder between mkdir and the write (milliseconds), or
-            # one that died in that gap. Only the second is ever older than a
-            # minute, and without this it would block every run forever.
+            # No pid yet: mid-write (milliseconds), or died in that gap. Only the
+            # latter is older than a minute.
             local age
             age=$(( $(date +%s) - $(stat -f %m "$LOCK_DIR" 2>/dev/null || date +%s) ))
             (( age > 60 )) || return 1
@@ -188,14 +149,11 @@ require_lock() {
     return 1
 }
 
-# Opens this run's log and claims the progress file. Called FIRST, before
-# anything else can log — including the connectivity probe that may exit early,
-# because a run that skipped is still a run someone may ask about.
+# Called first, before anything can log, so a run that skips early still has a
+# log.
 #
-# The run id is minted here rather than in state_env so the progress marker can
-# carry it. state_env runs after the layer sync, which is several seconds of
-# git, and a reader polling during that window would otherwise be told the
-# previous run's result as though it were this one.
+# The run id is minted here so the progress marker carries it: a reader polling
+# during the layer sync would otherwise see the previous run's result.
 start_run_log() {
     mkdir -p "$LOG_DIR" 2>/dev/null || true
     RUN_LOG="${LOG_DIR}/$(date '+%Y%m%d-%H%M%S')-${1}.log"
@@ -210,14 +168,12 @@ start_run_log() {
     chmod 600 "$PROGRESS_FILE" 2>/dev/null || true
 }
 
-# Delete successful runs' logs past the retention window, and only after a run
-# that itself succeeded — a machine that is failing should not be quietly
-# tidying away the evidence.
+# Prunes only after a successful run: a failing machine should not tidy away its
+# evidence.
 #
-# Which runs failed is read from history.jsonl rather than encoded in filenames,
-# so there is one source of truth and no rename to get wrong. A log with no
-# history entry at all is treated as keepable until it ages out: it is more
-# likely an interrupted run than litter.
+# Failed runs are read from history.jsonl, one source of truth. A log with no
+# history entry is kept until it ages out: it is more likely interrupted than
+# litter.
 prune_logs() {
     [[ -d "$LOG_DIR" ]] || return 0
     local keep old_log
@@ -255,77 +211,59 @@ To clone repositories that are missing:  computer-setup apply --tags repositorie
 EOF
 }
 
-# Refresh every content layer so the merge reflects the latest layer content
-# (drift covers orchestrator + all layers).
-#
-# EVERY mode must do this before running the playbook. ansible-pull updates the
-# ORCHESTRATOR only; the layers are separate repos in a separate cache. Skipping
-# it leaves the engine ahead of the layers, and any change that spans both — a
-# var the engine stopped defining and a layer still references — fails the run.
-# This includes `apply` — the mode a human runs by hand is the one that most
-# needs current layers.
+# Refresh every content layer before the playbook. ansible-pull updates only the
+# orchestrator; a layer that lags the engine fails any run that spans both.
+# Every mode does this, including `apply`.
 sync_layers() {
     [[ -f "$MACHINE_FILE" && -n "$LAYER_CACHE" ]] || return 0
     "$LAYER_SYNC" sync --manifest "$MACHINE_FILE" --cache "$LAYER_CACHE" \
         --schema-version {{ computer_setup_schema_version }}
 }
 
-# Any mode that runs the playbook records what it did. `partial` marks a run
-# that was narrowed with extra args (`--tags repositories`, `--limit`, …):
-# without it `status` would report "no drift" for the WHOLE machine on the
-# strength of a run that only ever looked at one role.
+# Any mode that runs the playbook records what it did. `partial` marks a
+# narrowed run, which must not read as a verdict on the whole machine.
 #
-# The args themselves are deliberately NOT recorded — `-e secret=…` is a
-# legitimate invocation, and this file is a report, not a shell history.
+# The args themselves are not recorded: `-e secret=…` is legitimate, and this is
+# a report, not a shell history.
 state_env() {
     CS_STATE_FILE="$LAST_RUN_FILE"
     CS_MANIFEST_FILE="$MANIFEST_FILE"
     CS_HISTORY_FILE="$HISTORY_FILE"
     CS_PROGRESS_FILE="$PROGRESS_FILE"
-    # Recorded into the history line, so every run in `history` can be traced to
-    # its own log — which is what makes a "recent runs" menu clickable.
+    # Lets `history` link each run to its own log.
     CS_LOG_FILE="$RUN_LOG"
     CS_RUN_MODE="$1"
     CS_RUN_PARTIAL="$2"
-    # Identifies this invocation across every play it runs. History is APPENDED,
-    # and ansible-pull can reach the callback's final hook more than once, so
-    # without a key one run could leave two lines. $$ alone is not enough — the
-    # plays may be separate processes — hence the timestamp.
-    # CS_RUN_ID is minted by start_run_log, which runs first — see the note
-    # there about why the progress marker cannot wait until this point.
+    # Keys the history line: the final hook can fire twice, and plays may be
+    # separate processes. Minted by start_run_log.
     export CS_STATE_FILE CS_MANIFEST_FILE CS_HISTORY_FILE CS_PROGRESS_FILE CS_LOG_FILE
     export CS_RUN_MODE CS_RUN_PARTIAL CS_RUN_ID
 }
 
 # ─── Interactive reconcile: stream, don't capture ────────────────────────────
-# Shared by apply and check. Runs in the foreground, prints if there is anywhere
-# to print to, and ALWAYS writes this run's log.
+# Shared by apply and check. Runs in the foreground, streams to a terminal if
+# there is one, and always writes this run's log.
 #
-# No longer `exec`: that replaced the shell, so nothing could tee the output or
-# run afterwards. Fine while every foreground run had a terminal; not fine now
-# that the menu bar launches runs in the background, where exec's output would
-# go nowhere and a failure would leave no trace but an exit code nobody sees.
+# Not `exec`: the output must be teed and the shell must survive to prune and
+# notify. See "Run logs" in docs/architecture.md.
 # $1 mode, $2 partial (1 when the CALLER passed extra arguments), rest: the
 # ansible-pull arguments.
 #
-# `partial` is taken as a parameter rather than derived from $# here, because by
-# this point the argument list also holds this function's own fixed flags —
-# `--check --diff local.yml` and friends — so `$# > 0` is always true and every
-# run would mark itself partial. That is not cosmetic: a partial run writes no
-# manifest at all, so the inventory would have silently stopped updating.
+# `partial` is a parameter: derived from $# it would always be true, since the
+# callers' fixed flags are already in the argument list.
 run_foreground() {
     local mode="$1" partial="$2"; shift 2
     require_lock || return 1
     start_run_log "$mode"
     sync_layers || printf '%s\n' "WARN: layer sync failed; continuing with cached content" >&2
-    # State is recorded for hand-run modes too, or `status` would describe the
-    # 10:00 agent's world rather than the one you just made.
+    # Hand-run modes record state too, or `status` would describe the scheduled
+    # agent's last run.
     state_env "$mode" "$partial"
 
     local rc
     if [[ -t 1 ]]; then
-        # Interactive: still streams to the terminal exactly as before, and is
-        # kept as well. PIPESTATUS, because tee's exit code is not the run's.
+        # Interactive: streams as before, and is kept too. PIPESTATUS: tee's exit
+        # code is not the run's.
         "$ANSIBLE_PULL" "${ARGS[@]}" "$@" 2>&1 | tee -a "$RUN_LOG"
         rc=${PIPESTATUS[0]}
     else
@@ -333,9 +271,7 @@ run_foreground() {
         rc=$?
     fi
 
-    # A background run has no terminal to complain to, so it says so here. The
-    # menu bar and `status` both show the failure regardless; this is for the
-    # case where neither is being looked at.
+    # A background run has no terminal to report to, so it notifies.
     if [[ $rc -ne 0 && ! -t 1 ]]; then
         notify_failed "$mode" "$rc"
     fi
@@ -353,16 +289,12 @@ cmd_check() {
 }
 
 # ─── Upgrade managed tools, including casks ──────────────────────────────────
-# The scheduled 09:00 agent already upgrades formulae, Galaxy and Node. It
-# deliberately skips casks: those replace app bundles in /Applications and can
-# raise a sudo prompt, which a LaunchAgent has no TTY to answer. This command is
-# how casks get upgraded — run it when you're at the keyboard.
+# The 09:00 agent upgrades formulae, Galaxy and Node. Casks are left to this
+# command: they replace /Applications bundles and can raise a sudo prompt that a
+# LaunchAgent cannot answer.
 #
-# Confirmation happens HERE, in your terminal (a guaranteed TTY), rather than via
-# an in-play Ansible `pause` — a pause inside `ansible-pull` blocks forever when
-# the prompt is missed and silently skips when stdin isn't interactive. This is
-# why upgrade stays its own verb instead of being folded into
-# `apply --tags upgrade`.
+# Confirms in this terminal: an Ansible `pause` blocks forever, or silently
+# skips, when stdin is not interactive.
 cmd_upgrade() {
     if [[ ! -t 0 ]]; then
         printf '%s\n' "computer-setup upgrade needs a terminal to confirm on." >&2
@@ -381,16 +313,9 @@ cmd_upgrade() {
         echo "Aborted — nothing changed."
         return 0
     fi
-    # Casks that replace files they own (Docker Desktop) need root. Homebrew
-    # shells out to sudo, and by then we are several processes deep inside
-    # Ansible with pipes for stdin — sudo has no terminal to prompt on, and a
-    # credential cached with `sudo -v` out here is not usable in there either.
-    #
-    # The homebrew_cask module solves this properly: given `sudo_password` it
-    # writes a 0700 askpass script and sets SUDO_ASKPASS, which Homebrew turns
-    # into `sudo -A`. Collect the password here, where a terminal exists, and
-    # hand it over through the environment — not `-e`, which would expose it in
-    # the process list.
+    # Casks that need root (Docker Desktop) get the password from the environment,
+    # not `-e`, which would show it in the process list. The homebrew_cask module
+    # feeds it to sudo through an askpass helper.
     local sudo_pw
     echo
     echo "Some casks need root to upgrade (e.g. Docker Desktop)."
@@ -400,14 +325,12 @@ cmd_upgrade() {
     [[ -n "$sudo_pw" ]] && export CS_SUDO_PASSWORD="$sudo_pw"
     unset sudo_pw
 
-    # Taken after the prompts so a refusal does not waste the confirmation, and
-    # logged like every other run: this is the one most likely to fail (casks),
-    # and used to leave nothing behind.
+    # Taken after the prompts so a refusal wastes no confirmation. Logged like any
+    # run: this is the one most likely to fail.
     require_lock || { unset CS_SUDO_PASSWORD; return 1; }
     start_run_log upgrade
     sync_layers || printf '%s\n' "WARN: layer sync failed; continuing with cached content" >&2
-    # Always partial: this runs `--tags upgrade`, so it says nothing about
-    # whether the rest of the machine matches its configuration.
+    # Always partial: `--tags upgrade` says nothing about the rest of the machine.
     state_env upgrade 1
     "$ANSIBLE_PULL" "${ARGS[@]}" --tags upgrade \
         -e computer_setup_upgrade_assume_yes=true local.yml "$@" 2>&1 | tee -a "$RUN_LOG"
@@ -425,7 +348,7 @@ read_stamp() {
 }
 
 # Whole days since the last successful scheduled run; empty if there has never
-# been one. `date -j -f` is BSD date — macOS only, which this whole system is.
+# been one. BSD `date -j`: macOS only.
 days_since_success() {
     local stamp then_ts now
     stamp="$(read_stamp "${1:-$LAST_SUCCESS_FILE}")"
@@ -435,9 +358,8 @@ days_since_success() {
     echo $(( (now - then_ts) / 86400 ))
 }
 
-# Render the changed/failed task list. `dest` is optional (not every task acts
-# on a path), so it is emitted tab-separated and the tab collapsed away here —
-# yq is mikefarah's, which has no jq-style `if/then/else` to inline it.
+# Renders the changed/failed list. `dest` is optional, so the row is
+# tab-separated and collapsed here; mikefarah yq has no if/then/else.
 state_task_list() {
     [[ -f "$LAST_RUN_FILE" ]] || return 0
     yq -r "${1}[] | \"  - \" + .task + \"\t\" + (.dest // .item // \"\")" "$LAST_RUN_FILE" 2>/dev/null \
@@ -452,8 +374,7 @@ cmd_status() {
     days="$(days_since_success)"
 
     if [[ "${1:-}" == "--json" ]]; then
-        # Composed rather than echoed: staleness is derived, and a consumer
-        # should not have to reimplement the date maths to get it.
+        # Composed here, so consumers need not redo the date maths for staleness.
         printf '{\n'
         stamp="$(read_stamp "$LAST_SUCCESS_FILE")"
         if [[ -n "$stamp" ]]; then stamp="\"$stamp\""; else stamp=null; fi
@@ -473,16 +394,14 @@ cmd_status() {
     fi
 
     # One yq call, `|`-delimited: a whitespace delimiter would collapse empty fields.
-    # `changed` is the LENGTH of the recorded list, not `.totals.changed`: Ansible
-    # counts a looped task once however many items changed, so a task that found
-    # three missing credentials would announce "1" and then list three.
+    # `changed` is the length of the recorded list, not `.totals.changed`: Ansible
+    # counts a looped task once, so the two would disagree.
     IFS='|' read -r mode result finished dur changed partial truncated failed_n < <(
         yq -r '[.mode // "", .result // "", .finished // "", .duration_seconds // "", (.changed | length), .partial // "", .truncated // "", .totals.failed // ""] | join("|")' "$LAST_RUN_FILE" 2>/dev/null
     ) || true
 
     echo "Last run:  ${mode:-?} — ${result:-?} at ${finished:-?}${dur:+ (${dur}s)}"
-    # Without this line a tag-limited run reads as a verdict on the whole
-    # machine, which is the most misleading thing this file could say.
+    # A tag-limited run must not read as a verdict on the whole machine.
     if [[ "$partial" == "true" ]]; then
         echo "           (partial run — only part of the configuration was evaluated)"
     fi
@@ -505,8 +424,7 @@ cmd_status() {
         echo "           Run \`computer-setup log\` for the detail."
     fi
 
-    # Cheap here, and it is the only place someone looks daily. The detail lives
-    # in `computer-setup manifest`; this is just the pointer.
+    # The detail lives in `computer-setup manifest`; this is the pointer.
     local orphan_n
     orphan_n="$(yq -r '.orphans // [] | length' "$MANIFEST_FILE" 2>/dev/null || true)"
     if [[ "${orphan_n:-0}" =~ ^[0-9]+$ && "${orphan_n:-0}" -gt 0 ]]; then
@@ -514,8 +432,7 @@ cmd_status() {
         echo "           See \`computer-setup manifest\`. Nothing is deleted automatically."
     fi
 
-    # The point of the whole file: a machine that silently stopped syncing looks
-    # identical to a healthy one until someone asks.
+    # A machine that silently stopped syncing looks healthy until someone checks.
     if [[ -z "$days" ]]; then
         echo "Sync:      no successful scheduled run recorded yet"
     elif [[ "$days" -ge "$STALE_AFTER_DAYS" ]]; then
@@ -523,8 +440,7 @@ cmd_status() {
     else
         echo "Sync:      ok — last successful scheduled run ${days} day(s) ago"
     fi
-    # Only when the upgrade has a record and it is behind: a machine that never
-    # had the agent should not be nagged.
+    # Only once an upgrade has been recorded: a machine without the agent is not nagged.
     local up_days
     up_days="$(days_since_success "$UPGRADE_SUCCESS_FILE")"
     if [[ -n "$up_days" && "$up_days" -ge "$UPGRADE_BEHIND_DAYS" ]]; then
@@ -533,11 +449,8 @@ cmd_status() {
 }
 
 # ─── What this system owns ───────────────────────────────────────────────────
-# The manifest answers "which files are mine", which until now could only be
-# reconstructed by reading the roles and resolving them against layer data. It
-# is written by the same callback that writes the run state, so it records what
-# the run ACTUALLY managed rather than a second hand-maintained list that could
-# disagree with it.
+# Which files are mine. Written by the run-state callback, so it records what the
+# run managed, not a hand-kept list that could disagree with it.
 cmd_manifest() {
     if [[ ! -f "$MANIFEST_FILE" ]]; then
         echo "No manifest yet. Run \`computer-setup check\` to populate it."
@@ -553,9 +466,8 @@ cmd_manifest() {
         yq -r '[.generated // "", (.files | length), (.directories | length), (.backups | length), (.orphans // [] | length)] | join("|")' "$MANIFEST_FILE" 2>/dev/null
     ) || true
 
-    # Only a complete run writes this file, so it is always the last full
-    # picture — but it may predate the last run, and saying when it was taken is
-    # how someone notices they have been running tagged applies all week.
+    # Only complete runs write this file, so it may predate the last run; the
+    # timestamp shows how old it is.
     echo "Recorded:  ${generated:-?}"
     echo
     echo "Files (${n_files:-0}):"
@@ -564,16 +476,15 @@ cmd_manifest() {
     echo
     echo "Directories (${n_dirs:-0}):"
     yq -r '.directories[] | "  " + .path' "$MANIFEST_FILE" 2>/dev/null
-    # Ansible's `backup: true` residue. Nothing reads these and nothing removes
-    # them, so they are listed apart rather than mixed in with live files.
+    # Ansible's `backup: true` residue: nothing reads or removes it, so it is
+    # listed apart.
     if [[ "${n_backups:-0}" -gt 0 ]]; then
         echo
         echo "Backup copies left behind (${n_backups}):"
         yq -r '.backups[] | "  " + .path' "$MANIFEST_FILE" 2>/dev/null
     fi
-    # Paths this system used to write, still on disk, no longer written by any
-    # active capability. REPORTED, never removed — deciding a file is garbage is
-    # a judgement, and the evidence is shown so a person can make it.
+    # Still on disk, but no active capability writes them. Reported, never
+    # removed: deleting is a judgement.
     if [[ "${n_orphans:-0}" -gt 0 ]]; then
         echo
         echo "No longer managed, still on disk (${n_orphans}):"
@@ -585,8 +496,7 @@ cmd_manifest() {
 }
 
 # ─── Run history ─────────────────────────────────────────────────────────────
-# Keeps "when did this machine last actually apply anything" answerable after the
-# run logs are pruned.
+# Answers "when did this machine last apply anything" after run logs are pruned.
 cmd_history() {
     if [[ ! -f "$HISTORY_FILE" ]]; then
         echo "No history yet. It is appended to by every run."
@@ -595,18 +505,14 @@ cmd_history() {
     local n="${1:-20}"
     [[ "$n" =~ ^[0-9]+$ ]] || { printf '%s\n' "history: expected a number, got '$n'" >&2; return 64; }
 
-    # One yq over the whole slice, not one per line: `history 500` would
-    # otherwise be 500 process spawns for what is a single read.
+    # One yq over the whole slice, not one per line.
     #
-    # `partial` is emitted as a plain field and turned into the asterisk by awk.
-    # yq here is mikefarah's, which has no jq-style `if/then/else` — see the
-    # note in docs/findings.md; this is the second time that has bitten.
+    # `partial` is a plain field, turned into the asterisk by awk: yq has no
+    # if/then/else (see docs/findings.md).
     {
         printf '%-26s %-8s %-8s %8s %8s %9s\n' FINISHED MODE RESULT CHANGED FAILED DURATION
-        # HISTORY_TSV_EXPR — kept on one line so check.sh can lift it out and
-        # run it against a fixture. A broken expression here fails silently
-        # (the header still prints, the rows just vanish), which is how the
-        # if/then/else version shipped.
+        # HISTORY_TSV_EXPR: kept on one line so check.sh can lift it out and test
+        # it. A broken expression fails silently: the rows vanish.
         tail -n "$n" "$HISTORY_FILE" \
             | yq -p json -r '[.finished, .mode, .result, (.partial | tostring), (.changed | tostring), (.failed | tostring), (.duration_seconds | tostring)] | @tsv' \
             | awk -F'\t' '{
@@ -619,9 +525,8 @@ cmd_history() {
 }
 
 # ─── Live progress ───────────────────────────────────────────────────────────
-# The point is runs you did NOT start: the 09:00 upgrade or the 10:00 check are
-# invisible while they happen, and "is it stuck or is it working" had no answer
-# short of reading the log afterwards. An interactive run already prints itself.
+# For runs you did not start (09:00 upgrade, 10:00 check): otherwise invisible
+# while they run. Interactive runs print their own progress.
 cmd_progress() {
     if [[ ! -f "$PROGRESS_FILE" ]]; then
         echo "No run has recorded progress yet."
@@ -631,8 +536,8 @@ cmd_progress() {
     local head last head_event mode total last_event result tasks n current
     head="$(head -n1 "$PROGRESS_FILE")"
     last="$(tail -n1 "$PROGRESS_FILE")"
-    # A half-written line makes yq fail, leaving every field empty. `|` is not
-    # whitespace, so read keeps empty fields; task goes last as it may hold `|`.
+    # Empty fields survive `read` because `|` is not whitespace; a half-written
+    # line leaves them empty. Task goes last: it may hold `|`.
     IFS='|' read -r head_event mode total < <(yq -r \
         '[.event, (.mode | tostring), (.total_estimate // 0)] | join("|")' <<<"$head" 2>/dev/null)
     IFS='|' read -r last_event result tasks n current < <(yq -r \
@@ -648,9 +553,8 @@ cmd_progress() {
         return 0
     fi
 
-    # No end marker does not prove a run is live — it may have been killed. The
-    # file's mtime is the only evidence either way, so say which it is rather
-    # than animating a bar for a process that died an hour ago.
+    # No end marker does not mean live: the run may have been killed. mtime tells
+    # the two apart.
     local age
     age=$(( $(date +%s) - $(stat -f %m "$PROGRESS_FILE" 2>/dev/null || echo 0) ))
     if [[ "$age" -gt "$PROGRESS_STALLED_SECONDS" ]]; then
@@ -663,13 +567,12 @@ cmd_progress() {
     if [[ "${total:-0}" -gt 0 ]]; then
         local pct filled bar i
         pct=$(( 100 * n / total ))
-        # The estimate is the PREVIOUS run of this mode, so this run can
-        # legitimately have more tasks. Clamp rather than render past the end.
+        # The estimate is the previous run of this mode, so clamp rather than
+        # render past 100%.
         [[ "$pct" -gt 100 ]] && pct=100
         filled=$(( pct / 5 ))
-        # Built a character at a time. `printf '#%.0s' $(seq 1 0)` looks like it
-        # draws nothing and actually draws one — printf reruns its format when
-        # given no arguments — so the bar was 21 characters wide at 0%.
+        # Built a character at a time: printf with no arguments still prints its
+        # format once.
         bar=""
         for (( i = 0; i < 20; i++ )); do
             if (( i < filled )); then bar+="#"; else bar+="."; fi
@@ -684,14 +587,11 @@ cmd_progress() {
 }
 
 # ─── Machine declaration backup ──────────────────────────────────────────────
-# Delegated to scripts/computer-setup-machine, not implemented here, because
-# bootstrap.sh needs the same operations on a machine where THIS FILE does not
-# exist yet: the runner is an Ansible template deployed by the first playbook
-# run, and restoring a machine has to happen before that. Same split, and the
-# same reason, as computer-setup-layers.
+# Lives in scripts/computer-setup-machine: bootstrap.sh needs the same operations
+# before this template is deployed. Same split as computer-setup-layers.
 #
-# The paths are supplied here so the interactive command needs no arguments; an
-# explicit flag still wins, as with `layers`.
+# The paths are supplied here so the command needs no arguments; an explicit
+# flag still wins, as with `layers`.
 cmd_machine() {
     local sub="${1:-}"
     [[ $# -gt 0 ]] && shift
@@ -722,10 +622,9 @@ cmd_log() {
 
 # ─── Repository list scaffold ────────────────────────────────────────────────
 # Prints a repositories.yml built from the checkouts already on this machine.
-# To clone the repos that are MISSING, run `computer-setup apply --tags
-# repositories` — the role is gated behind the `never` tag so the scheduled
-# agents never clone and bootstrap never touches private repos before SSH auth
-# exists. Cloning is non-destructive: existing checkouts are untouched.
+# To clone the missing repos: `computer-setup apply --tags repositories`. That tag
+# is `never`, so scheduled agents and bootstrap never clone. Existing checkouts
+# are untouched.
 cmd_repos() {
     local base="${1:-$REPOS_BASE_DIR}"
     if [[ ! -d "$base" ]]; then
@@ -751,8 +650,8 @@ cmd_capture() {
 }
 
 # ─── Scheduled modes (LaunchAgents) ──────────────────────────────────────────
-# Retried: at 09:00 the network is often not up yet (wake, VPN). Every failure's
-# stderr is logged, because a bare "unreachable" cannot be diagnosed afterwards.
+# Retried: the network is often not up at 09:00 (wake, VPN). Stderr is logged,
+# since a bare "unreachable" cannot be diagnosed afterwards.
 repo_reachable() {
     local tries=3 try err
     for ((try = 1; try <= tries; try++)); do
@@ -768,8 +667,8 @@ repo_reachable() {
 # Logged, notified, and guarded on connectivity. Never interactive.
 run_scheduled() {
     local mode="$1"; shift
-    # Before start_run_log: that claims the progress file, which would clobber
-    # the live run's. A skipped-busy run leaves no log of its own on purpose.
+    # Before start_run_log, which claims the progress file; a skipped run leaves
+    # no log on purpose.
     if ! acquire_lock; then
         echo "computer-setup ${mode}: skipped, another run is in progress (pid ${LOCK_HOLDER:-unknown})"
         exit 0
@@ -782,19 +681,14 @@ run_scheduled() {
         echo "──────────────────────────────────────────────────────────"
     } >> "$RUN_LOG"
 
-    # EXPORTED, not scoped to the probe. A command-prefix assignment would apply
-    # to `git ls-remote` alone, leaving the layer sync and the ansible-pull free
-    # to hit an interactive host-key or passphrase prompt — inside a LaunchAgent
-    # with no TTY, that hangs forever. BatchMode makes any such prompt an
-    # immediate failure instead.
+    # Exported, not a per-command prefix: otherwise the layer sync and ansible-pull
+    # could hang on a host-key or passphrase prompt with no TTY.
+    # BatchMode turns any such prompt into an immediate failure.
     export GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=${CONNECTIVITY_TIMEOUT} -o StrictHostKeyChecking=accept-new"
 
-    # Probe the transport we actually use: an SSH git fetch against the real
-    # repo. An HTTPS probe passes on networks that allow 443 but block 22
-    # (corporate wifi, hotels, captive portals); the pull then fails and fires a
-    # "check failed" notification indistinguishable from a real breakage. A
-    # closed laptop, a blocked port and an expired key are all "can't work right
-    # now", not "your config is broken".
+    # Probe the transport we use (SSH to the real repo): an HTTPS probe passes
+    # where port 22 is blocked, and the pull would then fail like a real breakage.
+    # Offline, a blocked port and a bad key all mean "can't work now".
     if ! repo_reachable; then
         log "RESULT: skipped — ${REPO_URL} unreachable (offline, port 22 blocked, or SSH key unavailable)"
         exit 0
@@ -802,15 +696,12 @@ run_scheduled() {
 
     sync_layers >> "$RUN_LOG" 2>&1 || log "WARN: layer sync failed; continuing with cached content"
 
-    # check:   -e homebrew_update=false — `state=present` never upgrades, so
-    #          refreshing the Homebrew index adds time with zero detection value.
-    # upgrade: formulae/Galaxy/Node only; casks need sudo and there's no TTY.
+    # check:   -e homebrew_update=false: `state=present` never upgrades, so the
+    #          index refresh detects nothing.
+    # upgrade: formulae/Galaxy/Node only; casks need sudo, which has no TTY here.
     #
-    # BOTH are non-interactive. A LaunchAgent has no terminal and no one
-    # watching, so anything that would prompt — a cask's sudo, an `auth login`
-    # browser flow — must be reported rather than attempted. It is passed for
-    # every scheduled mode rather than only where it is needed today, because
-    # the next thing that prompts should be safe by default.
+    # Non-interactive in every scheduled mode: anything that would prompt is
+    # reported instead.
     local -a mode_args=(-e computer_setup_interactive=false)
     if [[ "$mode" == "check" ]]; then
         mode_args+=(-e homebrew_update=false --check --diff)
@@ -820,8 +711,7 @@ run_scheduled() {
     fi
 
     local pull_out rc changed_count partial=0
-    # The scheduled upgrade is `--tags upgrade`, so like the interactive one it
-    # is never a statement about the whole machine. The scheduled CHECK is.
+    # The scheduled upgrade is partial (`--tags upgrade`); the scheduled check is not.
     [[ "$mode" == "upgrade" || $# -gt 0 ]] && partial=1
     state_env "$mode" "$partial"
     pull_out=$("$ANSIBLE_PULL" "${ARGS[@]}" "${mode_args[@]}" local.yml "$@" 2>&1)
@@ -835,16 +725,13 @@ run_scheduled() {
         exit "$rc"
     fi
 
-    # Read the count from the state file the callback plugin wrote, NOT from the
-    # console output. ansible-pull emits its own checkout play alongside the real
-    # one, with [WARNING] lines interleaved between them, so every text-based
-    # count has to guess which recap is which. The plugin runs inside the play
-    # and simply knows. Missing file or key leaves it non-numeric, hence 0.
+    # From the callback's state file, not console output: ansible-pull prints two
+    # recaps, interleaved with warnings. A missing file or key leaves it
+    # non-numeric, hence 0.
     changed_count=$(yq -r '.totals.changed' "$LAST_RUN_FILE" 2>/dev/null)
     [[ "$changed_count" =~ ^[0-9]+$ ]] || changed_count=0
 
-    # Only a run that actually reached the repo and finished gets here, which is
-    # exactly what "still syncing" means.
+    # Only a run that reached the repo and finished writes these stamps.
     local ts
     ts=$(date '+%Y-%m-%dT%H:%M:%S%z')
     printf '%s\n' "$ts" > "$LAST_SUCCESS_FILE" 2>/dev/null || true
@@ -872,12 +759,8 @@ run_scheduled() {
     exit 0
 }
 
-# `layers sync`/`layers lint` default to the manifest/cache this orchestrator
-# already uses everywhere else (see sync_layers() above) — without this, the
-# interactive command contradicts its own usage text, which promises "layers
-# sync" refreshes the cache with no further arguments. An explicit
-# --manifest/--cache on the command line still wins, so overriding for a one-off
-# invocation (e.g. linting a manifest that isn't deployed yet) keeps working.
+# `layers sync`/`lint` default to the cache and manifest this runner uses; an
+# explicit --manifest/--cache still wins.
 has_arg() {
     local want="$1" a
     shift
