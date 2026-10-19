@@ -1,13 +1,12 @@
 ---
 # Second phase of the manifest contract: what happens when a path STOPS being
-# managed. Same fixture directory as tests/manifest.yml, minus the looped files
-# and the backup — so running this after it makes those paths orphans.
+# managed. Run after tests/manifest.yml with the same `m` (scratch dir, passed
+# with -e): this declares the same directory minus the looped files
+# and the backup, so those paths become orphans.
 - name: Exercise orphan detection
   hosts: localhost
   connection: local
   gather_facts: false
-  vars:
-    m: /tmp/cs-manifest-contract
   tasks:
     - name: A managed directory
       ansible.builtin.file:

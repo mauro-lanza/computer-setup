@@ -14,8 +14,6 @@
   hosts: localhost
   connection: local
   gather_facts: false
-  vars:
-    m: /tmp/cs-manifest-contract
   tasks:
     - name: A managed directory
       ansible.builtin.file:

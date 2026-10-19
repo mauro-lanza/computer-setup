@@ -296,6 +296,7 @@ echo "==> bootstrap capability merge"
     MACHINE_FILE="$REPO_ROOT/tests/fixtures/machine.yml"
     load_capabilities >/dev/null 2>&1
     cp "$MERGED_CAPABILITIES_FILE" "$WORK/merged.tsv"
+    rm -f "$MERGED_CAPABILITIES_FILE"
 )
 merged_ids="$(cut -d"$FS_U" -f1 "$WORK/merged.tsv" | tr '\n' ' ' | sed 's/ $//')"
 assert_eq "layers merge highest-priority-first, deduped by id" \
@@ -550,6 +551,7 @@ assert_eq "run_playbook passes the repo, branch, pull dir and repo URL to ansibl
     MACHINE_FILE="$REPO_ROOT/tests/fixtures/machine.yml"
     load_questions >/dev/null 2>&1
     cp "$MERGED_QUESTIONS_FILE" "$WORK/merged-q.tsv"
+    rm -f "$MERGED_QUESTIONS_FILE"
 )
 assert_eq "questions merge deduped by id" \
     "editor unanswered repositories-dir drift-agents git-email" \
@@ -568,6 +570,7 @@ echo "==> bootstrap presets"
     MACHINE_FILE="$REPO_ROOT/tests/fixtures/machine.yml"
     load_presets >/dev/null 2>&1
     cp "$MERGED_PRESETS_FILE" "$WORK/presets.tsv"
+    rm -f "$MERGED_PRESETS_FILE"
 )
 assert_eq "presets load from layers" "everything nothing" \
     "$(cut -d"$FS_U" -f1 "$WORK/presets.tsv" | tr '\n' ' ' | sed 's/ $//')"

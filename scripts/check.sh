@@ -65,9 +65,6 @@ run_section() {
     echo "==> $name ... ok"
 }
 
-# Fixed path that tests/manifest.yml and tests/orphans.yml write to.
-cs_mscratch=/tmp/cs-manifest-contract
-
 # cs_run MODE PARTIAL ID [VAR=VAL...] playbook [args]: quiet ansible-playbook with
 # the run env scoped to this one call.
 cs_run() {
@@ -481,20 +478,20 @@ PY
 section_manifest() {
 echo "==> Manifest contract"
 cs_mdir="$(mktemp -d "$CS_TMP/manifest.XXXXXX")"
-rm -rf -- "$cs_mscratch"
+cs_mscratch="$cs_mdir/scratch"
 cs_run apply 0 contract-1 CS_MANIFEST_FILE="$cs_mdir/managed-paths.json" \
-    CS_HISTORY_FILE="$cs_mdir/history.jsonl" tests/manifest.yml
+    CS_HISTORY_FILE="$cs_mdir/history.jsonl" tests/manifest.yml -e "m=$cs_mscratch"
 # A second run with the SAME run id: ansible-pull can reach the callback's final
 # hook more than once per invocation, and history is appended, so without a key
 # one run would leave two lines.
 cs_run apply 0 contract-1 CS_MANIFEST_FILE="$cs_mdir/managed-paths.json" \
-    CS_HISTORY_FILE="$cs_mdir/history.jsonl" tests/manifest.yml
+    CS_HISTORY_FILE="$cs_mdir/history.jsonl" tests/manifest.yml -e "m=$cs_mscratch"
 # A third, with a new id and narrowed — the shape of a `--tags` run.
 cs_run check 1 contract-2 CS_MANIFEST_FILE="$cs_mdir/managed-paths.json" \
-    CS_HISTORY_FILE="$cs_mdir/history.jsonl" tests/manifest.yml
+    CS_HISTORY_FILE="$cs_mdir/history.jsonl" tests/manifest.yml -e "m=$cs_mscratch"
 cs_py "$cs_mdir" <<'PY'
 m = load("managed-paths.json")
-base = "/tmp/cs-manifest-contract"
+base = os.path.join(d, "scratch")
 
 assert m["schema_version"] == 1, m["schema_version"]
 files = {e["path"] for e in m["files"]}
@@ -574,16 +571,17 @@ print("  ok  a fresh machine's manifest includes loop-created files")
 PYEOF
 
 # Phase two: a path that STOPS being managed. Same fixture directory, fewer
-# declared files — so what tests/manifest.yml wrote is now unmanaged and still
-# on disk. Report-only; nothing here deletes anything.
-cs_run apply 0 contract-3 CS_MANIFEST_FILE="$cs_mdir/managed-paths.json" tests/orphans.yml
+# declared files — so what tests/manifest.yml wrote (the same `m` scratch dir;
+# this phase depends on it) is now unmanaged and still on disk. Report-only;
+# nothing here deletes anything.
+cs_run apply 0 contract-3 CS_MANIFEST_FILE="$cs_mdir/managed-paths.json" tests/orphans.yml -e "m=$cs_mscratch"
 # Twice, because an orphan must SURVIVE the next run. A naive
 # previous-minus-current diff reports it once and then silently forgets it,
 # while the file is still sitting there.
-cs_run apply 0 contract-4 CS_MANIFEST_FILE="$cs_mdir/managed-paths.json" tests/orphans.yml
+cs_run apply 0 contract-4 CS_MANIFEST_FILE="$cs_mdir/managed-paths.json" tests/orphans.yml -e "m=$cs_mscratch"
 cs_py "$cs_mdir" <<'PYEOF'
 m = load("managed-paths.json")
-base = "/tmp/cs-manifest-contract"
+base = os.path.join(d, "scratch")
 orphans = {e["path"]: e for e in m["orphans"]}
 
 # Dropped from the declaration, still on disk, and still reported after a
@@ -614,10 +612,10 @@ PYEOF
 # this the list only ever grows, and a report that never shrinks is one nobody
 # reads. The check is `lexists`, so a broken symlink still counts as present.
 rm -f -- "$cs_mscratch/looped-a.conf"
-cs_run apply 0 contract-5 CS_MANIFEST_FILE="$cs_mdir/managed-paths.json" tests/orphans.yml
+cs_run apply 0 contract-5 CS_MANIFEST_FILE="$cs_mdir/managed-paths.json" tests/orphans.yml -e "m=$cs_mscratch"
 cs_py "$cs_mdir" <<'PYEOF'
 m = load("managed-paths.json")
-base = "/tmp/cs-manifest-contract"
+base = os.path.join(d, "scratch")
 orphans = {e["path"] for e in m["orphans"]}
 
 assert f"{base}/looped-a.conf" not in orphans, "a deleted orphan is still reported"
@@ -631,7 +629,7 @@ PYEOF
 # would otherwise block every later manifest without a word.
 for cs_garbage in '[]' '{"files": null, "orphans": "x"}'; do
     printf '%s\n' "$cs_garbage" > "$cs_mdir/managed-paths.json"
-    cs_run apply 0 contract-6 CS_MANIFEST_FILE="$cs_mdir/managed-paths.json" tests/orphans.yml
+    cs_run apply 0 contract-6 CS_MANIFEST_FILE="$cs_mdir/managed-paths.json" tests/orphans.yml -e "m=$cs_mscratch"
     cs_py "$cs_mdir" "$cs_garbage" <<'PYEOF'
 m = load("managed-paths.json")
 assert isinstance(m, dict) and m["files"], \
@@ -639,7 +637,6 @@ assert isinstance(m, dict) and m["files"], \
 PYEOF
 done
 echo "  ok  a malformed previous manifest does not stop the next one being written"
-rm -rf -- "$cs_mscratch"
 }
 
 # A progress file is only useful if a reader can distinguish "running" from
@@ -649,14 +646,13 @@ rm -rf -- "$cs_mscratch"
 section_progress() {
 echo "==> Live progress"
 cs_pdir="$(mktemp -d "$CS_TMP/progress.XXXXXX")"
-rm -rf -- "$cs_mscratch"
 cs_run apply 0 prog-1 CS_PROGRESS_FILE="$cs_pdir/progress.jsonl" \
-    CS_HISTORY_FILE="$cs_pdir/history.jsonl" tests/manifest.yml
+    CS_HISTORY_FILE="$cs_pdir/history.jsonl" tests/manifest.yml -e "m=$cs_pdir/scratch"
 # A second run must REPLACE the file, not append to it. Appending would leave a
 # reader seeing the previous run's tasks as this run's, and a progress bar that
 # starts at 100%.
 cs_run apply 0 prog-2 CS_PROGRESS_FILE="$cs_pdir/progress.jsonl" \
-    CS_HISTORY_FILE="$cs_pdir/history.jsonl" tests/manifest.yml
+    CS_HISTORY_FILE="$cs_pdir/history.jsonl" tests/manifest.yml -e "m=$cs_pdir/scratch"
 cs_py "$cs_pdir" <<'PYEOF'
 lines = jsonl("progress.jsonl")
 
@@ -692,7 +688,6 @@ hist = jsonl("history.jsonl")
 assert hist[-1]["tasks"] == end["tasks"], hist[-1]
 print(f"  ok  {len(tasks)} tasks streamed, replaced not appended, end marker present")
 PYEOF
-rm -rf -- "$cs_mscratch"
 
 # MAX_RECORDED had never executed: the run-state contract asserts
 # `truncated is False` and nothing drove the other side. It matters on exactly
@@ -895,10 +890,10 @@ rm -rf -- "$cs_fscratch"
 # suite. Assert the run FAILS, and for the right reason.
 echo "==> Layer contract (negative paths)"
 expect_layer_failure() {
-    local case="$1" expect="$2" out
+    local case="$1" expect="$2" machine="${3:-machine.yml}" out
     out="$(ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook tests/negative.yml \
         -e computer_setup_layer_cache="$PWD/tests/fixtures/negative/$case/layers_cache" \
-        -e computer_setup_machine_file="$PWD/tests/fixtures/negative/$case/machine.yml" 2>&1)" && {
+        -e computer_setup_machine_file="$PWD/tests/fixtures/negative/${machine}" 2>&1)" && {
         echo "ERROR: negative case '$case' was ACCEPTED — the guard is not enforcing" >&2
         return 1
     }
@@ -911,9 +906,8 @@ expect_layer_failure() {
 }
 expect_layer_failure reserved "defines reserved key"
 expect_layer_failure schema "requires schema_version 99"
-# Reserved by PREFIX, not by name: the runner loads this key at extra-vars
-# precedence on every unattended run.
-expect_layer_failure prefix "defines reserved key"
+# Reserved by PREFIX, not by name: the engine's scheduled jobs read these keys.
+expect_layer_failure drift-prefix "defines reserved key"
 # Ansible's execution controls are reserved as a NAMESPACE. Enumerating five of
 # them left ansible_become_password and ansible_ssh_common_args reachable.
 expect_layer_failure ansible-prefix "defines reserved key"
@@ -933,7 +927,7 @@ expect_layer_failure question "question setting reserved key"
 expect_layer_failure machine-tier "defines reserved key"
 
 # A malformed machine declaration must abort, not continue with defaults.
-expect_layer_failure malformed-machine "YAML parsing failed"
+expect_layer_failure malformed-machine "YAML parsing failed" malformed-machine/machine.yml
 }
 
 # A pinned layer must stay put while origin moves, and unpinning must return it

@@ -1,5 +1,0 @@
----
-layers:
-  - name: bad
-    repo: git@github.com:example/bad.git
-    priority: 10
