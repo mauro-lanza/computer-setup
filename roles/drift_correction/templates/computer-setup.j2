@@ -43,30 +43,31 @@ LOG_DIR="{{ computer_setup_log_dir }}"
 LOG_RETENTION_DAYS={{ drift_correction_log_retention_days }}
 # Set per run by start_run_log.
 RUN_LOG=""
+STATE_DIR="{{ computer_setup_state_dir }}"
 # Machine-readable run state, written by the computer_setup_state callback
 # plugin (see callback_plugins/). `status` reads it; a UI could too. The plugin
 # is inert unless CS_STATE_FILE is exported, which is why every mode that wants
 # state recorded sets it explicitly.
-STATE_FILE="{{ computer_setup_state_dir }}/last-run.json"
+LAST_RUN_FILE="${STATE_DIR}/last-run.json"
 # Every filesystem path this system manages, rewritten each complete run. The
 # basis for auditing what the tool owns, and later for collecting what it has
 # stopped owning. Separate from last-run.json because it answers a different
 # question: that file is what HAPPENED, this is what IS.
-MANIFEST_FILE="{{ computer_setup_state_dir }}/managed-paths.json"
+MANIFEST_FILE="${STATE_DIR}/managed-paths.json"
 # One short JSON line per run, oldest trimmed; it outlives the pruned run logs.
-HISTORY_FILE="{{ computer_setup_state_dir }}/history.jsonl"
+HISTORY_FILE="${STATE_DIR}/history.jsonl"
 # LIVE progress, rewritten by every run: one line per task, flushed as it goes.
 # What a UI tails to show a run happening rather than a spinner. Transient by
 # design — the previous run's progress is of no interest to anyone.
-PROGRESS_FILE="{{ computer_setup_state_dir }}/progress.jsonl"
+PROGRESS_FILE="${STATE_DIR}/progress.jsonl"
 # Plain ISO timestamp of the last SCHEDULED run that reached the repo and
 # finished cleanly. Deliberately a separate one-line file rather than a field in
 # the JSON: it must survive a run that failed, and merging JSON in bash to
 # preserve one field is how you end up with neither.
-LAST_SUCCESS_FILE="{{ computer_setup_state_dir }}/last-success"
+LAST_SUCCESS_FILE="${STATE_DIR}/last-success"
 # Same, for the scheduled UPGRADE only. `last-success` is shared with the check,
 # so a daily passing check hides an upgrade that has not run for days.
-UPGRADE_SUCCESS_FILE="{{ computer_setup_state_dir }}/last-success-upgrade"
+UPGRADE_SUCCESS_FILE="${STATE_DIR}/last-success-upgrade"
 # Where this machine's declaration is backed up, and under what name. CONFIG,
 # not state: you choose it, it is hand-editable, and losing it means deciding
 # again. A file of its own rather than a key in machine.yml, because machine.yml
@@ -152,11 +153,11 @@ log() { printf '%s\n' "$*" >> "${RUN_LOG:-/dev/null}"; }
 # check can genuinely overlap. A directory is the lock because mkdir is atomic;
 # the pid inside lets a crashed run's lock be recognised and cleared. A run
 # suspended by sleep still has a live pid, which is correct: it still owns things.
-LOCK_DIR="{{ computer_setup_state_dir }}/run.lock"
+LOCK_DIR="${STATE_DIR}/run.lock"
 
 # Returns 0 with the lock held, 1 with the holder's pid in LOCK_HOLDER.
 acquire_lock() {
-    mkdir -p "$(dirname "$LOCK_DIR")" 2>/dev/null || true
+    mkdir -p "$STATE_DIR" 2>/dev/null || true
     # Twice: the second pass is after clearing a dead holder's lock.
     for _ in 1 2; do
         if mkdir "$LOCK_DIR" 2>/dev/null; then
@@ -203,7 +204,7 @@ start_run_log() {
 
     CS_RUN_ID="$$-$(date +%s)"
     export CS_RUN_ID
-    mkdir -p "$(dirname "$PROGRESS_FILE")" 2>/dev/null || true
+    mkdir -p "$STATE_DIR" 2>/dev/null || true
     printf '{"schema_version":1,"event":"launching","mode":"%s","run_id":"%s","started":"%s"}\n' \
         "$1" "$CS_RUN_ID" "$(date '+%Y-%m-%dT%H:%M:%S%z')" > "$PROGRESS_FILE" 2>/dev/null || true
     chmod 600 "$PROGRESS_FILE" 2>/dev/null || true
@@ -277,7 +278,7 @@ sync_layers() {
 # The args themselves are deliberately NOT recorded — `-e secret=…` is a
 # legitimate invocation, and this file is a report, not a shell history.
 state_env() {
-    CS_STATE_FILE="$STATE_FILE"
+    CS_STATE_FILE="$LAST_RUN_FILE"
     CS_MANIFEST_FILE="$MANIFEST_FILE"
     CS_HISTORY_FILE="$HISTORY_FILE"
     CS_PROGRESS_FILE="$PROGRESS_FILE"
@@ -422,8 +423,8 @@ cmd_upgrade() {
 # present. Missing file or missing key both yield empty, never an error: state is
 # a REPORT, and a machine with no report yet is not a broken machine.
 state_field() {
-    [[ -f "$STATE_FILE" ]] || return 0
-    yq -r "${1} // \"\"" "$STATE_FILE" 2>/dev/null | grep -v '^null$' || true
+    [[ -f "$LAST_RUN_FILE" ]] || return 0
+    yq -r "${1} // \"\"" "$LAST_RUN_FILE" 2>/dev/null | grep -v '^null$' || true
 }
 
 # Whole days since the last successful scheduled run; empty if there has never
@@ -443,8 +444,8 @@ days_since_success() {
 # on a path), so it is emitted tab-separated and the tab collapsed away here —
 # yq is mikefarah's, which has no jq-style `if/then/else` to inline it.
 state_task_list() {
-    [[ -f "$STATE_FILE" ]] || return 0
-    yq -r "${1}[] | \"  - \" + .task + \"\t\" + (.dest // .item // \"\")" "$STATE_FILE" 2>/dev/null \
+    [[ -f "$LAST_RUN_FILE" ]] || return 0
+    yq -r "${1}[] | \"  - \" + .task + \"\t\" + (.dest // .item // \"\")" "$LAST_RUN_FILE" 2>/dev/null \
         | sed -e 's/\t$//' -e 's/\t/  →  /' || true
 }
 
@@ -461,12 +462,12 @@ cmd_status() {
         printf '  "stale": %s,\n' "$( [[ -n "$days" && "$days" -ge "$STALE_AFTER_DAYS" ]] && echo true || echo false )"
         printf '  "days_since_upgrade_success": %s,\n' "$(days_since_success "$UPGRADE_SUCCESS_FILE" | grep . || echo null)"
         printf '  "last_run": '
-        if [[ -f "$STATE_FILE" ]]; then cat "$STATE_FILE"; else printf 'null\n'; fi
+        if [[ -f "$LAST_RUN_FILE" ]]; then cat "$LAST_RUN_FILE"; else printf 'null\n'; fi
         printf '}\n'
         return 0
     fi
 
-    if [[ ! -f "$STATE_FILE" ]]; then
+    if [[ ! -f "$LAST_RUN_FILE" ]]; then
         echo "No run recorded yet. Run \`computer-setup check\` to populate it."
         return 0
     fi
