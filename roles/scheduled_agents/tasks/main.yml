@@ -109,11 +109,11 @@
          | unique
          | difference(_scheduled_agents_wanted | map(attribute='label') | list) }}
   vars:
-    # `reject('equalto', '')` because an empty manifest splits to [''], which
-    # would otherwise reach the teardown loop as a label of "".
+    # Only a missing manifest is empty; an unreadable one must fail. Empty splits to [''], hence the reject.
     _previous: >-
-      {{ (lookup('ansible.builtin.file', scheduled_agents_manifest_path, errors='ignore')
-          | default('', true)).splitlines() | reject('equalto', '') | list }}
+      {{ (lookup('ansible.builtin.file', scheduled_agents_manifest_path)
+          if scheduled_agents_manifest_path is file else '').splitlines()
+         | reject('equalto', '') | list }}
 
 - name: Unload scheduled agents that no longer apply
   ansible.builtin.command:

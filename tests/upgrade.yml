@@ -2,8 +2,8 @@
 # The upgrade role's PREVIEW path (assume_yes false) with a stub `brew` first on
 # PATH that records its argv. Proves: only managed packages are queried, excluded
 # casks are left out, casks are skipped when include_casks is false, and a brew
-# error is reported as CHECK FAILED rather than "up to date". The apply path
-# needs real Homebrew modules and is not exercised here.
+# error is reported as CHECK FAILED rather than "up to date". The apply path is
+# exercised only for the nvm gate (no Homebrew modules: nothing is managed).
 - name: Upgrade role preview
   hosts: localhost
   connection: local
@@ -73,6 +73,64 @@
           # did not abort the preview.
           - (calls2.content | b64decode).count('--cask') == c.count('--cask')
           - (calls2.content | b64decode).count('--formula') == 2
+
+    # Apply path with nothing managed (so no Homebrew module runs), a stub
+    # ansible-galaxy and a stub nvm.sh that records its invocation: the Node
+    # step must run with the nvm capability active and not at all without it.
+    - name: Stub ansible-galaxy
+      ansible.builtin.copy:
+        dest: "{{ s.path }}/ansible-galaxy"
+        mode: "0755"
+        content: |
+          #!/bin/bash
+          exit 0
+
+    - name: Stub nvm.sh
+      ansible.builtin.copy:
+        dest: "{{ s.path }}/nvm.sh"
+        mode: "0644"
+        content: |
+          nvm() { echo "$*" >> "{{ s.path }}/nvm-calls"; }
+
+    - name: Apply with and without nvm
+      vars:
+        homebrew_managed_formulae: []
+        homebrew_managed_casks: []
+        upgrade_casks_exclude: []
+        runtimes_nvm_default_node: lts/*
+        runtimes_nvm_capability: nvm
+        runtimes_nvm_script_path: "{{ s.path }}/nvm.sh"
+        computer_setup_upgrade_assume_yes: true
+        computer_setup_runtime_bin: "{{ s.path }}"
+        computer_setup_state_dir: "{{ s.path }}/state"
+      environment:
+        PATH: "{{ s.path }}:{{ lookup('env', 'PATH') }}"
+      block:
+        - name: Run without nvm
+          ansible.builtin.include_role:
+            name: upgrade
+          vars:
+            computer_setup_active_capabilities: []
+        - name: Node step must not have run
+          ansible.builtin.stat:
+            path: "{{ s.path }}/nvm-calls"
+          register: nvm_off
+        - name: Run with nvm
+          ansible.builtin.include_role:
+            name: upgrade
+          vars:
+            computer_setup_active_capabilities: [nvm]
+        - name: Read nvm calls
+          ansible.builtin.slurp:
+            src: "{{ s.path }}/nvm-calls"
+          register: nvm_on
+
+    - name: Assert Node upgrade is gated on the nvm capability
+      ansible.builtin.assert:
+        that:
+          - not nvm_off.stat.exists
+          - "'install lts/* --latest-npm' in (nvm_on.content | b64decode)"
+        fail_msg: the apply path must run the nvm Node upgrade only when the nvm capability is active
 
     - name: Cleanup
       ansible.builtin.file:

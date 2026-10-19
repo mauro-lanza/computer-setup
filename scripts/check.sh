@@ -710,9 +710,9 @@ for t in logins upgrade; do
         exit 1
     }
 done
-# The preview names Node only while the nvm capability is active: once with it
-# on, once with it off.
-[[ "$(grep -c 'Node\.js lts' <<<"$lu_out")" == 1 ]] || {
+# The preview names Node only while the nvm capability is active: with it on in
+# the preview run and in the apply run, off in the other two.
+[[ "$(grep -c 'Node\.js lts' <<<"$lu_out")" == 2 ]] || {
     echo "ERROR: the upgrade preview must mention Node exactly when nvm is active" >&2
     printf '%s\n' "$lu_out" >&2
     exit 1
@@ -746,6 +746,30 @@ for expect in "2 macOS default(s)" "dom1 key1 (declared bool): mismatch-A" "dom2
 done
 [[ "$mr_out" != *"fine fine"* ]] || { echo "ERROR: a SUCCESSFUL default was reported as failed" >&2; exit 1; }
 echo "  ok  both failure sources reported, successes not"
+
+# Same lift for the cask report: the merged install loop registers one result
+# that this task must still collect failures from.
+echo "==> Cask failure report"
+cr_dir="$(mktemp -d)"
+yq '[.[0].post_tasks[] | select(.name == "Report casks that could not be installed")]' local.yml > "$cr_dir/task.yml"
+yq -n '[{"hosts":"localhost","connection":"local","gather_facts":false,"vars":{
+  "homebrew_cask_results":{"results":[
+    {"failed":true,"msg":"boom-A","item":"cask-bad-a"},
+    {"failed":false,"item":"cask-fine"},
+    {"failed":true,"msg":"boom-B","item":"cask-bad-b"}]}},
+  "tasks":[]}]' > "$cr_dir/pb.yml"
+yq -i ".[0].tasks = load(\"$cr_dir/task.yml\")" "$cr_dir/pb.yml"
+cr_out="$(ansible-playbook "$cr_dir/pb.yml" 2>&1 || true)"
+rm -rf -- "$cr_dir"
+for expect in "2 cask(s) could not be installed" "cask-bad-a: boom-A" "cask-bad-b: boom-B"; do
+    [[ "$cr_out" == *"$expect"* ]] || {
+        echo "ERROR: the cask failure report is missing '$expect'" >&2
+        printf '%s\n' "$cr_out" >&2
+        exit 1
+    }
+done
+[[ "$cr_out" != *"cask-fine:"* ]] || { echo "ERROR: a SUCCESSFUL cask was reported as failed" >&2; exit 1; }
+echo "  ok  failed casks collected and reported, successes not"
 
 echo "==> History rendering"
 hist_expr="$(sed -n "s/.*| yq -p json -r '\(.*\)' \\\\$/\1/p" \

@@ -95,8 +95,8 @@
 - name: Resolve stale shell snippets from previous manifest
   ansible.builtin.set_fact:
     shell_stale_snippets: >-
-      {{ ((lookup('ansible.builtin.file', shell_snippet_manifest_path, errors='ignore')
-           | default('', true)).splitlines()
+      {{ ((lookup('ansible.builtin.file', shell_snippet_manifest_path)
+            if shell_snippet_manifest_path is file else '').splitlines()
           + shell_snippet_candidate_paths)
          | reject('equalto', '')
          | unique
