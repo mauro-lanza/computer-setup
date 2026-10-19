@@ -14,21 +14,13 @@
     path: "{{ computer_setup_machine_file }}"
   register: machine_file
 
-- name: Load the machine declaration
+# Unnamed, so `answers`, `selected_capabilities` and `layers` land in play scope
+# when the playbook is run directly (every test entry point). Extra-vars from
+# the runner outrank it. A malformed file aborts here.
+- name: Read the machine declaration
+  ansible.builtin.include_vars:
+    file: "{{ computer_setup_machine_file }}"
   when: machine_file.stat.exists
-  block:
-    # Unnamed, so `answers` and `selected_capabilities` land in play scope.
-    # Redundant when the runner passes `-e @machine.yml`, and NOT redundant when
-    # the playbook is run directly — which is what every test entry point does.
-    - name: Read the machine declaration
-      ansible.builtin.include_vars:
-        file: "{{ computer_setup_machine_file }}"
-  rescue:
-    - name: Warn about a malformed machine declaration
-      ansible.builtin.debug:
-        msg: >-
-          WARNING: {{ computer_setup_machine_file }} is malformed or unreadable.
-          Re-run bootstrap.sh to regenerate. Continuing with defaults.
 
 - name: Seed the accumulated layer vars
   ansible.builtin.set_fact:
@@ -85,27 +77,13 @@
       - homebrew_prefix
       - repositories_base_dir
 
-- name: Check for a machine declaration
-  ansible.builtin.stat:
-    path: "{{ computer_setup_machine_file }}"
-  register: machine_file_stat
-
 - name: Load and merge content layers
-  when: machine_file_stat.stat.exists
+  when: machine_file.stat.exists
   block:
-    # Read into a NAMED var, not play scope. The file is also passed as
-    # `-e @machine.yml`, so `answers` and `selected_capabilities` already arrive
-    # as extra-vars; re-reading them here unnamed would shadow that with a lower
-    # precedence copy. Only `.layers` is wanted at this point.
-    - name: Read the machine declaration
-      ansible.builtin.include_vars:
-        file: "{{ computer_setup_machine_file }}"
-        name: _machine
-
     - name: Resolve active layers (ascending priority — highest wins last)
       ansible.builtin.set_fact:
         computer_setup_active_layers: >-
-          {{ (_machine.layers | default([], true))
+          {{ (layers | default([], true))
              | sort(attribute='priority') }}
 
     # ─── Questions and answers ────────────────────────────────────────────────

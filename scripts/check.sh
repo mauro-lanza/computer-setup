@@ -844,6 +844,9 @@ expect_layer_failure question "question setting reserved key"
 # layer var may set, or the tier becomes a hole rather than a door.
 expect_layer_failure machine-tier "defines reserved key"
 
+# A malformed machine declaration must abort, not continue with defaults.
+expect_layer_failure malformed-machine "YAML parsing failed"
+
 # Capabilities, questions and presets refer to each other by id, and every one of
 # those references fails SILENTLY when wrong — a preset naming a capability that
 # does not exist just selects nothing. The linter makes them loud.
