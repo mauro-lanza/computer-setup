@@ -196,22 +196,21 @@ echo "==> Bootstrap prompt behaviour"
 section_templates() {
 echo "==> Templated script syntax"
 check_template_syntax() {
-    local src="$1" shell="$2" tmp
+    local src="$1" tmp
     tmp="$(mktemp "$CS_TMP/template.XXXXXX")"
     sed -e 's/{{[^}]*}}/PLACEHOLDER/g' -e '/{%.*%}/d' "$src" > "$tmp"
-    if ! "$shell" -n "$tmp"; then
-        echo "ERROR: $src does not parse as $shell after de-templating" >&2
+    if ! bash -n "$tmp"; then
+        echo "ERROR: $src does not parse as bash after de-templating" >&2
         return 1
     fi
-    # Only bash templates get shellcheck: it has no zsh mode.
-    if [[ "$shell" == "bash" ]] && ! shellcheck -S style -s bash "$tmp"; then
+    if ! shellcheck -S style -s bash "$tmp"; then
         echo "ERROR: $src has shellcheck findings after de-templating" >&2
         return 1
     fi
     echo "  ok  $src"
 }
-check_template_syntax roles/drift_correction/templates/computer-setup.j2 bash
-check_template_syntax roles/macos/templates/macos-capture.sh.j2 bash
+check_template_syntax roles/drift_correction/templates/computer-setup.j2
+check_template_syntax roles/macos/templates/macos-capture.sh.j2
 
 # The sed above cannot see a template Jinja itself refuses to parse — and the
 # syntaxes collide: `${#arr[@]}` contains Jinja's comment-open `{#`. Parse each
@@ -401,12 +400,6 @@ cs_m pull alpha "$cs_m_tmp/out.yml" >/dev/null
 # DIFFERENT machine.
 diff -q tests/fixtures/machine.yml "$cs_m_tmp/out.yml" >/dev/null || {
     echo "ERROR: pulled backup does not match the pushed declaration" >&2; exit 1; }
-for cs_m_key in '.layers[]?' '.selected_capabilities[]?' '.answers'; do
-    yq -r "$cs_m_key" "$cs_m_tmp/out.yml" >/dev/null || {
-        echo "ERROR: pulled backup does not parse ($cs_m_key)" >&2; exit 1; }
-done
-[[ "$(yq -r '.layers | length' "$cs_m_tmp/out.yml")" -gt 0 ]] || {
-    echo "ERROR: restored declaration carries no layers" >&2; exit 1; }
 
 # Never clobber: a bad restore must always be recoverable.
 cs_m_expect_failure "Refusing to overwrite" pull alpha "$cs_m_tmp/out.yml" "${cs_m_flags[@]}"
@@ -981,13 +974,11 @@ echo "  ok  tag and sha pins hold, unpin follows the branch, bad refs rejected"
 # Cross-references (capability, question and preset ids) fail silently when wrong; the linter makes them loud.
 # `lint --machine`: an unknown selected id is an error, a known one is not.
 echo "==> Layer lint (machine selections)"
-./scripts/computer-setup-layers lint --cache tests/fixtures/layers_cache \
-    --machine tests/fixtures/machine.yml >/dev/null 2>&1 && {
+lm_out="$(./scripts/computer-setup-layers lint --cache tests/fixtures/layers_cache \
+    --machine tests/fixtures/machine.yml 2>&1)" && {
     echo "ERROR: lint --machine accepted the fixture's ghost" >&2
     exit 1
 }
-lm_out="$(./scripts/computer-setup-layers lint --cache tests/fixtures/layers_cache \
-    --machine tests/fixtures/machine.yml 2>&1 || true)"
 [[ "$lm_out" == *"selected_capabilities names 'ghost'"* && "$lm_out" != *"names 'nvm'"* ]] || {
     echo "ERROR: lint --machine reported the wrong ids: $lm_out" >&2
     exit 1
