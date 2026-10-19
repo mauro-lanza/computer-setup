@@ -427,13 +427,17 @@ state_field() {
     yq -r "${1} // \"\"" "$LAST_RUN_FILE" 2>/dev/null | grep -v '^null$' || true
 }
 
+# The stamp in a success file, whitespace stripped; empty if missing.
+read_stamp() {
+    [[ -f "$1" ]] || return 0
+    tr -d '[:space:]' < "$1"
+}
+
 # Whole days since the last successful scheduled run; empty if there has never
 # been one. `date -j -f` is BSD date — macOS only, which this whole system is.
 days_since_success() {
-    local file="${1:-$LAST_SUCCESS_FILE}"
-    [[ -f "$file" ]] || return 0
     local stamp then_ts now
-    stamp="$(tr -d '[:space:]' < "$file")"
+    stamp="$(read_stamp "${1:-$LAST_SUCCESS_FILE}")"
     [[ -n "$stamp" ]] || return 0
     then_ts=$(date -j -f '%Y-%m-%dT%H:%M:%S%z' "$stamp" '+%s' 2>/dev/null) || return 0
     now=$(date '+%s')
@@ -453,14 +457,16 @@ state_task_list() {
 UPGRADE_BEHIND_DAYS=3
 
 cmd_status() {
-    local days changed result mode finished dur partial truncated failed_n
+    local days changed result mode finished dur partial truncated failed_n stamp
     days="$(days_since_success)"
 
     if [[ "${1:-}" == "--json" ]]; then
         # Composed rather than echoed: staleness is derived, and a consumer
         # should not have to reimplement the date maths to get it.
         printf '{\n'
-        printf '  "last_success": "%s",\n' "$(cat "$LAST_SUCCESS_FILE" 2>/dev/null | tr -d '[:space:]')"
+        stamp="$(read_stamp "$LAST_SUCCESS_FILE")"
+        if [[ -n "$stamp" ]]; then stamp="\"$stamp\""; else stamp=null; fi
+        printf '  "last_success": %s,\n' "$stamp"
         printf '  "days_since_success": %s,\n' "${days:-null}"
         printf '  "stale": %s,\n' "$( [[ -n "$days" && "$days" -ge "$STALE_AFTER_DAYS" ]] && echo true || echo false )"
         printf '  "days_since_upgrade_success": %s,\n' "$(days_since_success "$UPGRADE_SUCCESS_FILE" | grep . || echo null)"
@@ -552,11 +558,9 @@ cmd_manifest() {
     fi
 
     local generated n_files n_dirs n_backups n_orphans
-    generated="$(yq -r '.generated // ""' "$MANIFEST_FILE" 2>/dev/null)"
-    n_files="$(yq -r '.files | length' "$MANIFEST_FILE" 2>/dev/null)"
-    n_dirs="$(yq -r '.directories | length' "$MANIFEST_FILE" 2>/dev/null)"
-    n_backups="$(yq -r '.backups | length' "$MANIFEST_FILE" 2>/dev/null)"
-    n_orphans="$(yq -r '.orphans // [] | length' "$MANIFEST_FILE" 2>/dev/null)"
+    IFS='|' read -r generated n_files n_dirs n_backups n_orphans < <(
+        yq -r '[.generated // "", (.files | length), (.directories | length), (.backups | length), (.orphans // [] | length)] | join("|")' "$MANIFEST_FILE" 2>/dev/null
+    ) || true
 
     # Only a complete run writes this file, so it is always the last full
     # picture — but it may predate the last run, and saying when it was taken is
@@ -565,7 +569,7 @@ cmd_manifest() {
     echo
     echo "Files (${n_files:-0}):"
     yq -r '.files[] | "  " + .path + "\t" + (.role // "-")' "$MANIFEST_FILE" 2>/dev/null \
-        | column -t -s $'\t' 2>/dev/null || yq -r '.files[].path' "$MANIFEST_FILE"
+        | column -t -s $'\t'
     echo
     echo "Directories (${n_dirs:-0}):"
     yq -r '.directories[] | "  " + .path' "$MANIFEST_FILE" 2>/dev/null
@@ -583,8 +587,7 @@ cmd_manifest() {
         echo
         echo "No longer managed, still on disk (${n_orphans}):"
         yq -r '.orphans[] | "  " + .path + "\t" + ("was " + (.role // "?")) + "\tsince " + (.since // "?")' \
-            "$MANIFEST_FILE" 2>/dev/null | column -t -s $'\t' 2>/dev/null \
-            || yq -r '.orphans[].path' "$MANIFEST_FILE" 2>/dev/null
+            "$MANIFEST_FILE" 2>/dev/null | column -t -s $'\t'
         echo
         echo "  Nothing is deleted automatically. Remove what you recognise."
     fi
