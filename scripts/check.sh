@@ -3,10 +3,65 @@ set -euo pipefail
 
 cd "$(dirname "$0")/.."
 
-# Run the gate against the PINNED runtime, not whatever `ansible` happens to be
-# on PATH. Testing a different ansible-core than production runs is how a suite
-# stays green while the fleet breaks — and after pinning there may be no
-# `ansible` on PATH at all, which would silently skip every playbook check.
+# Section names, in run order. Each is a function of the same name with `-`
+# turned into `_`, defined below.
+SECTIONS=(shellcheck bootstrap templates syntax contract machine run-state
+          manifest progress roles runner negative layers agreement ansible-lint)
+
+verbose="${CS_CHECK_VERBOSE:-0}"
+selected=()
+for arg in "$@"; do
+    case "$arg" in
+        --list) printf '%s\n' "${SECTIONS[@]}"; exit 0 ;;
+        -v) verbose=1 ;;
+        -*) echo "ERROR: unknown option '$arg' (options: -v, --list)" >&2; exit 2 ;;
+        *)
+            if [[ " ${SECTIONS[*]} " != *" $arg "* ]]; then
+                echo "ERROR: unknown section '$arg'" >&2
+                echo "       valid sections: ${SECTIONS[*]}" >&2
+                exit 2
+            fi
+            selected+=("$arg")
+            ;;
+    esac
+done
+if (( ${#selected[@]} == 0 )); then
+    selected=("${SECTIONS[@]}")
+fi
+
+LOG="$(mktemp "${TMPDIR:-/tmp}/computer-setup-check.XXXXXX")"
+echo "log: $LOG"
+
+# Plain command, not under if/||: those disable set -e inside the section.
+run_section() {
+    local name="$1" sec_log rc
+    sec_log="$(mktemp)"
+    set +e
+    if [[ "$verbose" == 1 ]]; then
+        ( set -e; "section_${name//-/_}" ) 2>&1 | tee "$sec_log"
+        rc="${PIPESTATUS[0]}"
+    else
+        ( set -e; "section_${name//-/_}" ) >"$sec_log" 2>&1
+        rc=$?
+    fi
+    set -e
+    cat "$sec_log" >> "$LOG"
+    if (( rc != 0 )); then
+        echo "==> $name ... FAILED"
+        if [[ "$verbose" != 1 ]]; then
+            tail -n 40 "$sec_log"
+        fi
+        echo "log: $LOG"
+        rm -f "$sec_log"
+        exit 1
+    fi
+    rm -f "$sec_log"
+    echo "==> $name ... ok"
+}
+
+# Test the pinned runtime, not whatever `ansible` is on PATH: another core hides production breakage.
+# Runs in the current shell, since it exports PATH and the mitogen strategy.
+preamble() {
 RUNTIME_BIN="$HOME/.local/share/computer-setup/runtime/bin"
 if [[ ! -x "$RUNTIME_BIN/ansible-playbook" ]]; then
     echo "ERROR: the pinned engine runtime is missing." >&2
@@ -45,11 +100,28 @@ else
     echo "       Reconcile it:  computer-setup apply --tags runtime" >&2
     exit 1
 fi
+# Ansible's own interpreter: the only one guaranteed to have Jinja2 installed.
+CS_PY="$(head -1 "$(command -v ansible)" | sed 's/^#!//')"
+[[ -x "$CS_PY" ]] || CS_PY=python3
+}
+
+preamble_log="$(mktemp)"
+trap 'rc=$?; if (( rc != 0 )) && [[ -n "$preamble_log" ]]; then tail -n 40 "$preamble_log" >&2; echo "log: $LOG" >&2; fi' EXIT
+if [[ "$verbose" == 1 ]]; then
+    preamble
+else
+    preamble >"$preamble_log" 2>&1
+fi
+cat "$preamble_log" >> "$LOG"
+rm -f "$preamble_log"
+preamble_log=""
+echo "==> runtime ... ok"
 
 # Every bash file here is linted by shellcheck (a parse error fails it too), and a
 # FAILURE when absent for the same reason ansible-lint is: a fresh machine is
 # where the tool is missing and where "passed" has to mean it. Findings are
 # waived inline, at the line, with a reason — never globally.
+section_shellcheck() {
 echo "==> shellcheck"
 if ! command -v shellcheck >/dev/null 2>&1; then
     echo "ERROR: shellcheck is not installed, so this gate cannot run." >&2
@@ -59,20 +131,20 @@ if ! command -v shellcheck >/dev/null 2>&1; then
 fi
 shellcheck -S style -x bootstrap.sh scripts/* tests/*.sh
 echo "  ok  no findings"
+}
 
 # `bash -n` proves bootstrap.sh parses, not that the prompt loop works — and
 # that loop only runs on a fresh machine, where nobody is watching it fail.
 # These drive it with scripted answers.
+section_bootstrap() {
 echo "==> Bootstrap prompt behaviour"
 ./tests/bootstrap-prompts.sh
+}
 
 # Templated shell only becomes shell after rendering, so a broken runner would
 # first surface inside a LaunchAgent at 09:00. De-template and check the skeleton.
+section_templates() {
 echo "==> Templated script syntax"
-# Templated scripts cannot be linted in place — Jinja is not shell. De-template
-# first (placeholders for {{ }}, drop {% %} lines), then parse AND shellcheck.
-# Every templated script is bash now, which is the point: shellcheck has no zsh
-# mode, so a zsh template would be parse-checked only.
 check_template_syntax() {
     local src="$1" shell="$2" tmp
     tmp="$(mktemp)"
@@ -82,6 +154,7 @@ check_template_syntax() {
         echo "ERROR: $src does not parse as $shell after de-templating" >&2
         return 1
     fi
+    # Only bash templates get shellcheck: it has no zsh mode.
     if [[ "$shell" == "bash" ]] && ! shellcheck -S style -s bash "$tmp"; then
         rm -f "$tmp"
         echo "ERROR: $src has shellcheck findings after de-templating" >&2
@@ -97,9 +170,6 @@ check_template_syntax roles/macos/templates/macos-capture.sh.j2 bash
 # syntaxes collide: `${#arr[@]}` contains Jinja's comment-open `{#`. Parse each
 # template with the same Jinja2 Ansible uses.
 echo "==> Template parses as Jinja"
-# Ansible's own interpreter: the only one guaranteed to have Jinja2 installed.
-CS_PY="$(head -1 "$(command -v ansible)" | sed 's/^#!//')"
-[[ -x "$CS_PY" ]] || CS_PY=python3
 "$CS_PY" - <<'PY'
 import sys, pathlib
 from jinja2 import Environment
@@ -133,7 +203,9 @@ assert cb.CALLBACK_NEEDS_ENABLED is True, "must be opt-in via callbacks_enabled"
 assert isinstance(m.STATE_SCHEMA_VERSION, int)
 print("  ok  aggregate, opt-in, schema_version =", m.STATE_SCHEMA_VERSION)
 PY
+}
 
+section_syntax() {
 echo "==> Ansible syntax"
 ansible-playbook --syntax-check local.yml
 ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook --syntax-check tests/contract.yml
@@ -163,7 +235,9 @@ ansible-playbook --list-tasks --tags repositories local.yml >/dev/null
 
 echo "==> Upgrade task graph"
 ansible-playbook --list-tasks --tags upgrade local.yml >/dev/null
+}
 
+section_contract() {
 echo "==> Layer contract"
 ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook tests/contract.yml >/dev/null
 
@@ -196,14 +270,6 @@ done
 rm -rf -- "$sh_scratch"
 echo "  ok  copy, render, gate, a deleted snippet and a missing directory are handled"
 
-# The state file is a CONSUMED INTERFACE: `computer-setup status` reads it, and
-# a UI would too. Assert its shape, and — the point of the whole design — that
-# no file CONTENT reaches it. Ansible's diffs carry before/after payloads; the
-# plugin must record only task, action and dest.
-# `computer-setup machine` is git plumbing that only ever runs by hand, which is
-# where bit-rot hides. Driven against a LOCAL bare repo — no network, no gh, no
-# GitHub account — so the gate works on a fresh machine and in CI. `init` is the
-# only subcommand not covered: it is the one that needs an authenticated gh.
 # Two roles declaring the SAME directory with DIFFERENT modes is invisible until
 # it ships: one role sets the mode, the other reports drift on it, forever. That
 # is exactly what happened to ~/.local/state/computer-setup -- 0755 from the
@@ -236,11 +302,13 @@ if rc:
     sys.exit(rc)
 print("  ok  %d managed directories, no conflicting modes" % len(decls))
 CSPY
+}
 
 # `computer-setup-machine` is git plumbing that only runs by hand or on a fresh
 # machine, which is where bit-rot hides. Driven against a LOCAL bare repo — no
 # network, no gh, no GitHub account — so the gate works on a fresh machine and
 # in CI. `init` is the only subcommand not covered: it needs an authenticated gh.
+section_machine() {
 echo "==> Machine backup round-trip"
 cs_m_tmp="$(mktemp -d)"
 mkdir -p "$cs_m_tmp/cfg"
@@ -320,7 +388,11 @@ cs_m_expect_failure "Refusing to overwrite" pull alpha "$cs_m_tmp/out.yml" "${cs
 cs_m_expect_failure "No backup named" pull nonexistent "$cs_m_tmp/x.yml" "${cs_m_flags[@]}"
 rm -rf "$cs_m_tmp"
 echo "  ok  push, idempotent re-push, list, names, pull, and both refusals"
+}
 
+# The state file is a consumed interface (`computer-setup status`, and a UI later).
+# Diffs carry before/after payloads, so the plugin must record only task, action and dest.
+section_run_state() {
 echo "==> Run state contract"
 rm -f /tmp/cs-state-contract-template.txt /tmp/cs-state-contract-loop-a.txt /tmp/cs-state-contract-loop-b.txt
 cs_state="$(mktemp -d)/last-run.json"
@@ -388,10 +460,12 @@ assert mode == 0o600, oct(mode)
 print("  ok  shape, 0600, and no file contents recorded")
 PY
 rm -rf "$(dirname "$cs_state")"
+}
 
 # The manifest is the basis for deciding a path is no longer managed, so what it
 # OMITS matters as much as what it lists. Each omission below is deliberate and
 # would be invisible if it regressed.
+section_manifest() {
 echo "==> Manifest contract"
 cs_mdir="$(mktemp -d)"
 cs_mscratch=/tmp/cs-manifest-contract
@@ -579,11 +653,13 @@ PYEOF
 done
 echo "  ok  a malformed previous manifest does not stop the next one being written"
 rm -rf -- "$cs_mdir" "$cs_mscratch"
+}
 
 # A progress file is only useful if a reader can distinguish "running" from
 # "finished" from "died half way", and if the file describes THIS run rather
 # than an interleaving of two. Both are easy to get wrong and invisible when
 # wrong: the run still succeeds either way.
+section_progress() {
 echo "==> Live progress"
 cs_pdir="$(mktemp -d)"
 cs_pscratch=/tmp/cs-manifest-contract
@@ -671,14 +747,11 @@ assert m["complete"] is True, m["complete"]
 print("  ok  drift truncates and says so; the inventory does not")
 PY
 rm -rf -- "$cs_tdir" "$cs_tscratch"
+}
 
-# `computer-setup history` renders through a yq expression, and a broken one
-# fails SILENTLY: the header still prints and the rows simply vanish. That is
-# how a jq-style `if/then/else` shipped — yq here is mikefarah's, which has no
-# such construct. Lifted out of the template rather than duplicated, so the
-# thing under test is the thing that runs.
 # Roles against pre-existing user state, and the rendered runner's scheduled path
 # with git/ansible-pull stubbed. Output is captured and re-printed on failure.
+section_roles() {
 echo "==> Role robustness"
 rb_out="$(ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook tests/robustness.yml 2>&1)" || {
     printf '%s\n' "$rb_out" >&2
@@ -718,6 +791,9 @@ done
     exit 1
 }
 echo "  ok  logins detect/remedy gating, upgrade preview queries only managed packages"
+}
+
+section_runner() {
 echo "==> Scheduled runner"
 ./tests/runner.sh
 
@@ -772,6 +848,8 @@ done
 echo "  ok  failed casks collected and reported, successes not"
 
 echo "==> History rendering"
+# A broken yq expression fails silently (rows vanish), so check the rendered rows.
+# Lifted from the runner template, so the tested expression is the one that runs.
 hist_expr="$(sed -n "s/.*| yq -p json -r '\(.*\)' \\\\$/\1/p" \
     roles/drift_correction/templates/computer-setup.j2)"
 if [[ -z "$hist_expr" ]]; then
@@ -802,11 +880,13 @@ if [[ "$(printf '%s\n' "$hist_out" | tail -1)" \
     exit 1
 fi
 echo "  ok  2 rows, fields in the order awk expects"
+}
 
 # `result` was derived from a stats key Ansible does not emit ("failed" rather
 # than "failures"), so every failed run reported itself as ok. `complete` is
 # derived from the same total, which would have authorised collection after a
 # run that never finished.
+section_negative() {
 echo "==> Failure is reported as failure"
 cs_fdir="$(mktemp -d)"
 cs_fscratch=/tmp/cs-failure-contract
@@ -905,12 +985,11 @@ expect_layer_failure machine-tier "defines reserved key"
 
 # A malformed machine declaration must abort, not continue with defaults.
 expect_layer_failure malformed-machine "YAML parsing failed"
+}
 
-# Capabilities, questions and presets refer to each other by id, and every one of
-# those references fails SILENTLY when wrong — a preset naming a capability that
-# does not exist just selects nothing. The linter makes them loud.
 # A pinned layer must stay put while origin moves, and unpinning must return it
 # to the branch. Real local repos, no network. Captured, never piped into grep -q.
+section_layers() {
 echo "==> Layer sync (pinned ref)"
 _pd="$(mktemp -d)"
 git init -q -b main "$_pd/src"
@@ -944,6 +1023,7 @@ pin_out="$(pin_sync)" && { echo "ERROR: an unknown ref was ACCEPTED" >&2; exit 1
 rm -rf "$_pd"
 echo "  ok  tag and sha pins hold, unpin follows the branch, bad refs rejected"
 
+# Cross-references (capability, question and preset ids) fail silently when wrong; the linter makes them loud.
 # `lint --machine`: an unknown selected id is an error, a known one is not.
 echo "==> Layer lint (machine selections)"
 ./scripts/computer-setup-layers lint --cache tests/fixtures/layers_cache \
@@ -1003,6 +1083,7 @@ do
     fi
 done
 echo "  ok  all 10 broken references rejected"
+}
 
 # The highest supported layer schema_version is stated in three places that
 # cannot import from each other: bootstrap.sh runs before any checkout exists
@@ -1010,6 +1091,7 @@ echo "  ok  all 10 broken references rejected"
 # is therefore forced — but disagreement is not. A bump that updates only one
 # would let bootstrap accept a layer the engine then rejects, on a fresh machine,
 # mid-provision. Assert them equal instead of documenting that they should be.
+section_agreement() {
 echo "==> Schema version agreement"
 sv_bootstrap="$(sed -n 's/^SCHEMA_VERSION_MAX=\([0-9]*\)$/\1/p' bootstrap.sh)"
 sv_playbook="$(yq -r '.[0].vars.computer_setup_schema_version' local.yml)"
@@ -1065,10 +1147,12 @@ for v in LAYER_CACHE RUNTIME_DIR BACKUP_REPO_DIR; do
     fi
 done
 echo "  ok  bootstrap.sh and local.yml agree on ~/$data_playbook"
+}
 
 # A gate, not an advisory: .ansible-lint waives the two rules that contradict
 # this architecture, so any finding is real. Missing ansible-lint is a FAILURE —
 # a fresh machine is where the tool is absent and where "passed" must mean it.
+section_ansible_lint() {
 echo "==> ansible-lint"
 if ! command -v ansible-lint >/dev/null 2>&1; then
     echo "ERROR: ansible-lint is not installed, so this gate cannot run." >&2
@@ -1078,5 +1162,10 @@ if ! command -v ansible-lint >/dev/null 2>&1; then
 fi
 ansible-lint -q
 echo "  ok  no findings"
+}
+
+for section in "${selected[@]}"; do
+    run_section "$section"
+done
 
 echo "Checks passed"

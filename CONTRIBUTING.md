@@ -34,6 +34,10 @@ their negative paths, and `ansible-lint`. Both linters are **required** — the
 script fails if either is absent rather than skipping it, because a fresh
 machine is exactly where a tool is missing and where "passed" has to mean it.
 
+Output is quiet (one line per section, the tail of a failure, the log path);
+`./scripts/check.sh <section>...` runs only those, `--list` names them, `-v`
+streams everything.
+
 `ansible-lint` rules waived on architectural grounds are documented in
 [.ansible-lint](.ansible-lint). `shellcheck` findings are waived **inline, at the
 line, with a reason** — never globally — so each waiver is reviewed where it

@@ -38,4 +38,4 @@ jobs:
           git config --global user.email ci@example.invalid
 
       - name: Run the gate
-        run: ./scripts/check.sh
+        run: ./scripts/check.sh -v
