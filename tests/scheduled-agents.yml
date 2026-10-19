@@ -96,6 +96,29 @@
           - manifest_labels == ['com.computer-setup.test-alpha']
         success_msg: "an agent deleted from a layer is unloaded and its plist removed"
 
+    - name: Redeploy with every agent deleted
+      ansible.builtin.include_role:
+        name: scheduled_agents
+      vars:
+        home_dir: "{{ agents_home.path }}"
+        scheduled_agents: []
+
+    - name: Stat and read the manifest after the third run
+      ansible.builtin.stat:
+        path: "{{ agents_home.path }}/Library/LaunchAgents/com.computer-setup.test-alpha.plist"
+      register: after_third
+
+    - name: Read the emptied manifest
+      ansible.builtin.slurp:
+        src: "{{ agents_home.path }}/Library/LaunchAgents/.computer-setup-agents"
+      register: agents_manifest_empty
+
+    - name: Assert the last agent was torn down and the manifest emptied
+      ansible.builtin.assert:
+        that:
+          - not after_third.stat.exists
+          - (agents_manifest_empty.content | b64decode) == ''
+
     - name: Clean up the scratch HOME
       ansible.builtin.file:
         path: "{{ agents_home.path }}"

@@ -24,59 +24,41 @@
 # lands at the same dest with the .j2 stripped. That is how a snippet reaches
 # layer vars (homebrew_prefix, a Python version, an active-capability list)
 # rather than repeating them as literals.
-# Stat before searching: `find` warns once per missing dir on every run, and
-# layers are not required to ship snippets. A warning from this role should mean
-# something real.
-- name: Check which layers ship shell snippets
-  ansible.builtin.stat:
-    path: "{{ computer_setup_layer_cache }}/{{ item.name }}/files/shell"
-  loop: "{{ computer_setup_active_layers | default([]) }}"
-  loop_control:
-    label: "{{ item.name }}"
-  register: shell_snippet_dirs
-
-- name: Discover layer shell snippets
-  ansible.builtin.find:
-    paths: "{{ computer_setup_layer_cache }}/{{ item.name }}/files/shell"
-    patterns:
-      - "*.zsh"
-      - "*.zsh.j2"
-    file_type: file
-  # The original layer dicts, so `_f.0.item` downstream still carries
-  # name/priority. A layer with no files/shell simply never reaches `find`.
-  loop: >-
-    {{ shell_snippet_dirs.results
-       | selectattr('stat.isdir', 'defined') | selectattr('stat.isdir')
-       | map(attribute='item') | list }}
-  loop_control:
-    label: "{{ item.name }}"
-  register: shell_layer_find
-
-# Build one candidate list carrying every discovered snippet's source, its
-# deterministic managed dest (priority + layer name + filename), and whether its
-# capability gate is satisfied. The deploy map and the candidate-path list (used
-# for stale cleanup) are then both derived from this — the dest is computed once.
+#
+# Each candidate carries its source, its deterministic managed dest (priority +
+# layer name + filename) and whether its capability gate is satisfied; the deploy
+# map and the stale-cleanup paths are both derived from this list. `fileglob`
+# yields nothing for a layer without files/shell, so no stat is needed.
 - name: Build the shell snippet candidate list
   ansible.builtin.set_fact:
     shell_snippet_candidates: >-
       {{ (shell_snippet_candidates | default([])) + [{
-           'src': _f.1.path,
+           'src': _path,
            'dest': shell_zsh_config_dir ~ '/'
                    ~ (('%0' ~ (shell_priority_width | int) ~ 'd')
-                      | format(_f.0.item.priority | int))
-                   ~ '-' ~ _f.0.item.name ~ '-'
-                   ~ (_f.1.path | basename | regex_replace('\.j2$', '')),
-           'template': _f.1.path.endswith('.j2'),
+                      | format(_layer.priority | int))
+                   ~ '-' ~ _layer.name ~ '-'
+                   ~ (_path | basename | regex_replace('\.j2$', '')),
+           'template': _path.endswith('.j2'),
            'enabled': (_cap | length == 0)
                       or (_cap in (computer_setup_active_capabilities | default([])))
          }] }}
-  loop: "{{ shell_layer_find.results | subelements('files', skip_missing=True) }}"
+  loop: "{{ query('ansible.builtin.fileglob', *_globs) }}"
   loop_control:
-    loop_var: _f
-    label: "{{ _f.0.item.name }}/{{ _f.1.path | basename }}"
+    loop_var: _path
+    label: "{{ _layer.name }}/{{ _path | basename }}"
   vars:
+    _layers: "{{ computer_setup_active_layers | default([]) }}"
+    _globs: >-
+      {{ _layers | map(attribute='name')
+         | map('regex_replace', '^', computer_setup_layer_cache ~ '/')
+         | map('regex_replace', '$', '/files/shell/')
+         | product(['*.zsh', '*.zsh.j2']) | map('join') | list }}
+    _layer: >-
+      {{ _layers | selectattr('name', 'eq', _path | relpath(computer_setup_layer_cache) | split('/') | first)
+         | first }}
     _cap: >-
-      {{ (lookup('ansible.builtin.file', _f.1.path)
+      {{ (lookup('ansible.builtin.file', _path)
           | regex_search('(?m)^#\s*cs:requires-capability:\s*(\S+)', '\1')
           | default([], true)) | join('') }}
 
@@ -110,22 +92,11 @@
 # Reconcile: remove only layer snippets this role created on a previous run and
 # no longer creates now. User-created ~/.zsh/*.zsh files are not inferred as
 # managed from their filename.
-- name: Check previous shell snippet manifest
-  ansible.builtin.stat:
-    path: "{{ shell_snippet_manifest_path }}"
-  register: shell_snippet_manifest
-
-- name: Read previous shell snippet manifest
-  ansible.builtin.slurp:
-    path: "{{ shell_snippet_manifest_path }}"
-  register: shell_snippet_manifest_data
-  when: shell_snippet_manifest.stat.exists
-
 - name: Resolve stale shell snippets from previous manifest
   ansible.builtin.set_fact:
     shell_stale_snippets: >-
-      {{ (((shell_snippet_manifest_data.content | default('') | b64decode).splitlines()
-           if shell_snippet_manifest.stat.exists else [])
+      {{ ((lookup('ansible.builtin.file', shell_snippet_manifest_path, errors='ignore')
+           | default('', true)).splitlines()
           + (shell_snippet_candidate_paths | default([])))
          | reject('equalto', '')
          | unique

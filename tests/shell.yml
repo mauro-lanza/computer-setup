@@ -1,0 +1,109 @@
+---
+# The shell role's snippet discovery, gating and reaping. State lives in a scratch
+# dir across processes, because the role's facts persist within one play: check.sh
+# runs this once per phase (-e shell_phase=1..3 -e shell_scratch=DIR).
+- name: Shell snippet discovery and reaping
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    homebrew_prefix: /opt/homebrew
+    home_dir: "{{ shell_scratch }}/home"
+    computer_setup_layer_cache: "{{ shell_scratch }}/cache"
+    computer_setup_active_layers:
+      - {name: alpha, priority: 10}
+      - {name: beta, priority: 20}
+    shell_config_files: []
+    _snip: "{{ computer_setup_layer_cache }}/alpha/files/shell"
+    _zsh: "{{ home_dir }}/.zsh"
+  tasks:
+    - name: Seed layers (phase 1)
+      when: shell_phase | int == 1
+      block:
+        - name: Create the layer snippet directories
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: directory
+            mode: "0755"
+          loop:
+            - "{{ _snip }}"
+            - "{{ computer_setup_layer_cache }}/beta"
+            - "{{ _zsh }}"
+        - name: Write the snippets
+          ansible.builtin.copy:
+            dest: "{{ _snip }}/{{ item.name }}"
+            content: "{{ item.content }}"
+            mode: "0644"
+          loop:
+            - {name: 10-plain.zsh, content: "alias a=b\n"}
+            - {name: 20-tpl.zsh.j2, content: "export P={{ '{{' }} homebrew_prefix {{ '}}' }}\n"}
+            - {name: 30-gated.zsh, content: "# cs:requires-capability: nope\nalias g=h\n"}
+        - name: Write a user-owned snippet the role must never reap
+          ansible.builtin.copy:
+            dest: "{{ _zsh }}/user.zsh"
+            content: "alias u=v\n"
+            mode: "0644"
+
+    - name: Delete a snippet from the layer (phase 2)
+      ansible.builtin.file:
+        path: "{{ _snip }}/10-plain.zsh"
+        state: absent
+      when: shell_phase | int == 2
+
+    - name: Delete the whole snippet directory (phase 3)
+      ansible.builtin.file:
+        path: "{{ _snip }}"
+        state: absent
+      when: shell_phase | int == 3
+
+    - name: Run the shell role
+      ansible.builtin.include_role:
+        name: shell
+      vars:
+        computer_setup_active_capabilities: "{{ ['nope'] if shell_phase | int == 2 else [] }}"
+
+    - name: Read back what was deployed
+      ansible.builtin.find:
+        paths: "{{ _zsh }}"
+        hidden: false
+        patterns: ["*.zsh"]
+      register: deployed
+
+    - name: Read the manifest
+      ansible.builtin.slurp:
+        src: "{{ _zsh }}/.computer-setup-snippets"
+      register: manifest
+
+    - name: Read the rendered template
+      ansible.builtin.slurp:
+        src: "{{ _zsh }}/010-alpha-20-tpl.zsh"
+      register: rendered
+      when: shell_phase | int < 3
+
+    - name: Assert phase 1 (copy, render, gate closed)
+      vars:
+        names: "{{ deployed.files | map(attribute='path') | map('basename') | sort | list }}"
+      ansible.builtin.assert:
+        that:
+          - names == ['010-alpha-10-plain.zsh', '010-alpha-20-tpl.zsh', 'user.zsh']
+          - (rendered.content | b64decode) == "export P=/opt/homebrew\n"
+          - (manifest.content | b64decode).splitlines() | map('basename') | sort | list == ['010-alpha-10-plain.zsh', '010-alpha-20-tpl.zsh']
+      when: shell_phase | int == 1
+
+    - name: Assert phase 2 (deleted snippet reaped, gate open)
+      vars:
+        names: "{{ deployed.files | map(attribute='path') | map('basename') | sort | list }}"
+      ansible.builtin.assert:
+        that:
+          - names == ['010-alpha-20-tpl.zsh', '010-alpha-30-gated.zsh', 'user.zsh']
+          - (manifest.content | b64decode).splitlines() | map('basename') | sort | list == ['010-alpha-20-tpl.zsh', '010-alpha-30-gated.zsh']
+      when: shell_phase | int == 2
+
+    - name: Assert phase 3, no snippets, all reaped, empty manifest
+      vars:
+        names: "{{ deployed.files | map(attribute='path') | map('basename') | sort | list }}"
+      ansible.builtin.assert:
+        that:
+          - names == ['user.zsh']
+          - (manifest.content | b64decode) == ''
+      when: shell_phase | int == 3

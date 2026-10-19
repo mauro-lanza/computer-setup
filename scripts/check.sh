@@ -140,6 +140,7 @@ ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook --syntax-check tests/contract.y
 ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook --syntax-check tests/scheduled-agents.yml
 ansible-playbook --syntax-check tests/truncation.yml
 ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook --syntax-check tests/robustness.yml
+ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook --syntax-check tests/shell.yml
 ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook --syntax-check tests/repositories.yml
 ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook --syntax-check tests/upgrade.yml
 ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook --syntax-check tests/logins.yml
@@ -180,6 +181,19 @@ if ! sa_out="$(ANSIBLE_ROLES_PATH="$PWD/roles" \
     exit 1
 fi
 echo "  ok  an agent deleted from a layer is torn down, not orphaned"
+
+echo "==> Shell snippets"
+sh_scratch="$(mktemp -d)"
+for sh_phase in 1 2 3; do
+    if ! sh_out="$(ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook tests/shell.yml \
+            -e shell_scratch="$sh_scratch" -e shell_phase="$sh_phase" 2>&1)"; then
+        printf '%s\n' "$sh_out" >&2
+        echo "ERROR: shell snippet test failed in phase $sh_phase" >&2
+        exit 1
+    fi
+done
+rm -rf -- "$sh_scratch"
+echo "  ok  copy, render, gate, a deleted snippet and a missing directory are handled"
 
 # The state file is a CONSUMED INTERFACE: `computer-setup status` reads it, and
 # a UI would too. Assert its shape, and — the point of the whole design — that

@@ -100,29 +100,20 @@
 # Deleting the plist without `launchctl bootout` leaves the job running until
 # the next reboot, so removal has an ordering requirement no path-based
 # collector can honour.
-- name: Check the previous scheduled agent manifest
-  ansible.builtin.stat:
-    path: "{{ scheduled_agents_manifest_path }}"
-  register: _scheduled_agents_manifest
-
-- name: Read the previous scheduled agent manifest
-  ansible.builtin.slurp:
-    src: "{{ scheduled_agents_manifest_path }}"
-  register: _scheduled_agents_manifest_data
-  when: _scheduled_agents_manifest.stat.exists
-
 - name: Resolve scheduled agents to tear down
   ansible.builtin.set_fact:
+    _scheduled_agents_previous: "{{ _previous }}"
     # Previously deployed, plus still-declared-but-unwanted, minus wanted.
-    # `reject('equalto', '')` because an empty manifest splits to [''], which
-    # would otherwise reach the teardown loop as a label of "".
     _scheduled_agents_stale: >-
-      {{ (((_scheduled_agents_manifest_data.content | default('') | b64decode).splitlines()
-            if _scheduled_agents_manifest.stat.exists else [])
-          + (_scheduled_agents_unwanted | map(attribute='label') | list))
-         | reject('equalto', '')
+      {{ (_previous + (_scheduled_agents_unwanted | map(attribute='label') | list))
          | unique
          | difference(_scheduled_agents_wanted | map(attribute='label') | list) }}
+  vars:
+    # `reject('equalto', '')` because an empty manifest splits to [''], which
+    # would otherwise reach the teardown loop as a label of "".
+    _previous: >-
+      {{ (lookup('ansible.builtin.file', scheduled_agents_manifest_path, errors='ignore')
+          | default('', true)).splitlines() | reject('equalto', '') | list }}
 
 - name: Unload scheduled agents that no longer apply
   ansible.builtin.command:
@@ -154,4 +145,4 @@
   # has never had an agent has nothing to record and no directory to record it
   # in; one that had them keeps the directory, so the empty manifest still
   # lands and the next run knows the reaping is done.
-  when: _scheduled_agents_wanted | length > 0 or _scheduled_agents_manifest.stat.exists
+  when: _scheduled_agents_wanted | length > 0 or _scheduled_agents_previous | length > 0
