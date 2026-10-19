@@ -449,6 +449,9 @@ state_task_list() {
         | sed -e 's/\t$//' -e 's/\t/  →  /' || true
 }
 
+# Days without a successful scheduled upgrade before `status` reports BEHIND.
+UPGRADE_BEHIND_DAYS=3
+
 cmd_status() {
     local days changed result mode finished dur partial truncated failed_n
     days="$(days_since_success)"
@@ -527,7 +530,7 @@ cmd_status() {
     # had the agent should not be nagged.
     local up_days
     up_days="$(days_since_success "$UPGRADE_SUCCESS_FILE")"
-    if [[ -n "$up_days" && "$up_days" -ge 3 ]]; then
+    if [[ -n "$up_days" && "$up_days" -ge "$UPGRADE_BEHIND_DAYS" ]]; then
         echo "Upgrade:   BEHIND — last successful scheduled upgrade was ${up_days} day(s) ago (see \`computer-setup log --list\`)"
     fi
 }
@@ -784,13 +787,14 @@ run_scheduled() {
     # failure's stderr is kept in the log, because a bare "unreachable" cannot be
     # diagnosed afterwards.
     local probe_try probe_err reachable=0
-    for probe_try in 1 2 3; do
+    PROBE_TRIES=3
+    for ((probe_try = 1; probe_try <= PROBE_TRIES; probe_try++)); do
         if probe_err=$(git ls-remote --exit-code "$REPO_URL" "$REPO_BRANCH" 2>&1 >/dev/null); then
             reachable=1
             break
         fi
-        log "probe ${probe_try}/3 failed: ${probe_err:-no output}"
-        if [[ $probe_try -lt 3 ]]; then sleep "${PROBE_RETRY_DELAY:-20}"; fi
+        log "probe ${probe_try}/${PROBE_TRIES} failed: ${probe_err:-no output}"
+        if [[ $probe_try -lt $PROBE_TRIES ]]; then sleep "${PROBE_RETRY_DELAY:-20}"; fi
     done
     if [[ $reachable -ne 1 ]]; then
         log "RESULT: skipped — ${REPO_URL} unreachable (offline, port 22 blocked, or SSH key unavailable)"
@@ -843,9 +847,11 @@ run_scheduled() {
 
     # Only a run that actually reached the repo and finished gets here, which is
     # exactly what "still syncing" means.
-    date '+%Y-%m-%dT%H:%M:%S%z' > "$LAST_SUCCESS_FILE" 2>/dev/null || true
+    local ts
+    ts=$(date '+%Y-%m-%dT%H:%M:%S%z')
+    printf '%s\n' "$ts" > "$LAST_SUCCESS_FILE" 2>/dev/null || true
     if [[ "$mode" == "upgrade" ]]; then
-        date '+%Y-%m-%dT%H:%M:%S%z' > "$UPGRADE_SUCCESS_FILE" 2>/dev/null || true
+        printf '%s\n' "$ts" > "$UPGRADE_SUCCESS_FILE" 2>/dev/null || true
     fi
     prune_logs
 
