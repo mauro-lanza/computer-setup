@@ -5,9 +5,10 @@
 # Needs the pinned runtime on PATH (jinja2) and yq.
 set -euo pipefail
 cd "$(dirname "$0")/.."
+ROOT="$PWD"
 
 T="$(mktemp -d)"
-trap 'rm -rf -- "$T"' EXIT
+trap 'rm -rf -- "$T"; [[ -z "${holder:-}" ]] || kill "$holder" 2>/dev/null || true' EXIT
 mkdir -p "$T/bin" "$T/state" "$T/logs" "$T/home"
 
 # The runtime's own interpreter (has jinja2); its path is the `ansible` shebang.
@@ -133,10 +134,10 @@ echo "  ok  the play is told the repo url and branch"
 
 # 8. `layers new` scaffolds a lintable layer named as asked, and refuses to overwrite.
 mkdir -p "$T/pull/examples"
-cp -R "$OLDPWD/examples/example-layer" "$T/pull/examples/example-layer" 2>/dev/null || cp -R examples/example-layer "$T/pull/examples/example-layer"
+cp -R "$ROOT/examples/example-layer" "$T/pull/examples/example-layer"
 (cd "$T" && run layers new acme >/dev/null) || fail "layers new failed"
 [[ "$(yq -r '.name' "$T/acme/layer.yml")" == acme ]] || fail "scaffold not renamed"
-"$OLDPWD/scripts/computer-setup-layers" lint --layer "$T/acme" >/dev/null 2>&1 || ./scripts/computer-setup-layers lint --layer "$T/acme" >/dev/null || fail "scaffold does not lint"
+"$ROOT/scripts/computer-setup-layers" lint --layer "$T/acme" >/dev/null || fail "scaffold does not lint"
 (cd "$T" && run layers new acme >/dev/null 2>&1) && fail "layers new overwrote an existing dir"
 (cd "$T" && run layers new ../x >/dev/null 2>&1) && fail "layers new accepted a bad name"
 echo "  ok  layers new scaffolds a lintable layer, refuses overwrite and bad names"
