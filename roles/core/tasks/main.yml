@@ -77,6 +77,10 @@
       - homebrew_prefix
       - repositories_base_dir
 
+- name: Build the reserved-prefix pattern
+  ansible.builtin.set_fact:
+    computer_setup_reserved_prefix_re: "^({{ computer_setup_reserved_layer_prefixes | join('|') }})"
+
 - name: Load and merge content layers
   when: machine_file.stat.exists
   block:

@@ -80,12 +80,11 @@
           + (_qs | selectattr('options', 'defined') | map(attribute='options') | flatten
              | selectattr('set', 'defined') | map(attribute='set') | map('list') | flatten))
          | unique | list }}
-    _reserved_prefix_re: "^({{ computer_setup_reserved_layer_prefixes | join('|') }})"
     # The machine tier is subtracted from the reserved set rather than exempted
     # case by case, so the two lists cannot drift apart.
     _reserved: >-
       {{ (computer_setup_reserved_layer_keys
-          + (_keys | select('match', _reserved_prefix_re) | list))
+          + (_keys | select('match', computer_setup_reserved_prefix_re) | list))
          | difference(computer_setup_machine_tier_keys) }}
     _blocked: "{{ _keys | intersect(_reserved) | unique | list }}"
   when: _layer_questions_stat.stat.exists

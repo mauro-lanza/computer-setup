@@ -844,6 +844,7 @@ expect_layer_failure prefix "defines reserved key"
 # Ansible's execution controls are reserved as a NAMESPACE. Enumerating five of
 # them left ansible_become_password and ansible_ssh_common_args reachable.
 expect_layer_failure ansible-prefix "defines reserved key"
+expect_layer_failure cs-prefix "defines reserved key"
 # Must fail ATTRIBUTED to the layer: a mis-shaped `capabilities:` key aborts
 # pre_tasks, which every entry point runs.
 expect_layer_failure capabilities "malformed capabilities.yml"

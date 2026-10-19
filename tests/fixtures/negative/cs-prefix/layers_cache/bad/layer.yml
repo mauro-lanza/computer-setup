@@ -1,0 +1,4 @@
+---
+name: bad
+schema_version: 1
+description: "Layer that illegally claims a reserved key"
