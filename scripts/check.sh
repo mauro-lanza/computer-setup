@@ -1041,14 +1041,23 @@ for expect in \
     "has a config: entry missing src: or dest:" \
     "config: uses mode:" \
     "config: has a non-boolean executable:" \
-    "shell_config_files key 'no-such-shell-file' matches no files/"
+    "shell_config_files key 'no-such-shell-file' matches no files/" \
+    "config src 'no-such-config-file' matches no files/"
 do
     if ! grep -qF "$expect" <<<"$lint_out"; then
         echo "ERROR: linter did not report: $expect" >&2
         exit 1
     fi
 done
-echo "  ok  all 11 broken references rejected"
+echo "  ok  all 12 broken references rejected"
+
+# One malformed file is one error, not one per projection read from it.
+malformed_count="$(grep -cF "malformed/capabilities.yml is not valid YAML" <<<"$lint_out" || true)"
+if [[ "$malformed_count" -ne 1 ]]; then
+    echo "ERROR: malformed capabilities.yml reported $malformed_count times, expected 1" >&2
+    exit 1
+fi
+echo "  ok  malformed YAML reported once"
 }
 
 # The highest supported layer schema_version is stated in three places that

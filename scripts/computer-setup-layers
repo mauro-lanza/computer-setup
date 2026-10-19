@@ -242,16 +242,22 @@ lint_ref_problem() {
     fi
 }
 
+# Files found malformed by lint_validate; lint_read skips them so each is
+# reported once instead of cascading into "reference does not resolve" errors.
+lint_invalid=$'\n'
+
+lint_validate() {
+    local file="$1"
+    [[ -f "$file" ]] || return 0
+    yq '.' "$file" >/dev/null 2>&1 && return 0
+    lint_err "$(basename "$(dirname "$file")")/$(basename "$file") is not valid YAML"
+    lint_invalid+="$file"$'\n'
+}
+
 # Emit a yq projection over a file, or nothing when the file is absent/invalid.
-# A malformed file is reported once, here, rather than yielding a confusing
-# cascade of "reference does not resolve" errors.
 lint_read() {
     local file="$1" expr="$2"
-    [[ -f "$file" ]] || return 0
-    if ! yq '.' "$file" >/dev/null 2>&1; then
-        lint_err "$(basename "$(dirname "$file")")/$(basename "$file") is not valid YAML"
-        return 0
-    fi
+    [[ -f "$file" && "$lint_invalid" != *$'\n'"$file"$'\n'* ]] || return 0
     yq -r "$expr" "$file" 2>/dev/null | grep -v '^null$' || true
 }
 
@@ -306,6 +312,11 @@ lint_layers() {
     local all_caps="" all_questions="" all_preset_caps="" d ids dupes name
     for d in "${dirs[@]}"; do
         name="$(basename "$d")"
+
+        local f
+        for f in capabilities questions vars presets; do
+            lint_validate "$d/$f.yml"
+        done
 
         ids="$(lint_read "$d/capabilities.yml" '.capabilities[]?.id')"
         dupes="$(printf '%s\n' "$ids" | grep -v '^$' | sort | uniq -d || true)"
@@ -370,6 +381,14 @@ lint_layers() {
         # yq v4 reports YAML tags, so a real boolean is "!!bool" -- NOT jq's
         # "boolean", which would match nothing and pass everything.
         done <<< "$(lint_read "$d/capabilities.yml" '.capabilities[]? | select([.config[]? | select(has("executable")) | select(.executable | type != "!!bool")] | length > 0) | .id')"
+
+        # config[].src -> a file in files/ or templates/; an unresolved src is
+        # silently skipped at deploy time
+        while IFS= read -r ref; do
+            [[ -z "$ref" ]] && continue
+            lint_file_resolves "$ref" "${dirs[@]}" \
+                || lint_ref_problem "[$name] config src '$ref' matches no files/$ref or templates/$ref.j2"
+        done <<< "$(lint_read "$d/capabilities.yml" '.capabilities[]?.config[]?.src')"
 
         # shell_config_files[].key -> a file in files/ or templates/; an
         # unresolved key is silently skipped at deploy time

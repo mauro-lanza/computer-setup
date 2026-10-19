@@ -37,3 +37,9 @@ capabilities:
     type: feature
     config:
       - {src: scripts/thing3}
+  # A src matching no files/ or templates/ entry is silently skipped at deploy.
+  - id: nosrc
+    desc: "config src resolves to nothing"
+    type: feature
+    config:
+      - {src: no-such-config-file, dest: /tmp/nosrc}

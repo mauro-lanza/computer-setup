@@ -1,0 +1,4 @@
+---
+name: malformed
+schema_version: 1
+description: "Layer with one unparseable file. Used by scripts/check.sh."
