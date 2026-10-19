@@ -157,8 +157,7 @@
           Everything else is already configured; re-running is safe and cheap.
       vars:
         _failed: >-
-          {{ ((homebrew_adopt_results | default({})).get('results', [])
-              + (homebrew_fresh_results | default({})).get('results', []))
+          {{ (homebrew_cask_results | default({})).get('results', [])
              | selectattr('failed', 'defined') | selectattr('failed') | list }}
       when: _failed | length > 0
       tags: [homebrew]
