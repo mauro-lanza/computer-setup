@@ -24,9 +24,6 @@ CONFIG_DIR="$HOME/.config/computer-setup"
 # because it is one decision — capability ids are meaningless without the layer
 # registry that defines them, so a backup of half of it restores nothing.
 MACHINE_FILE="$CONFIG_DIR/machine.yml"
-# 0 until Phase 2 has gathered answers. Guards machine_write against emitting
-# empty answers over a reconfigured machine's existing ones.
-MACHINE_ANSWERS_LOADED=0
 LAYER_CACHE="$HOME/.local/share/computer-setup/layers"
 # Must match `computer_setup_pull_dir` in local.yml. Pinned rather than left to
 # ansible-pull's `~/.ansible/pull/<hostname>` default: a Mac's hostname changes
@@ -78,11 +75,26 @@ FS_U=$'\037'
 
 export HOMEBREW_NO_ANALYTICS=1
 
+# Mutable run state, declared once so every function can rely on it being set.
+INTERACTIVE=1
+# 0 until Phase 2 has gathered answers. Guards machine_write against emitting
+# empty answers over a reconfigured machine's existing ones.
+MACHINE_ANSWERS_LOADED=0
+# Set by --answers, or by offer_restore: skips every prompt (see load_answers_file).
+ANSWERS_FILE=""
+PRIOR_SELECTED_IDS=" "
+HAS_PRIOR_MACHINE=false
+# A preset is a pure prefill: it seeds the prompts and is never recorded.
+PRESET_ID=""
+PRESET_CAPS=" "
+REVIEW_ANSWERS=true
+ANSWER_IDS=()
+ANSWER_VALUES=()
+
 # Under `curl … | bash` stdin IS the script source, so every `read` would
 # consume the unparsed remainder of this file. Re-point stdin at the terminal
 # before any prompt. A function, not top-level code, so sourcing this file for
 # tests does not hijack the harness's stdin.
-INTERACTIVE=1
 reattach_stdin() {
     if [[ ! -t 0 ]]; then
         if [[ -r /dev/tty ]] && { exec < /dev/tty; } 2>/dev/null; then
@@ -132,15 +144,6 @@ resolve_script_dir() {
     fi
 }
 SCRIPT_DIR="$(resolve_script_dir "${BASH_SOURCE[0]:-}")"
-# `:+` so these stay EMPTY rather than becoming "/scripts/..." when SCRIPT_DIR
-# is. Every consumer tests the path before using it and downloads otherwise.
-LAYER_SYNC_SCRIPT="${SCRIPT_DIR:+$SCRIPT_DIR/scripts/computer-setup-layers}"
-MACHINE_SCRIPT="${SCRIPT_DIR:+$SCRIPT_DIR/scripts/computer-setup-machine}"
-# Where a restored/backed-up declaration is kept. Same paths the deployed runner
-# uses, so `bootstrap.sh` and `computer-setup machine` are the same two callers
-# of one repo rather than two conventions.
-BACKUP_CONFIG="$CONFIG_DIR/backup.yml"
-BACKUP_REPO_DIR="$HOME/.local/share/computer-setup/backups"
 
 # ─── Colors ───────────────────────────────────────────────────────────────────
 RED='\033[0;31m'
@@ -157,7 +160,6 @@ error() { echo -e "${RED}✗${NC} $1" >&2; }
 # ─── Helper: yes/no prompt with custom default ───────────────────────────────
 ask_yn() {
     local prompt="$1" default="${2:-n}" yn
-    require_tty
     if [[ "$default" == "y" ]]; then
         read -rp "$prompt [Y/n]: " yn
         yn="${yn:-y}"
@@ -220,8 +222,7 @@ ensure_prereqs() {
 }
 
 # Fetch a file from the repo: the local checkout when there is a verified one,
-# otherwise the raw URL. Phase 0 runs before anything is cloned, so several
-# things are needed before a checkout exists.
+# otherwise the raw URL. Prints the path; returns 1 when the download fails.
 fetch_repo_file() {
     local name="$1" local_copy="${SCRIPT_DIR:+$SCRIPT_DIR/$1}"
     if [[ -n "$local_copy" && -f "$local_copy" ]]; then
@@ -233,9 +234,20 @@ fetch_repo_file() {
     if ! curl -fsSL "$RAW_BASE/$name" -o "$tmp"; then
         rm -f "$tmp"
         error "Failed to download $name from $RAW_BASE"
-        exit 1
+        return 1
     fi
     printf '%s\n' "$tmp"
+}
+
+# Run a repo script (both are self-contained bash) from the checkout or a
+# download, removing the download afterwards. Returns the script's status.
+run_repo_script() {
+    local name="$1" file rc=0
+    shift
+    file="$(fetch_repo_file "$name")" || return 1
+    /bin/bash "$file" "$@" || rc=$?
+    [[ -n "$SCRIPT_DIR" && "$file" == "$SCRIPT_DIR/"* ]] || rm -f "$file"
+    return "$rc"
 }
 
 # The engine's own runtime, pinned by runtime.yml — NOT the `ansible` formula.
@@ -249,9 +261,10 @@ fetch_repo_file() {
 # general-purpose `ansible` for the user.
 install_runtime() {
     local pins python_version core_version ansible_version
-    pins="$(fetch_repo_file runtime.yml)"
+    pins="$(fetch_repo_file runtime.yml)" || exit 1
     python_version="$(yq -r '.python' "$pins")"
     core_version="$(yq -r '.ansible_core' "$pins")"
+    [[ -n "$SCRIPT_DIR" && "$pins" == "$SCRIPT_DIR/"* ]] || rm -f "$pins"
     if [[ -z "$python_version" || "$python_version" == "null" \
        || -z "$core_version" || "$core_version" == "null" ]]; then
         error "runtime.yml did not yield a python and ansible_core version"
@@ -278,8 +291,9 @@ install_runtime() {
 install_galaxy_collections() {
     info "Installing Ansible Galaxy collections..."
     local reqs
-    reqs="$(fetch_repo_file requirements.yml)"
+    reqs="$(fetch_repo_file requirements.yml)" || exit 1
     "$RUNTIME_BIN/ansible-galaxy" collection install -r "$reqs" --upgrade
+    [[ -n "$SCRIPT_DIR" && "$reqs" == "$SCRIPT_DIR/"* ]] || rm -f "$reqs"
     ok "Collections installed"
 }
 
@@ -357,8 +371,6 @@ manage_layers() {
         exit 1
     fi
 
-    require_tty
-    mkdir -p "$CONFIG_DIR"
     echo
     info "Content layers — pluggable repos that supply capabilities, vars, and files."
     echo "  Current manifest:"
@@ -375,7 +387,6 @@ manage_layers() {
     # Entries only — machine_write supplies the `layers:` key and the rest of
     # the file around them.
     local tmp; tmp="$(mktemp)"
-    : > "$tmp"
 
     local added=0 name repo prio
     while true; do
@@ -410,38 +421,29 @@ manage_layers() {
     # file Phase 2 writes. Emitting from memory here would blank the answers of
     # a machine being reconfigured, so the other sections are carried across
     # from the file itself.
+    machine_write "$tmp"
+    rm -f "$tmp"
     if [[ $added -gt 0 ]]; then
-        machine_write "$tmp"
         ok "Wrote layer manifest ($added layer(s)) to ${MACHINE_FILE}"
     else
-        : > "$tmp"
-        machine_write "$tmp"
         warn "No layers defined — orchestrator will run on safe empty defaults."
     fi
-    rm -f "$tmp"
     echo
     info "Active layers:"
     show_layers
 }
 
 # ── Machine backup / restore ─────────────────────────────────────────────────
-# Under `curl | bash` there is no checkout, so the helper is fetched the same way
-# the layer script is. Returns non-zero when it cannot be obtained, and every
-# caller treats that as "skip", never as "fail": a backup repo being unreachable
-# must not stop a machine being set up.
-ensure_machine_script() {
-    [[ -x "$MACHINE_SCRIPT" ]] && return 0
-    MACHINE_SCRIPT="$(mktemp)"
-    if ! curl -fsSL "$RAW_BASE/scripts/computer-setup-machine" -o "$MACHINE_SCRIPT"; then
-        rm -f "$MACHINE_SCRIPT"
-        return 1
-    fi
-    chmod +x "$MACHINE_SCRIPT"
-}
+# Same paths the deployed runner uses, so `bootstrap.sh` and `computer-setup
+# machine` are two callers of one repo rather than two conventions.
+BACKUP_CONFIG="$CONFIG_DIR/backup.yml"
+BACKUP_REPO_DIR="$HOME/.local/share/computer-setup/backups"
 
+# Fails when the helper cannot be obtained, and every caller treats that as
+# "skip", never as "fail": a backup repo being unreachable must not stop a
+# machine being set up.
 machine_helper() {
-    ensure_machine_script || return 1
-    "$MACHINE_SCRIPT" "$@" \
+    run_repo_script scripts/computer-setup-machine "$@" \
         --config "$BACKUP_CONFIG" \
         --repo-dir "$BACKUP_REPO_DIR" \
         --machine-file "$MACHINE_FILE"
@@ -488,19 +490,17 @@ offer_restore() {
     done
     [[ "$choice" -eq 0 ]] && { info "Starting fresh."; return 0; }
 
-    local picked="${list[$((choice - 1))]}" tmp
-    tmp="$(mktemp -d)/${picked}.yml"
-    if ! machine_helper pull "$picked" "$tmp" >/dev/null; then
+    local picked="${list[$((choice - 1))]}"
+    mkdir -p "$(dirname "$MACHINE_FILE")"
+    # Pulled straight into machine.yml (the helper refuses to overwrite, and none
+    # exists here) so manage_layers finds the layers. ANSWERS_FILE makes Phase 2
+    # validate it against the merged registry and prompt for nothing.
+    if ! machine_helper pull "$picked" "$MACHINE_FILE" >/dev/null; then
+        rm -f "$MACHINE_FILE"
         warn "Could not fetch '${picked}' — continuing without it."
         return 0
     fi
-    # Routed through --answers rather than copied over machine.yml: the restored
-    # file is then validated against the layers' merged registry like any other
-    # answers file, and a stale id in it is reported instead of silently applied.
-    ANSWERS_FILE="$tmp"
-    mkdir -p "$(dirname "$MACHINE_FILE")"
-    cp "$tmp" "$MACHINE_FILE"
-    chmod 600 "$MACHINE_FILE"
+    ANSWERS_FILE="$MACHINE_FILE"
     ok "Restored '${picked}' — its layers will be used below."
 }
 
@@ -521,15 +521,7 @@ offer_backup() {
 # Clone/update each layer into the stable layer cache.
 clone_layers() {
     [[ ! -f "$MACHINE_FILE" ]] && return
-    if [[ ! -x "$LAYER_SYNC_SCRIPT" ]]; then
-        local repo_raw="$RAW_BASE"
-        LAYER_SYNC_SCRIPT="$(mktemp)"
-        trap 'rm -f "$LAYER_SYNC_SCRIPT"' RETURN
-        curl -fsSL "$repo_raw/scripts/computer-setup-layers" -o "$LAYER_SYNC_SCRIPT"
-        chmod +x "$LAYER_SYNC_SCRIPT"
-    fi
-
-    "$LAYER_SYNC_SCRIPT" sync \
+    run_repo_script scripts/computer-setup-layers sync \
         --manifest "$MACHINE_FILE" \
         --cache "$LAYER_CACHE" \
         --schema-version "$SCHEMA_VERSION_MAX"
@@ -679,9 +671,6 @@ load_questions() {
 # seeds the prompts and is never recorded in machine.yml. Presets live
 # entirely here; the engine has no concept of them. See "Presets" in
 # docs/architecture.md.
-PRESET_ID=""
-PRESET_CAPS=" "
-REVIEW_ANSWERS=true
 
 # Merged presets. Columns:
 #   id  desc  capabilities(csv)  answers(k=v,csv)
@@ -700,7 +689,7 @@ load_presets() {
 # The preset's answer for one question id, empty when the preset does not set it.
 preset_answer() {
     [[ -z "$PRESET_ID" ]] && return 0
-    awk -F'\037' -v p="$PRESET_ID" -v k="$1" '
+    awk -F"$FS_U" -v p="$PRESET_ID" -v k="$1" '
         $1 == p {
             n = split($4, kv, ",")
             for (i = 1; i <= n; i++) {
@@ -715,7 +704,6 @@ preset_answer() {
 
 choose_preset() {
     [[ ! -s "${MERGED_PRESETS_FILE:-}" ]] && return 0
-    require_tty
 
     echo
     info "Presets — a starting point you can then review:"
@@ -730,7 +718,7 @@ choose_preset() {
         echo "    ${n}) ${desc}"
         n=$((n + 1))
     done < "$MERGED_PRESETS_FILE"
-    echo "    ${n}) Custom — start from $($HAS_PRIOR_PREFS && echo "your previous answers" || echo "the defaults")"
+    echo "    ${n}) Custom — start from $($HAS_PRIOR_MACHINE && echo "your previous answers" || echo "the defaults")"
     echo
 
     local reply idx
@@ -751,7 +739,7 @@ choose_preset() {
     done
 
     if [[ -n "$PRESET_ID" ]]; then
-        PRESET_CAPS=" $(awk -F'\037' -v p="$PRESET_ID" '$1==p{gsub(/,/," ",$3); print $3}' \
+        PRESET_CAPS=" $(awk -F"$FS_U" -v p="$PRESET_ID" '$1==p{gsub(/,/," ",$3); print $3}' \
             "$MERGED_PRESETS_FILE") "
         ok "Preset '${PRESET_ID}' selected"
         # Reviewing is opt-IN: the whole point of picking a preset is not being
@@ -771,7 +759,6 @@ choose_preset() {
 # works directly. Nothing in it is required: unknown answers are dropped and
 # unanswered questions fall back to their layer default, so a partial file is
 # valid and an empty one means "take every layer default".
-ANSWERS_FILE=""
 
 load_answers_file() {
     local f="$1"
@@ -845,17 +832,18 @@ parse_args() {
 }
 
 # ─── Prior selections (re-run friendliness) ──────────────────────────────────
-PRIOR_SELECTED_IDS=" "
-HAS_PRIOR_PREFS=false
-
 is_prior_selected() {
     [[ "$PRIOR_SELECTED_IDS" == *" $1 "* ]]
 }
 
+# Phase 1 writes a layers-only machine.yml on a first run, so the file existing
+# does not mean there is anything to pre-fill from.
 load_prior_machine() {
-    [[ ! -f "$MACHINE_FILE" ]] && return
-    HAS_PRIOR_PREFS=true
-
+    [[ -f "$MACHINE_FILE" ]] || return 0
+    local carried
+    carried="$(yq -r '((.answers // {}) | length) + ((.selected_capabilities // []) | length)' \
+        "$MACHINE_FILE" 2>/dev/null)" || carried=0
+    [[ "$carried" -gt 0 ]] && HAS_PRIOR_MACHINE=true
     # Selections are just capability ids now — remember them directly.
     local cap
     while IFS= read -r cap; do
@@ -870,7 +858,7 @@ load_prior_machine() {
 # is mikefarah/yq, which has no jq-style `--arg`, and interpolating an id
 # straight into the expression would break on any quoting in it.
 prior_answer() {
-    [[ -f "$MACHINE_FILE" ]] || return 0
+    $HAS_PRIOR_MACHINE || return 0
     CS_ANSWER_KEY="$1" yq -r '.answers[strenv(CS_ANSWER_KEY)] // ""' \
         "$MACHINE_FILE" 2>/dev/null || true
 }
@@ -914,7 +902,7 @@ gather_optional_tools() {
     if [[ ! -s "$MERGED_CAPABILITIES_FILE" ]]; then
         return 0
     fi
-    if $HAS_PRIOR_PREFS; then
+    if $HAS_PRIOR_MACHINE; then
         info "Optional tools — your previous answers are pre-filled (press Enter to keep):"
     else
         info "Optional tools — answer y/n for each:"
@@ -981,8 +969,6 @@ gather_optional_tools() {
 # ─── Questions (single-select / free-text decisions) ─────────────────────────
 # Answers are written to machine.yml as `answers:`. The engine turns them into
 # play-scope vars via each question's `set_var:` / each option's `set:` payload.
-ANSWER_IDS=()
-ANSWER_VALUES=()
 
 gather_answers() {
     ANSWER_IDS=()
@@ -1017,11 +1003,9 @@ gather_answers() {
             bool)
                 # Stored as the strings true/false so the engine's `| bool`
                 # filter reads them, and so machine.yml stays valid YAML.
-                if [[ "$default" == "true" ]]; then
-                    ask_yn "  ${prompt}?" "y" && reply=true || reply=false
-                else
-                    ask_yn "  ${prompt}?" "n" && reply=true || reply=false
-                fi
+                local yn=n
+                [[ "$default" == "true" ]] && yn=y
+                if ask_yn "  ${prompt}?" "$yn"; then reply=true; else reply=false; fi
                 ;;
             *)
                 reply="$(ask_text "$prompt" "$default" "$validate")"
@@ -1041,7 +1025,6 @@ gather_answers() {
 # writes must go to stderr or it would be captured as part of the answer.
 ask_select() {
     local prompt="$1" default="$2" options="$3"
-    require_tty
     local -a opts=()
     local IFS=','
     for o in $options; do opts+=("$o"); done
@@ -1092,7 +1075,6 @@ ask_select() {
 # shape without knowing what the value means.
 ask_text() {
     local prompt="$1" default="$2" validate="${3:-}" reply
-    require_tty
     while true; do
         read -rp "  ${prompt} [${default}]: " reply
         reply="${reply:-$default}"
@@ -1211,7 +1193,10 @@ run_playbook() {
     info "Running playbook..."
     echo
 
-    local extra_args=(
+    local pull_args=(
+        -U "$REPO_URL"
+        -C "$REPO_BRANCH"
+        -d "$PULL_DIR"
         -e "@${MACHINE_FILE}"
         -e "computer_setup_layer_cache=${LAYER_CACHE}"
         -e "computer_setup_machine_file=${MACHINE_FILE}"
@@ -1222,13 +1207,8 @@ run_playbook() {
     if [[ -n "$ANSWERS_FILE" ]]; then
         info "Non-interactive run — applying without a dry-run prompt."
     elif ask_yn "Preview changes first (dry-run)?"; then
-        "$RUNTIME_BIN/ansible-pull" \
-            -U "$REPO_URL" \
-            -C "$REPO_BRANCH" \
-            -d "$PULL_DIR" \
-            "${extra_args[@]}" \
-            --check --diff \
-            local.yml || warn "Dry-run completed with warnings (some tasks can't be previewed)"
+        "$RUNTIME_BIN/ansible-pull" "${pull_args[@]}" --check --diff local.yml \
+            || warn "Dry-run completed with warnings (some tasks can't be previewed)"
         echo
         if ! ask_yn "Apply these changes for real?"; then
             warn "Aborted — no changes applied"
@@ -1239,12 +1219,7 @@ run_playbook() {
     collect_sudo_password
 
     info "Applying changes..."
-    "$RUNTIME_BIN/ansible-pull" \
-        -U "$REPO_URL" \
-        -C "$REPO_BRANCH" \
-        -d "$PULL_DIR" \
-        "${extra_args[@]}" \
-        local.yml
+    "$RUNTIME_BIN/ansible-pull" "${pull_args[@]}" local.yml
 
     unset CS_SUDO_PASSWORD
     ok "Playbook completed successfully"
@@ -1263,8 +1238,7 @@ run_playbook() {
 # Optional on purpose: Enter skips, those casks are then reported at the end
 # rather than failing the run, and everything else still applies.
 collect_sudo_password() {
-    [[ -n "${ANSWERS_FILE:-}" ]] && return 0   # non-interactive: no prompt
-    [[ -t 0 ]] || return 0
+    [[ -n "$ANSWERS_FILE" ]] && return 0   # non-interactive: no prompt
     local pw
     echo
     info "Some casks need root to install (e.g. Docker Desktop places a helper"
@@ -1297,6 +1271,7 @@ main() {
     parse_args "$@"
 
     reattach_stdin
+    [[ -n "$ANSWERS_FILE" ]] || require_tty
 
     echo
     echo "╔══════════════════════════════════════════════╗"
@@ -1332,7 +1307,7 @@ main() {
     if [[ -n "$ANSWERS_FILE" ]]; then
         load_answers_file "$ANSWERS_FILE"
     else
-        if $HAS_PRIOR_PREFS; then
+        if $HAS_PRIOR_MACHINE; then
             ok "Found existing machine declaration at ${MACHINE_FILE} — using prior answers as defaults"
             echo
         fi

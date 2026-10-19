@@ -91,13 +91,13 @@ make_caps() {
 }
 
 # Drive gather_optional_tools with a scripted answer file and echo the result.
-#   $1 answers file, $2 prior-selection string, $3 "true"/"false" HAS_PRIOR_PREFS
+#   $1 answers file, $2 prior-selection string, $3 "true"/"false" HAS_PRIOR_MACHINE
 # Prints: "<rc>|<space separated selections>"
 run_prompts() {
     local answers="$1" prior="${2:- }" has_prior="${3:-false}"
     (
         PRIOR_SELECTED_IDS="$prior"
-        HAS_PRIOR_PREFS="$has_prior"
+        HAS_PRIOR_MACHINE="$has_prior"
         INTERACTIVE=1
         MERGED_CAPABILITIES_FILE="$WORK/caps.tsv"
         # gather_optional_tools resolves `requires:` entirely from the merged
@@ -254,7 +254,7 @@ echo "==> bootstrap machine file"
 make_caps > "$WORK/caps.tsv"
 (
     PRIOR_SELECTED_IDS=" "
-    HAS_PRIOR_PREFS=false
+    HAS_PRIOR_MACHINE=false
     INTERACTIVE=1
     MERGED_CAPABILITIES_FILE="$WORK/caps.tsv"
     MACHINE_FILE="$WORK/machine.yml"
@@ -278,7 +278,7 @@ fi
 
 # ── 9. An empty selection set must still produce a valid machine file ──────────
 (
-    PRIOR_SELECTED_IDS=" "; HAS_PRIOR_PREFS=false; INTERACTIVE=1
+    PRIOR_SELECTED_IDS=" "; HAS_PRIOR_MACHINE=false; INTERACTIVE=1
     MERGED_CAPABILITIES_FILE="$WORK/caps.tsv"
     MACHINE_FILE="$WORK/machine-empty.yml"
     gather_optional_tools < "$WORK/all-no" >/dev/null 2>&1 && write_machine >/dev/null 2>&1
@@ -301,7 +301,7 @@ merged_ids="$(cut -d"$FS_U" -f1 "$WORK/merged.tsv" | tr '\n' ' ' | sed 's/ $//')
 assert_eq "layers merge highest-priority-first, deduped by id" \
     "nvm vscode dbt vscode-peacock opencode zed adopted" "$merged_ids"
 assert_eq "  the higher-priority layer's definition wins" \
-    "nvm-from-override" "$(awk -F'\037' '$1=="nvm"{print $4}' "$WORK/merged.tsv")"
+    "nvm-from-override" "$(awk -F"$FS_U" '$1=="nvm"{print $4}' "$WORK/merged.tsv")"
 
 # ── 11. Questions: the single-select prompt path ─────────────────────────────
 # Same class of bug as the capability loop, and the same shape of test. Two
@@ -420,7 +420,80 @@ assert_eq "machine file records the answers" "zed" \
 assert_eq "  answers survive a yq round-trip as valid YAML" "/tmp/mine" \
     "$(yq -r '.answers.scratch' "$WORK/machine-answers.yml" 2>/dev/null)"
 assert_eq "  a stored answer is read back as the next run's default" "zed" \
-    "$(MACHINE_FILE="$WORK/machine-answers.yml" prior_answer editor)"
+    "$(MACHINE_FILE="$WORK/machine-answers.yml" HAS_PRIOR_MACHINE=true prior_answer editor)"
+
+# A first run's machine.yml holds layers only (Phase 1 wrote it), so it must not
+# count as a prior machine; one carrying answers or selections must, however few.
+printf -- '---\nlayers:\n  - name: "a"\n    repo: "r"\n    priority: 10\nanswers: {}\nselected_capabilities: []\n' \
+    > "$WORK/prior-layers-only.yml"
+printf -- '---\nlayers: []\nanswers:\n  editor: "zed"\nselected_capabilities: []\n' \
+    > "$WORK/prior-answers.yml"
+printf -- '---\nlayers: []\nselected_capabilities:\n  - alpha\n' \
+    > "$WORK/prior-selections.yml"
+printf -- '---\nlayers: []\nanswers:\nselected_capabilities:\n' \
+    > "$WORK/prior-null-keys.yml"
+prior_flag() {
+    (
+        HAS_PRIOR_MACHINE=false
+        PRIOR_SELECTED_IDS=" "
+        MACHINE_FILE="$1"
+        load_prior_machine
+        printf '%s' "$HAS_PRIOR_MACHINE"
+    )
+}
+assert_eq "a layers-only machine file is not a prior machine" "false" \
+    "$(prior_flag "$WORK/prior-layers-only.yml")"
+assert_eq "  null answers and selections are not a prior machine" "false" \
+    "$(prior_flag "$WORK/prior-null-keys.yml")"
+assert_eq "  a missing machine file is not a prior machine" "false" \
+    "$(prior_flag "$WORK/no-such-machine.yml")"
+assert_eq "  a file with answers is a prior machine" "true" \
+    "$(prior_flag "$WORK/prior-answers.yml")"
+assert_eq "  a file with only selections is a prior machine" "true" \
+    "$(prior_flag "$WORK/prior-selections.yml")"
+
+# ── manage_layers: with and without layers; machine_write creates the directory ─
+echo "==> bootstrap layer manifest"
+run_layers() {
+    (
+        INTERACTIVE=1
+        ANSWERS_FILE=""
+        MACHINE_FILE="$2"
+        manage_layers < "$1" >/dev/null 2>&1
+    )
+}
+printf 'n\n' > "$WORK/layers-none"
+run_layers "$WORK/layers-none" "$WORK/new-config/machine.yml"
+assert_eq "declining every layer still writes a manifest with none" "0|0" \
+    "$(yq -r '(.layers // [] | length | tostring) + "|" + (.selected_capabilities | length | tostring)' \
+        "$WORK/new-config/machine.yml" 2>/dev/null)"
+printf 'y\npub\ngit@github.com:o/r.git\n\nn\n' > "$WORK/layers-one"
+run_layers "$WORK/layers-one" "$WORK/new-config/machine-one.yml"
+assert_eq "  one layer is written with the default priority" "pub|10" \
+    "$(yq -r '.layers[0].name + "|" + (.layers[0].priority | tostring)' "$WORK/new-config/machine-one.yml" 2>/dev/null)"
+printf -- '---\nlayers:\n  - name: "a"\n    repo: "r"\n    priority: 10\nanswers:\n  editor: "zed"\nselected_capabilities: []\n' \
+    > "$WORK/new-config/machine-reconf.yml"
+printf 'y\nn\n' > "$WORK/layers-reconf"
+run_layers "$WORK/layers-reconf" "$WORK/new-config/machine-reconf.yml"
+assert_eq "  reconfiguring layers keeps the answers on disk" "zed" \
+    "$(yq -r '.answers.editor' "$WORK/new-config/machine-reconf.yml" 2>/dev/null)"
+
+# main must refuse before installing anything when there is neither a terminal
+# nor an --answers file. install_xcode_clt is stubbed so a missing guard shows up
+# as "reached phase 0" instead of running the installer.
+no_tty_main() {
+    (
+        reattach_stdin() { INTERACTIVE=0; }
+        install_xcode_clt() { echo "reached phase 0"; exit 0; }
+        main "$@" 2>&1
+    )
+}
+out="$(no_tty_main)"; rc=$?
+assert_eq "no terminal and no --answers exits 1 with the hint, before phase 0" "1|1" \
+    "$rc|$([[ "$out" == *"No terminal available for prompts."* && "$out" != *"reached phase 0"* ]] && echo 1 || echo "$out")"
+out="$(no_tty_main --answers "$WORK/prior-answers.yml")"; rc=$?
+assert_eq "  --answers needs no terminal" "0|reached phase 0" \
+    "$rc|$([[ "$out" == *"reached phase 0"* ]] && echo "reached phase 0" || echo "$out")"
 
 # With prior answers present, bare Enter must keep them rather than revert to
 # the layer's declared default.
@@ -429,12 +502,47 @@ result="$(
     INTERACTIVE=1
     MERGED_QUESTIONS_FILE="$WORK/questions.tsv"
     MACHINE_FILE="$WORK/machine-answers.yml"
+    HAS_PRIOR_MACHINE=true
     ANSWER_IDS=(); ANSWER_VALUES=()
     gather_answers < "$WORK/q-enter2" >/dev/null 2>&1
     printf '%s=%s' "${ANSWER_IDS[0]}" "${ANSWER_VALUES[0]}"
 )"
 assert_eq "Enter keeps the prior answer instead of the declared default" \
     "editor=zed" "$result"
+
+# bool questions: the declared default is what Enter keeps, in both directions.
+bool_answer() {
+    (
+        INTERACTIVE=1
+        MERGED_QUESTIONS_FILE="$WORK/q-bool.tsv"
+        MACHINE_FILE="$WORK/no-such-machine.yml"
+        ANSWER_IDS=(); ANSWER_VALUES=()
+        gather_answers <<< "$1" >/dev/null 2>&1
+        printf '%s' "${ANSWER_VALUES[0]}"
+    )
+}
+for bool_default in true false; do
+    printf 'flag%sbool%sA flag%s%s%s\n' "$FS_U" "$FS_U" "$FS_U" "$bool_default" "$FS_U" \
+        > "$WORK/q-bool.tsv"
+    assert_eq "bool default ${bool_default}: Enter keeps it" "$bool_default" "$(bool_answer '')"
+    assert_eq "  y answers true" "true" "$(bool_answer y)"
+    assert_eq "  n answers false" "false" "$(bool_answer n)"
+done
+
+# The play gets the pull flags and the repo URL on the apply call.
+mkdir -p "$WORK/fake-bin"
+# shellcheck disable=SC2016 # the stub's $* and $PULL_LOG expand when it runs, not here
+printf '#!/bin/bash\necho "$*" >> "$PULL_LOG"\n' > "$WORK/fake-bin/ansible-pull"
+chmod +x "$WORK/fake-bin/ansible-pull"
+PULL_LOG="$WORK/pull.log" RUNTIME_BIN="$WORK/fake-bin" ANSWERS_FILE=x MACHINE_FILE=/m.yml \
+    run_playbook >/dev/null 2>&1
+assert_eq "run_playbook passes the repo, branch, pull dir and repo URL to ansible-pull" "1|1|1|1" \
+    "$(l="$(<"$WORK/pull.log")"
+       printf '%s|%s|%s|%s' \
+        "$([[ "$l" == "-U $REPO_URL -C $REPO_BRANCH "* ]] && echo 1)" \
+        "$([[ "$l" == *"-d $PULL_DIR "* ]] && echo 1)" \
+        "$([[ "$l" == *"-e computer_setup_repo_url=$REPO_URL"* ]] && echo 1)" \
+        "$([[ "$l" == *" local.yml" ]] && echo 1)")"
 
 # ── 12. load_questions merges layers by descending priority, dedup by id ─────
 (
@@ -448,7 +556,7 @@ assert_eq "questions merge deduped by id" \
     "$(cut -d"$FS_U" -f1 "$WORK/merged-q.tsv" | tr '\n' ' ' | sed 's/ $//')"
 assert_eq "  the higher-priority layer's question wins" \
     "Default editor (override)" \
-    "$(awk -F'\037' '$1=="editor"{print $3}' "$WORK/merged-q.tsv")"
+    "$(awk -F"$FS_U" '$1=="editor"{print $3}' "$WORK/merged-q.tsv")"
 
 # ── 13. Presets ──────────────────────────────────────────────────────────────
 # A preset is a pure prefill. The risks are that it loads nothing (a yq
@@ -464,7 +572,7 @@ echo "==> bootstrap presets"
 assert_eq "presets load from layers" "everything nothing" \
     "$(cut -d"$FS_U" -f1 "$WORK/presets.tsv" | tr '\n' ' ' | sed 's/ $//')"
 assert_eq "  capabilities survive as a csv column" "alpha,zzz-last" \
-    "$(awk -F'\037' '$1=="everything"{print $3}' "$WORK/presets.tsv")"
+    "$(awk -F"$FS_U" '$1=="everything"{print $3}' "$WORK/presets.tsv")"
 assert_eq "  preset_answer extracts one answer" "picked" \
     "$(MERGED_PRESETS_FILE="$WORK/presets.tsv" PRESET_ID=everything preset_answer editor)"
 assert_eq "  preset_answer is empty for an unset question" "" \
@@ -490,7 +598,7 @@ result="$(
     MERGED_CAPABILITIES_FILE="$WORK/caps.tsv"
     MERGED_PRESETS_FILE="$WORK/presets.tsv"
     PRIOR_SELECTED_IDS=" ext-pack "
-    HAS_PRIOR_PREFS=true
+    HAS_PRIOR_MACHINE=true
     PRESET_ID=everything
     PRESET_CAPS=" alpha zzz-last "
     REVIEW_ANSWERS=false
@@ -584,9 +692,28 @@ run_restore() {
         BACKUP_CONFIG="$RBACKUP/cfg/backup.yml"
         BACKUP_REPO_DIR="$RBACKUP/clone-$RANDOM"
         MACHINE_FILE="${4:-$WORK/restored-$RANDOM.yml}"
-        MACHINE_SCRIPT="$REPO_ROOT/scripts/computer-setup-machine"
         offer_restore < "$1" >/dev/null 2>&1
         printf '%s' "$ANSWERS_FILE"
+    )
+}
+
+# The fresh-machine path: no checkout (SCRIPT_DIR empty), so the helper is
+# downloaded. file:// stands in for raw.githubusercontent.com.
+#   $1 raw base URL; prints "<rc>|<ANSWERS_FILE set?>|<leftover temp files>|<output>"
+run_restore_download() {
+    mkdir -p "$WORK/dl-tmp"
+    (
+        INTERACTIVE=1
+        ANSWERS_FILE=""
+        SCRIPT_DIR=""
+        RAW_BASE="$1"
+        TMPDIR="$WORK/dl-tmp"
+        BACKUP_CONFIG="$RBACKUP/cfg/backup.yml"
+        BACKUP_REPO_DIR="$RBACKUP/clone-$RANDOM"
+        MACHINE_FILE="$WORK/restored-$RANDOM.yml"
+        offer_restore < "$WORK/pick-1" > "$WORK/dl-out" 2>&1; rc=$?
+        printf '%s|%s|%s|%s' "$rc" "${ANSWERS_FILE:+set}" \
+            "$(find "$WORK/dl-tmp" -type f | wc -l | tr -d ' ')" "$(<"$WORK/dl-out")"
     )
 }
 
@@ -598,6 +725,7 @@ if [[ -n "$got" && -f "$got" ]]; then
     pass "choosing a backup sets ANSWERS_FILE to the fetched declaration"
     assert_eq "  the restored file carries the layers" "2" \
         "$(yq -r '.layers | length' "$got" 2>/dev/null)"
+    assert_eq "  and is private" "600" "$(stat -f '%OLp' "$got" 2>/dev/null)"
 else
     fail "choosing a backup sets ANSWERS_FILE to the fetched declaration" "got [$got]"
 fi
@@ -615,6 +743,17 @@ assert_eq "--answers wins over a restore prompt" "supplied.yml" \
 printf -- '---\nlayers: []\n' > "$WORK/already.yml"
 assert_eq "an already-declared machine is not offered a restore" "" \
     "$(run_restore "$WORK/pick-1" 1 "" "$WORK/already.yml")"
+
+# pick-1 is defined above the guards; `run_restore_download` reads it too.
+got="$(run_restore_download "file://$REPO_ROOT")"
+dl_rc="${got%%|*}"; got="${got#*|}"; dl_set="${got%%|*}"; got="${got#*|}"
+dl_tmp="${got%%|*}"; dl_out="${got#*|}"
+assert_eq "a downloaded helper restores and leaves no temp file behind" "0|set|0" "$dl_rc|$dl_set|$dl_tmp"
+got="$(run_restore_download "file://$WORK/no-such-raw-base")"
+dl_rc="${got%%|*}"; got="${got#*|}"; dl_set="${got%%|*}"; got="${got#*|}"
+dl_tmp="${got%%|*}"; dl_out="${got#*|}"
+assert_eq "an undownloadable helper warns and continues, never fails" "0||0|warned" \
+    "$dl_rc|$dl_set|$dl_tmp|$([[ "$dl_out" == *"Could not read the machine backup repo"* ]] && echo warned || echo "$dl_out")"
 
 # ─── Where bootstrap thinks it is running from ───────────────────────────────
 # Under `curl | bash` there is no file, so BASH_SOURCE is empty and the old
