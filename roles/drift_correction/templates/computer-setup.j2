@@ -630,33 +630,33 @@ cmd_progress() {
         echo "No run has recorded progress yet."
         return 0
     fi
-    local head last done_line total current n
+    local PROGRESS_STALLED_SECONDS=300
+    local head last head_event mode total last_event result tasks n current
     head="$(head -n1 "$PROGRESS_FILE")"
     last="$(tail -n1 "$PROGRESS_FILE")"
-    done_line="$(yq -r 'select(.event == "end") | .result' <<<"$last" 2>/dev/null)"
+    # A half-written line makes yq fail, leaving every field empty. `|` is not
+    # whitespace, so read keeps empty fields; task goes last as it may hold `|`.
+    IFS='|' read -r head_event mode total < <(yq -r \
+        '[.event, (.mode | tostring), (.total_estimate // 0)] | join("|")' <<<"$head" 2>/dev/null)
+    IFS='|' read -r last_event result tasks n current < <(yq -r \
+        '[.event, (.result // ""), (.tasks | tostring), (.n // 0), (.task // "")] | join("|")' <<<"$last" 2>/dev/null)
 
-    if [[ -n "$done_line" && "$done_line" != "null" ]]; then
-        printf 'Not running. Last run: %s — %s (%s task(s))\n' \
-            "$(yq -r '.mode' <<<"$head" 2>/dev/null)" "$done_line" \
-            "$(yq -r '.tasks' <<<"$last" 2>/dev/null)"
+    if [[ "$last_event" == "end" && -n "$result" ]]; then
+        printf 'Not running. Last run: %s — %s (%s task(s))\n' "$mode" "$result" "$tasks"
         return 0
     fi
 
-    if [[ "$(yq -r '.event' <<<"$head" 2>/dev/null)" == "launching" ]]; then
-        printf '%s  starting — syncing layers and fetching the orchestrator\n' \
-            "$(yq -r '.mode' <<<"$head" 2>/dev/null)"
+    if [[ "$head_event" == "launching" ]]; then
+        printf '%s  starting — syncing layers and fetching the orchestrator\n' "$mode"
         return 0
     fi
 
-    total="$(yq -r '.total_estimate // 0' <<<"$head" 2>/dev/null)"
-    n="$(yq -r '.n // 0' <<<"$last" 2>/dev/null)"
-    current="$(yq -r '.task // ""' <<<"$last" 2>/dev/null)"
     # No end marker does not prove a run is live — it may have been killed. The
     # file's mtime is the only evidence either way, so say which it is rather
     # than animating a bar for a process that died an hour ago.
     local age
     age=$(( $(date +%s) - $(stat -f %m "$PROGRESS_FILE" 2>/dev/null || echo 0) ))
-    if [[ "$age" -gt 300 ]]; then
+    if [[ "$age" -gt "$PROGRESS_STALLED_SECONDS" ]]; then
         printf 'Stalled or interrupted — no progress for %sm, stopped at task %s.\n' \
             "$(( age / 60 ))" "${n:-?}"
         printf '  last: %s\n' "$current"
@@ -677,13 +677,11 @@ cmd_progress() {
         for (( i = 0; i < 20; i++ )); do
             if (( i < filled )); then bar+="#"; else bar+="."; fi
         done
-        printf '%s  [%s] %s%%  %s/%s\n' \
-            "$(yq -r '.mode' <<<"$head" 2>/dev/null)" \
-            "$bar" "$pct" "$n" "$total"
+        printf '%s  [%s] %s%%  %s/%s\n' "$mode" "$bar" "$pct" "$n" "$total"
     else
         # First run of a mode has no previous run to size against.
         printf '%s  task %s (no estimate yet — needs one completed run of this mode)\n' \
-            "$(yq -r '.mode' <<<"$head" 2>/dev/null)" "$n"
+            "$mode" "$n"
     fi
     printf '  now: %s\n' "$current"
 }
