@@ -103,11 +103,7 @@ export PYTHONUNBUFFERED=1
 # way to run without it, a broken mitogen would leave a machine unable to heal
 # itself. `CS_NO_MITOGEN=1 computer-setup apply` is that way.
 MITOGEN_STRATEGY_DIR="{{ computer_setup_runtime_tools }}/ansible-core/lib/python{{ computer_setup_python_version }}/site-packages/ansible_mitogen/plugins/strategy"
-use_mitogen() {
-    [[ "${CS_NO_MITOGEN:-0}" == "1" ]] && return 1
-    [[ -d "$MITOGEN_STRATEGY_DIR" ]]
-}
-if use_mitogen; then
+if [[ "${CS_NO_MITOGEN:-0}" != "1" && -d "$MITOGEN_STRATEGY_DIR" ]]; then
     export ANSIBLE_STRATEGY_PLUGINS="$MITOGEN_STRATEGY_DIR"
     export ANSIBLE_STRATEGY=mitogen_linear
 fi
@@ -143,6 +139,10 @@ ARGS=(-U "$REPO_URL" -C "$REPO_BRANCH" -d "$PULL_DIR"
 
 notify() {
     /usr/bin/osascript -e "display notification \"${2}\" with title \"${1}\"" 2>/dev/null || true
+}
+
+notify_failed() {
+    notify "computer-setup ${1} failed" "Exited rc=${2}. Run \`computer-setup log\`."
 }
 
 log() { printf '%s\n' "$*" >> "${RUN_LOG:-/dev/null}"; }
@@ -265,7 +265,7 @@ EOF
 # This includes `apply` — the mode a human runs by hand is the one that most
 # needs current layers.
 sync_layers() {
-    [[ -n "$MACHINE_FILE" && -f "$MACHINE_FILE" && -n "$LAYER_CACHE" ]] || return 0
+    [[ -f "$MACHINE_FILE" && -n "$LAYER_CACHE" ]] || return 0
     "$LAYER_SYNC" sync --manifest "$MACHINE_FILE" --cache "$LAYER_CACHE" \
         --schema-version {{ computer_setup_schema_version }}
 }
@@ -337,7 +337,7 @@ run_foreground() {
     # menu bar and `status` both show the failure regardless; this is for the
     # case where neither is being looked at.
     if [[ $rc -ne 0 && ! -t 1 ]]; then
-        notify "computer-setup ${mode} failed" "Exited rc=${rc}. Run \`computer-setup log\`."
+        notify_failed "$mode" "$rc"
     fi
     [[ $rc -eq 0 ]] && prune_logs
     return "$rc"
@@ -418,15 +418,6 @@ cmd_upgrade() {
 }
 
 # ─── Run state ───────────────────────────────────────────────────────────────
-# Read one field out of the state file. JSON is valid YAML and yq detects the
-# .json extension, so no -p flag; yq is a bootstrap prerequisite, so it is always
-# present. Missing file or missing key both yield empty, never an error: state is
-# a REPORT, and a machine with no report yet is not a broken machine.
-state_field() {
-    [[ -f "$LAST_RUN_FILE" ]] || return 0
-    yq -r "${1} // \"\"" "$LAST_RUN_FILE" 2>/dev/null | grep -v '^null$' || true
-}
-
 # The stamp in a success file, whitespace stripped; empty if missing.
 read_stamp() {
     [[ -f "$1" ]] || return 0
@@ -755,7 +746,25 @@ cmd_repos() {
     done
 }
 
+cmd_capture() {
+    exec "${BIN_DIR}/macos-capture" "$@"
+}
+
 # ─── Scheduled modes (LaunchAgents) ──────────────────────────────────────────
+# Retried: at 09:00 the network is often not up yet (wake, VPN). Every failure's
+# stderr is logged, because a bare "unreachable" cannot be diagnosed afterwards.
+repo_reachable() {
+    local tries=3 try err
+    for ((try = 1; try <= tries; try++)); do
+        if err=$(git ls-remote --exit-code "$REPO_URL" "$REPO_BRANCH" 2>&1 >/dev/null); then
+            return 0
+        fi
+        log "probe ${try}/${tries} failed: ${err:-no output}"
+        if [[ $try -lt $tries ]]; then sleep "${PROBE_RETRY_DELAY:-20}"; fi
+    done
+    return 1
+}
+
 # Logged, notified, and guarded on connectivity. Never interactive.
 run_scheduled() {
     local mode="$1"; shift
@@ -786,20 +795,7 @@ run_scheduled() {
     # "check failed" notification indistinguishable from a real breakage. A
     # closed laptop, a blocked port and an expired key are all "can't work right
     # now", not "your config is broken".
-    # Retried: at 09:00 the network is often not up yet (wake, VPN). The first
-    # failure's stderr is kept in the log, because a bare "unreachable" cannot be
-    # diagnosed afterwards.
-    local probe_try probe_err reachable=0
-    PROBE_TRIES=3
-    for ((probe_try = 1; probe_try <= PROBE_TRIES; probe_try++)); do
-        if probe_err=$(git ls-remote --exit-code "$REPO_URL" "$REPO_BRANCH" 2>&1 >/dev/null); then
-            reachable=1
-            break
-        fi
-        log "probe ${probe_try}/${PROBE_TRIES} failed: ${probe_err:-no output}"
-        if [[ $probe_try -lt $PROBE_TRIES ]]; then sleep "${PROBE_RETRY_DELAY:-20}"; fi
-    done
-    if [[ $reachable -ne 1 ]]; then
+    if ! repo_reachable; then
         log "RESULT: skipped — ${REPO_URL} unreachable (offline, port 22 blocked, or SSH key unavailable)"
         exit 0
     fi
@@ -823,7 +819,7 @@ run_scheduled() {
                     -e computer_setup_upgrade_include_casks=false)
     fi
 
-    local pull_out rc partial=0
+    local pull_out rc changed_count partial=0
     # The scheduled upgrade is `--tags upgrade`, so like the interactive one it
     # is never a statement about the whole machine. The scheduled CHECK is.
     [[ "$mode" == "upgrade" || $# -gt 0 ]] && partial=1
@@ -833,20 +829,19 @@ run_scheduled() {
 
     log "$pull_out"
 
+    if [[ $rc -ne 0 ]]; then
+        notify_failed "$mode" "$rc"
+        log "RESULT: ansible-pull failed (rc=$rc)"
+        exit "$rc"
+    fi
+
     # Read the count from the state file the callback plugin wrote, NOT from the
     # console output. ansible-pull emits its own checkout play alongside the real
     # one, with [WARNING] lines interleaved between them, so every text-based
     # count has to guess which recap is which. The plugin runs inside the play
-    # and simply knows.
-    local changed_count
-    changed_count=$(state_field '.totals.changed')
+    # and simply knows. Missing file or key leaves it non-numeric, hence 0.
+    changed_count=$(yq -r '.totals.changed' "$LAST_RUN_FILE" 2>/dev/null)
     [[ "$changed_count" =~ ^[0-9]+$ ]] || changed_count=0
-
-    if [[ $rc -ne 0 ]]; then
-        notify "computer-setup ${mode} failed" "ansible-pull exited rc=$rc. Run \`computer-setup log\`."
-        log "RESULT: ansible-pull failed (rc=$rc)"
-        exit "$rc"
-    fi
 
     # Only a run that actually reached the repo and finished gets here, which is
     # exactly what "still syncing" means.
@@ -942,7 +937,7 @@ case "$COMMAND" in
     history)            cmd_history "$@" ;;
     progress)           cmd_progress "$@" ;;
     repos)              cmd_repos "$@" ;;
-    capture)            exec "${BIN_DIR}/macos-capture" "$@" ;;
+    capture)            cmd_capture "$@" ;;
     layers)             cmd_layers "$@" ;;
     _scheduled-check)   run_scheduled check "$@" ;;
     _scheduled-upgrade) run_scheduled upgrade "$@" ;;
