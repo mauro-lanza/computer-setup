@@ -208,21 +208,14 @@
       loop_control:
         label: "{{ item.key }}"
 
-- name: Build the cross-layer file search path
+- name: Build the cross-layer file and template search paths
   ansible.builtin.set_fact:
     computer_setup_file_search_dirs: >-
-      {{ (computer_setup_active_layers | reverse | list)
-         | map(attribute='name')
-         | map('regex_replace', '^(.*)$', computer_setup_layer_cache + '/\1/files')
-         | list }}
-
-- name: Build the cross-layer template search path
-  ansible.builtin.set_fact:
+      {{ _names | map('regex_replace', '^(.*)$', computer_setup_layer_cache + '/\1/files') | list }}
     computer_setup_template_search_dirs: >-
-      {{ (computer_setup_active_layers | reverse | list)
-         | map(attribute='name')
-         | map('regex_replace', '^(.*)$', computer_setup_layer_cache + '/\1/templates')
-         | list }}
+      {{ _names | map('regex_replace', '^(.*)$', computer_setup_layer_cache + '/\1/templates') | list }}
+  vars:
+    _names: "{{ computer_setup_active_layers | reverse | map(attribute='name') | list }}"
 
 - name: Merge each layer's capabilities.yml into the capability registry
   ansible.builtin.include_tasks: merge_layer_capabilities.yml

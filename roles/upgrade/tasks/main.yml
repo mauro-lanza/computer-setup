@@ -20,11 +20,11 @@
 # machine, managed or not. Skip rather than preview packages we do not manage.
 - name: Determine which managed formulae are outdated
   ansible.builtin.command:
-    argv: "{{ ['brew', 'outdated', '--formula', '--verbose'] + upgrade_managed_formulae }}"
+    argv: "{{ ['brew', 'outdated', '--formula', '--verbose'] + homebrew_managed_formulae }}"
   register: upgrade_outdated_formulae
   changed_when: false
   failed_when: false
-  when: upgrade_managed_formulae | length > 0
+  when: homebrew_managed_formulae | length > 0
 
 - name: Determine which managed casks are outdated
   ansible.builtin.command:
@@ -49,7 +49,7 @@
     msg: |-
       ── Pending upgrades (preview) ───────────────────────────────
       Homebrew formulae:
-      {% if upgrade_managed_formulae | length == 0 %}
+      {% if homebrew_managed_formulae | length == 0 %}
         (none managed)
       {% elif upgrade_outdated_formulae.skipped | default(false) %}
         (not checked — `brew outdated` cannot run under --check)
@@ -79,7 +79,7 @@
       {% endif %}
 
       Also refreshed to latest on apply (not pre-diffable):
-        Ansible Galaxy collections, Node.js {{ upgrade_nvm_node }}.
+        Ansible Galaxy collections{{ ', Node.js ' ~ upgrade_nvm_node if upgrade_nvm_enabled | bool else '' }}.
       ─────────────────────────────────────────────────────────────
 
 - name: Apply the confirmed upgrades
@@ -141,9 +141,9 @@
 
     - name: Upgrade managed Homebrew formulae to latest
       community.general.homebrew:
-        name: "{{ upgrade_managed_formulae }}"
+        name: "{{ homebrew_managed_formulae }}"
         state: latest
-      when: upgrade_managed_formulae | length > 0
+      when: homebrew_managed_formulae | length > 0
 
     # One cask at a time with ignore_errors: passing the whole list to a single
     # task meant the first broken cask aborted the Galaxy and Node upgrades that
@@ -168,24 +168,27 @@
         - computer_setup_upgrade_include_casks | bool
         - upgrade_managed_casks | length > 0
 
-    - name: Check if nvm is installed (to upgrade Node)
-      ansible.builtin.stat:
-        path: "{{ homebrew_prefix }}/opt/nvm/nvm.sh"
-      register: upgrade_nvm_script
+    - name: Upgrade Node.js via nvm
+      when: upgrade_nvm_enabled | bool
+      block:
+        - name: Check if nvm is installed (to upgrade Node)
+          ansible.builtin.stat:
+            path: "{{ runtimes_nvm_script_path }}"
+          register: upgrade_nvm_script
 
-    # Version spec is quoted: the default is `lts/*` and zsh's NOMATCH makes an
-    # unmatched glob a fatal error before nvm is ever invoked.
-    - name: Upgrade default Node.js to newest via nvm ({{ upgrade_nvm_node }})
-      ansible.builtin.shell: |
-        export NVM_DIR="$HOME/.nvm"
-        source "{{ homebrew_prefix }}/opt/nvm/nvm.sh"
-        nvm install '{{ upgrade_nvm_node }}' --latest-npm
-        nvm alias default '{{ upgrade_nvm_node }}'
-      args:
-        executable: /bin/bash
-      register: upgrade_nvm_result
-      changed_when: "'Downloading and installing' in upgrade_nvm_result.stdout"
-      when: upgrade_nvm_script.stat.exists
+        # Version spec is quoted: the default is `lts/*` and zsh's NOMATCH makes an
+        # unmatched glob a fatal error before nvm is ever invoked.
+        - name: Upgrade default Node.js to newest via nvm ({{ upgrade_nvm_node }})
+          ansible.builtin.shell: |
+            export NVM_DIR="$HOME/.nvm"
+            source "{{ runtimes_nvm_script_path }}"
+            nvm install '{{ upgrade_nvm_node }}' --latest-npm
+            nvm alias default '{{ upgrade_nvm_node }}'
+          args:
+            executable: /bin/bash
+          register: upgrade_nvm_result
+          changed_when: "'Downloading and installing' in upgrade_nvm_result.stdout"
+          when: upgrade_nvm_script.stat.exists
 
 - name: Report casks that failed to upgrade
   ansible.builtin.fail:

@@ -115,3 +115,70 @@
       ansible.builtin.file:
         path: "{{ scratch.path }}"
         state: absent
+
+# A conditional identity is deployed, referenced from the managed config under
+# the same file name, and reaped when it is no longer declared.
+- name: A removed conditional identity is reaped
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    _id_a: {condition: "gitdir:~/a/", email: a@example.com}
+    _id_b: {condition: "gitdir:~/b/", email: b@example.com}
+  tasks:
+    - name: Create a scratch HOME
+      ansible.builtin.tempfile:
+        state: directory
+      register: scratch
+
+    - name: Apply the git role with two identities, then one
+      vars:
+        home_dir: "{{ scratch.path }}"
+      environment:
+        GIT_CONFIG_GLOBAL: "{{ scratch.path }}/.gitconfig"
+      block:
+        - name: Two identities
+          ansible.builtin.include_role:
+            name: git
+          vars:
+            git_conditional_identities: ["{{ _id_a }}", "{{ _id_b }}"]
+
+        - name: Find the identity files after run 1
+          ansible.builtin.find:
+            paths: "{{ scratch.path }}/.config/git"
+            patterns: "identity-*.gitconfig"
+          register: ids_before
+
+        - name: Read the managed config
+          ansible.builtin.slurp:
+            src: "{{ scratch.path }}/.config/git/computer-setup.gitconfig"
+          register: managed_before
+
+        - name: One identity
+          ansible.builtin.include_role:
+            name: git
+          vars:
+            git_conditional_identities: ["{{ _id_a }}"]
+
+        - name: Find the identity files after run 2
+          ansible.builtin.find:
+            paths: "{{ scratch.path }}/.config/git"
+            patterns: "identity-*.gitconfig"
+          register: ids_after
+
+        - name: Assert the includeIf paths exist, and only the declared one survives
+          vars:
+            before: "{{ ids_before.files | map(attribute='path') | list }}"
+            after: "{{ ids_after.files | map(attribute='path') | list }}"
+            managed: "{{ managed_before.content | b64decode }}"
+          ansible.builtin.assert:
+            that:
+              - before | length == 2
+              - after | length == 1
+              - after[0] in before
+              - before | select('in', managed) | list | length == 2
+
+    - name: Remove the scratch HOME
+      ansible.builtin.file:
+        path: "{{ scratch.path }}"
+        state: absent

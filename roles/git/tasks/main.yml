@@ -11,6 +11,21 @@
     state: directory
     mode: "0755"
 
+- name: Resolve git identity file names and the gitignore decision
+  ansible.builtin.set_fact:
+    git_gitignore_declared: "{{ (git_global_gitignore_entries | default([], true)) | length > 0 }}"
+    # Keyed by condition: the template, the deploy and the reconcile below all
+    # need the same name.
+    git_identity_files: >-
+      {{ dict(_conditions
+              | zip(_conditions | map('hash', 'md5')
+                    | map('regex_replace', '^(.*)$',
+                          git_managed_config_dir ~ '/identity-\1.gitconfig'))) }}
+  vars:
+    _conditions: >-
+      {{ git_conditional_identities | default([], true)
+         | map(attribute='condition') | list }}
+
 - name: Deploy global .gitignore file
   ansible.builtin.copy:
     content: |
@@ -24,7 +39,7 @@
     # restored ignore file to one comment line — and gitconfig.j2 then points
     # core.excludesFile at the file just emptied.
     backup: true
-  when: git_global_gitignore_entries | default([], true) | length > 0
+  when: git_gitignore_declared
 
 # Refuse to point git at an exclude file this role did not populate. Writing a
 # one-line stub and wiring core.excludesFile to it is worse than leaving both
@@ -34,7 +49,7 @@
     msg: >-
       No `git_global_gitignore_entries` declared by any active layer —
       leaving {{ git_global_gitignore_path }} untouched.
-  when: git_global_gitignore_entries | default([], true) | length == 0
+  when: not git_gitignore_declared
 
 - name: Deploy the managed git config
   ansible.builtin.template:
@@ -45,7 +60,7 @@
 - name: Deploy per-directory identity files
   ansible.builtin.template:
     src: identity.gitconfig.j2
-    dest: "{{ git_managed_config_dir }}/identity-{{ identity.condition | hash('md5') }}.gitconfig"
+    dest: "{{ git_identity_files[identity.condition] }}"
     mode: "0644"
   loop: "{{ git_conditional_identities | default([], true) }}"
   loop_control:
@@ -68,10 +83,7 @@
     state: absent
   loop: >-
     {{ (git_identity_found.files | default([]) | map(attribute='path') | list)
-       | difference(git_conditional_identities | default([], true)
-                    | map(attribute='condition') | map('hash', 'md5')
-                    | map('regex_replace', '^(.*)$',
-                          git_managed_config_dir ~ '/identity-\1.gitconfig') | list) }}
+       | difference(git_identity_files.values() | list) }}
   loop_control:
     label: "{{ item | basename }}"
 

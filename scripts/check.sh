@@ -142,6 +142,7 @@ ansible-playbook --syntax-check tests/truncation.yml
 ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook --syntax-check tests/robustness.yml
 ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook --syntax-check tests/shell.yml
 ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook --syntax-check tests/repositories.yml
+ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook --syntax-check tests/repositories-override.yml
 ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook --syntax-check tests/upgrade.yml
 ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook --syntax-check tests/logins.yml
 ansible-playbook --syntax-check tests/orphans.yml
@@ -690,6 +691,18 @@ rp_out="$(ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook tests/repositories.ym
     exit 1
 }
 echo "  ok  clone once, hook once, local work untouched, inactive skipped"
+for ro_case in none empty bare list; do
+    ro_dir="$(mktemp -d)"
+    mkdir -p "$ro_dir/cfg"
+    ro_out="$(ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook tests/repositories-override.yml \
+        -e repo_case="$ro_case" -e repo_scratch="$ro_dir" 2>&1)" || {
+        printf '%s\n' "$ro_out" >&2
+        echo "ERROR: repository override case '$ro_case' failed" >&2
+        exit 1
+    }
+    rm -rf -- "$ro_dir"
+done
+echo "  ok  override file wins only when it declares repositories (none, empty, bare key, list)"
 echo "==> Logins and upgrade roles"
 for t in logins upgrade; do
     lu_out="$(ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook "tests/$t.yml" 2>&1)" || {
@@ -697,6 +710,13 @@ for t in logins upgrade; do
         exit 1
     }
 done
+# The preview names Node only while the nvm capability is active: once with it
+# on, once with it off.
+[[ "$(grep -c 'Node\.js lts' <<<"$lu_out")" == 1 ]] || {
+    echo "ERROR: the upgrade preview must mention Node exactly when nvm is active" >&2
+    printf '%s\n' "$lu_out" >&2
+    exit 1
+}
 echo "  ok  logins detect/remedy gating, upgrade preview queries only managed packages"
 echo "==> Scheduled runner"
 ./tests/runner.sh

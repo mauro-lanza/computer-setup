@@ -22,6 +22,9 @@ computer_setup_upgrade_include_casks: true
 # Node line to re-resolve to the newest available version on upgrade.
 upgrade_nvm_node: "{{ runtimes_nvm_default_node }}"
 
+# Node is upgraded only when the nvm capability is active, as `runtimes` does.
+upgrade_nvm_enabled: "{{ runtimes_nvm_capability in computer_setup_active_capabilities }}"
+
 # Records which ansible-core the Galaxy collections were last resolved against.
 # State, not config: it describes what this machine did, and deleting it costs
 # nothing but one extra `--upgrade` on the next run.

@@ -26,3 +26,8 @@ homebrew_adopt_casks: []
 # by the core role (which keeps the machine file format short).
 homebrew_optional_formulae: []
 homebrew_optional_casks: []
+
+# What the homebrew and upgrade roles both act on, derived once.
+homebrew_managed_taps: "{{ (homebrew_baseline_taps + homebrew_optional_taps) | unique | list }}"
+homebrew_managed_formulae: "{{ homebrew_baseline_formulae + homebrew_optional_formulae }}"
+homebrew_managed_casks: "{{ homebrew_baseline_casks + homebrew_optional_casks }}"

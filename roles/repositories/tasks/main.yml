@@ -17,11 +17,9 @@
 # role. `computer-setup repos` emits exactly that on a machine with no checkouts yet.
 - name: Resolve the effective repository list
   ansible.builtin.set_fact:
-    repositories: "{{ _override | default(repositories, true) | default([], true) }}"
-  vars:
-    _override: >-
-      {{ (repositories_override | default({}, true)).repositories | default(None, true)
-         if repositories_override_stat.stat.exists else None }}
+    repositories: >-
+      {{ (repositories_override | default({}, true)).repositories
+         | default(repositories, true) | default([], true) }}
 
 - name: Report an empty repository list
   ansible.builtin.debug:

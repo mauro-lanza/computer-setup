@@ -11,6 +11,9 @@
 runtimes_nvm_capability: nvm
 runtimes_tfenv_capability: tfenv
 
+# Shared with the upgrade role, which sources it to upgrade Node.
+runtimes_nvm_script_path: "{{ homebrew_prefix }}/opt/nvm/nvm.sh"
+
 # Node version installed and set as the nvm default.
 runtimes_nvm_default_node: "lts/*"
 

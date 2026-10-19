@@ -9,7 +9,7 @@
 # defaults/main.yml for why they are not layer data.
 - name: Check if nvm is installed (to converge the default Node alias)
   ansible.builtin.stat:
-    path: "{{ homebrew_prefix }}/opt/nvm/nvm.sh"
+    path: "{{ runtimes_nvm_script_path }}"
   register: runtimes_nvm_script
   when: runtimes_nvm_capability in computer_setup_active_capabilities
 

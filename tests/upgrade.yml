@@ -27,12 +27,12 @@
 
     - name: Preview with casks, one excluded
       vars:
-        homebrew_baseline_formulae: [gitx]
-        homebrew_optional_formulae: [rg]
-        homebrew_baseline_casks: [appa, appb]
-        homebrew_optional_casks: []
+        homebrew_managed_formulae: [gitx, rg]
+        homebrew_managed_casks: [appa, appb]
         upgrade_casks_exclude: [appb]
         runtimes_nvm_default_node: lts/*
+        runtimes_nvm_capability: nvm
+        computer_setup_active_capabilities: [nvm]
         computer_setup_state_dir: "{{ s.path }}/state"
       environment:
         PATH: "{{ s.path }}:{{ lookup('env', 'PATH') }}"
@@ -54,6 +54,7 @@
                 name: upgrade
               vars:
                 computer_setup_upgrade_include_casks: false
+                computer_setup_active_capabilities: []
         - name: Read calls again
           ansible.builtin.slurp:
             src: "{{ s.path }}/calls"

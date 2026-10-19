@@ -6,13 +6,13 @@
 # real fresh Mac hit it.
 - name: Ensure required Homebrew taps
   community.general.homebrew_tap:
-    name: "{{ (homebrew_baseline_taps + homebrew_optional_taps) | unique }}"
+    name: "{{ homebrew_managed_taps }}"
     state: present
-  when: (homebrew_baseline_taps + homebrew_optional_taps) | length > 0
+  when: homebrew_managed_taps | length > 0
 
 - name: Install formulae (and refresh Homebrew first)
   community.general.homebrew:
-    name: "{{ homebrew_baseline_formulae + homebrew_optional_formulae }}"
+    name: "{{ homebrew_managed_formulae }}"
     state: present
     # Never refresh under --check: the module short-circuits there and never
     # reaches the install step, so the dry-run reports "Homebrew would be
@@ -38,7 +38,7 @@
     state: present
     install_options: "{{ 'adopt' if item in homebrew_adopt_casks else omit }}"
     sudo_password: "{{ lookup('env', 'CS_SUDO_PASSWORD') | default(omit, true) }}"
-  loop: "{{ homebrew_baseline_casks + homebrew_optional_casks }}"
+  loop: "{{ homebrew_managed_casks }}"
   loop_control:
     label: "{{ item }}"
   register: homebrew_cask_results

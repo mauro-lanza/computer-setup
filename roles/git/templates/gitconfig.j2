@@ -43,5 +43,5 @@
 {# Rendered last on purpose: an includeIf must come after the global [user]  #}
 {# block it is meant to override, or git keeps the global identity.          #}
 [includeIf "{{ identity.condition }}"]
-	path = {{ git_managed_config_dir }}/identity-{{ identity.condition | hash('md5') }}.gitconfig
+	path = {{ git_identity_files[identity.condition] }}
 {% endfor %}

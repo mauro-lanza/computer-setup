@@ -1,0 +1,35 @@
+---
+# Which repository list wins: the machine override file, or the layers' list.
+# Run once per case (-e repo_case=none|empty|bare|list -e repo_scratch=DIR): the
+# role's `repositories` fact outlives the play, so cases cannot share a process.
+# Every entry is `active: false`, so nothing is cloned.
+- name: Repository override resolution
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    repositories_base_dir: "{{ repo_scratch }}/base"
+    computer_setup_config_dir: "{{ repo_scratch }}/cfg"
+    repositories:
+      - {folder: layer, remote: "{{ repo_scratch }}/src", active: false}
+    _override_content:
+      none: null
+      empty: ""
+      bare: "repositories:\n"
+      list: "repositories:\n  - {folder: override, remote: x, active: false}\n"
+  tasks:
+    - name: Write the override file
+      ansible.builtin.copy:
+        content: "{{ _override_content[repo_case] }}"
+        dest: "{{ computer_setup_config_dir }}/repositories.yml"
+        mode: "0644"
+      when: repo_case != 'none'
+
+    - name: Run the role
+      ansible.builtin.include_role:
+        name: repositories
+
+    - name: Assert the winning list
+      ansible.builtin.assert:
+        that:
+          - (repositories | map(attribute='folder') | list) == ['override' if repo_case == 'list' else 'layer']
