@@ -1,36 +1,13 @@
 #!/bin/bash
-# Regression tests for bootstrap.sh's interactive prompt path.
-#
-# WHY THIS EXISTS
-# ---------------
-# Everything else in scripts/check.sh validates static artefacts: `bash -n`
-# parses bootstrap.sh, ansible-playbook syntax-checks the roles, the contract
-# playbook exercises the merge. None of that executes a single prompt — so the
-# one code path that ONLY ever runs on a fresh machine had zero coverage, and
-# shipped two bugs that made a from-scratch install silently useless:
-#
-#   1. The capability loop read its list from stdin (`done < "$FILE"`), while
-#      ask_yn's `read` also read from stdin. Every prompt ate the NEXT capability
-#      line as its answer: half the capabilities were skipped, none were ever
-#      selected, and bash suppressed the prompt text entirely (it only renders a
-#      `read -p` prompt when stdin is a terminal). Result: `selected_capabilities: []`
-#      on every fresh machine, with no error and no visible symptom.
-#
-#   2. The loop body ended in `[[ "$id" == "vscode" ]] && ...`, so when the last
-#      capability was selected and wasn't literally `vscode`, the while loop —
-#      and therefore the function — returned 1. Under `set -e` that aborts
-#      bootstrap AFTER the final prompt but BEFORE write_machine, leaving no
-#      machine file at all.
-#
-# Both are invisible to a human running bootstrap (it looks like it worked) and
-# both are trivially caught by driving the loop with a scripted answer file.
-# Every assertion below maps to a specific way the selection path can rot.
+# Regression tests for bootstrap.sh's interactive prompt path, the one code path
+# that only runs on a fresh machine. Each assertion maps to a way selection can rot:
+#   - the capability loop and `ask_yn` both reading stdin (every prompt ate the
+#     next capability, so nothing was ever selected);
+#   - a trailing failed test making the loop return 1, which `set -e` turns into
+#     an exit before write_machine.
 
-# Every assertion below runs its subject in a subshell to isolate global state,
-# then reads the result back through stdout. shellcheck cannot see that the
-# globals set inside those subshells are consumed by the functions sourced from
-# bootstrap.sh, so it reports them all as unused or lost. This directive is
-# file-scoped and must stay above the first command.
+# The assertions run in subshells; shellcheck cannot see their globals consumed
+# by the sourced functions. File-scoped, so it must stay above the first command.
 # shellcheck disable=SC2034,SC2030,SC2031
 # shellcheck source-path=SCRIPTDIR/..
 
@@ -62,31 +39,23 @@ assert_eq() {
     fi
 }
 
-# A capability list in the same TSV shape load_capabilities produces:
-#   id \t desc \t type \t packages \t requires
-# `vscode` sits BEFORE `ext-pack` so the in-run "VS Code was just selected"
-# unlock is exercised, and `zzz-last` is deliberately final and not named
-# `vscode` — that is the exact shape that triggered bug 2.
-# One merged-registry row. Fields are separated by FS_U (ASCII Unit Separator),
-# not tab — see the comment on FS_U in bootstrap.sh. Joining via IFS keeps the
-# field COUNT correct by construction: the merged file now carries six columns
-# (id, desc, type, packages, requires, adopt_if_present) and a row short by one
-# would shift every later field.
+# One merged-registry row, fields joined by FS_U via IFS so the column count
+# (id, desc, type, packages, requires, adopt_if_present) is right by construction.
 caps_row() {
     local IFS="$FS_U"
     printf '%s\n' "$*"
 }
 
-# $1 (optional): the adopt_if_present path for the `vscode` row, i.e. "this
-# capability is already installed on the machine".
+# `vscode` precedes `ext-pack` to exercise the in-run unlock; `zzz-last` is last
+# and not `vscode`, the shape that made the loop return 1.
+# $1 (optional): the adopt_if_present path for the `vscode` row.
 make_caps() {
     caps_row alpha      "Alpha tool"            formula   alpha                ""       ""
     caps_row vscode     "Visual Studio Code"    cask      visual-studio-code   ""       "${1:-}"
     caps_row ext-pack   "Editor extension pack" extension some.extension       vscode   ""
     caps_row zzz-last   "Last capability"       formula   zzz                  ""       ""
-    # A `feature` capability: no packages, but it DOES declare `requires`. With a
-    # tab separator the empty field collapses and `vscode` is read as its
-    # package list — installing a nonexistent formula.
+    # A `feature` has no packages but declares `requires`: an empty field that a
+    # tab separator would collapse, reading `vscode` as the package list.
     caps_row feat-gated "Config-only tool"      feature   ""                   vscode   ""
 }
 
@@ -100,15 +69,11 @@ run_prompts() {
         HAS_PRIOR_MACHINE="$has_prior"
         INTERACTIVE=1
         MERGED_CAPABILITIES_FILE="$WORK/caps.tsv"
-        # gather_optional_tools resolves `requires:` entirely from the merged
-        # registry above, so it never reads the layer cache. Point it at an
-        # empty dir anyway, so a regression that reintroduces a cache lookup
-        # fails here instead of depending on what the developer has installed.
+        # The registry alone resolves `requires:`; an empty cache dir makes a
+        # reintroduced cache lookup fail here.
         LAYER_CACHE="$WORK/empty-cache"
         SELECTED_CAPABILITIES=()
-        # Answers arrive on the function's stdin. The capability list must come
-        # from somewhere else entirely (FD 3) — that separation IS the fix, so
-        # feeding answers this way is what makes bug 1 detectable.
+        # Answers come on stdin and the capability list on FD 3; that separation is the fix under test.
         gather_optional_tools < "$answers" >/dev/null 2>&1
         printf '%s|%s\n' "$?" "${SELECTED_CAPABILITIES[*]+${SELECTED_CAPABILITIES[*]}}"
     )
@@ -119,7 +84,6 @@ make_caps > "$WORK/caps.tsv"
 TOTAL=5
 
 # ── 1. Answering yes must select EVERY capability ────────────────────────────
-# The regression signature of bug 1 is 0 selections from an all-yes run.
 printf 'y\ny\ny\ny\ny\ny\ny\n' > "$WORK/all-yes"
 result="$(run_prompts "$WORK/all-yes")"
 rc="${result%%|*}"; sel="${result#*|}"
@@ -129,8 +93,8 @@ assert_eq "  selections are the capability ids, in capability order" \
     "alpha vscode ext-pack zzz-last feat-gated" "$sel"
 
 # ── 2. The function must return success ──────────────────────────────────────
-# Bug 2: a trailing failed test made the loop return 1, which `set -e` turns
-# into "bootstrap exits before write_machine" — no machine file, no error message.
+# A trailing failed test made the loop return 1, which `set -e` turns into an
+# exit before write_machine.
 assert_eq "returns 0 after selecting a non-vscode capability last" "0" "$rc"
 
 # ── 3. Answering no must select nothing (and still return success) ───────────
@@ -144,8 +108,6 @@ result="$(run_prompts "$WORK/all-enter")"
 assert_eq "Enter defaults to no when there is no prior machine file" "0|" "$result"
 
 # ── 5. Bare Enter keeps prior answers on a re-run ────────────────────────────
-# Before the fix this path did not merely mis-prompt, it silently DISCARDED a
-# returning user's entire prior selection set.
 result="$(run_prompts "$WORK/all-enter" " alpha zzz-last " true)"
 assert_eq "Enter keeps prior selections on re-run" "0|alpha zzz-last" "$result"
 
@@ -165,26 +127,16 @@ result="$(run_prompts "$WORK/vscode-no")"
 assert_eq "entries are skipped when their requirement is unmet" \
     "0|alpha zzz-last" "$result"
 
-# Same gate, for a capability whose `packages` field is EMPTY (a `feature`).
-# With a tab separator that empty field collapses, `requires` is read as
-# `packages`, the gate disappears, and `feat-gated` is offered on a machine with
-# no editor — then "installed" as a formula literally named `vscode`.
-#
-# The trailing `y` is the trap: correct parsing never offers feat-gated, so the
-# extra answer is simply unread. Broken parsing offers it and takes the `y`.
+# A `feature` has an empty `packages` field; with a tab separator `requires` is
+# read as `packages` and the gate disappears. The trailing `y` is the trap:
+# correct parsing never offers feat-gated, so it goes unread.
 printf 'y\nn\ny\ny\n' > "$WORK/vscode-no-trap"
 result="$(run_prompts "$WORK/vscode-no-trap")"
 assert_eq "  a feature capability's requires survives an empty packages field" \
     "0|alpha zzz-last" "$result"
 
-# ...but an ALREADY-INSTALLED requirement satisfies the gate without selecting
-# it, via the capability's own adopt_if_present path. This is what replaced the
-# hardcoded `command -v code` probe, so it needs its own coverage: a layer that
-# names a different editor must gate on that editor, not on VS Code.
-# `adopt_if_present` is read from the MERGED registry column, not by re-globbing
-# the layer cache — the merge already decided which layer's definition of an id
-# wins, and a second, differently-ordered lookup could disagree with it (and
-# with the engine). So the probe is staged as registry data here.
+# An ALREADY-INSTALLED requirement satisfies the gate via the capability's own
+# adopt_if_present, read from the merged registry column (staged here as data).
 touch "$WORK/present-marker"
 make_caps "$WORK/present-marker" > "$WORK/caps.tsv"
 printf 'y\nn\ny\nn\n' > "$WORK/vscode-present"
@@ -200,15 +152,11 @@ result="$(run_prompts "$WORK/vscode-absent")"
 assert_eq "  and does not when the adopt path is missing" \
     "0|alpha zzz-last" "$result"
 
-# Restore the unstaged registry for the remaining cases.
+# Restore the default registry for the remaining cases.
 make_caps > "$WORK/caps.tsv"
 
-# ── 6b. `requires:` must survive a capability declared BEFORE its requirement ─
-# This was a silent, invisible failure: `requires` is resolved in one forward
-# pass, so a gated entry listed above its requirement was never offered at all —
-# no error, no prompt, just absent from a fresh machine. The order of two lines
-# in a layer file (or the priority order two layers merge in) was a load-bearing
-# invariant nobody could see. load_capabilities now reorders topologically.
+# ── 7. `requires:` must survive a capability declared BEFORE its requirement ──
+# `requires` resolves in one forward pass, so load_capabilities reorders topologically.
 echo "==> capability requires-ordering"
 {
     caps_row ext-early "Extension, declared first" extension some.ext vscode ""
@@ -221,8 +169,7 @@ assert_eq "a dependent is reordered to follow its requirement" \
     "alpha vscode ext-early" \
     "$(cut -d"$FS_U" -f1 "$WORK/caps-ordered.tsv" | tr '\n' ' ' | sed 's/ $//')"
 
-# And the whole point: it is now actually OFFERED. Answers: alpha=y, vscode=y,
-# ext-early=y. Before the fix ext-early was skipped and never selectable.
+# And it is now actually OFFERED. Answers: alpha=y, vscode=y, ext-early=y.
 cp "$WORK/caps-ordered.tsv" "$WORK/caps.tsv"
 printf 'y\ny\ny\n' > "$WORK/reorder-yes"
 result="$(run_prompts "$WORK/reorder-yes")"
@@ -242,14 +189,13 @@ assert_eq "  an unregistered requirement leaves the row in place" \
 
 make_caps > "$WORK/caps.tsv"
 
-# ── 7. An empty capability list is a no-op, not a crash ──────────────────────
+# ── 8. An empty capability list is a no-op, not a crash ──────────────────────
 : > "$WORK/caps.tsv"
 result="$(run_prompts "$WORK/all-yes")"
 assert_eq "empty capability list selects nothing and returns 0" "0|" "$result"
 
-# ── 8. write_machine must be reachable and emit parseable YAML ─────────────────
-# Ties the two bugs together: the point of selecting capabilities is that they
-# reach the machine file the playbook actually consumes.
+# ── 9. write_machine must be reachable and emit parseable YAML ─────────────────
+# Selections must reach the machine file the playbook consumes.
 echo "==> bootstrap machine file"
 make_caps > "$WORK/caps.tsv"
 (
@@ -276,7 +222,7 @@ else
     fail "write_machine is reachable after the prompt loop" "no machine file was written"
 fi
 
-# ── 9. An empty selection set must still produce a valid machine file ──────────
+# ── 10. An empty selection set must still produce a valid machine file ──────────
 (
     PRIOR_SELECTED_IDS=" "; HAS_PRIOR_MACHINE=false; INTERACTIVE=1
     MERGED_CAPABILITIES_FILE="$WORK/caps.tsv"
@@ -286,10 +232,9 @@ fi
 assert_eq "empty selection still writes a valid selected_capabilities list" \
     "0" "$(yq -r '.selected_capabilities | length' "$WORK/machine-empty.yml" 2>/dev/null)"
 
-# ── 10. load_capabilities merges layers by descending priority, dedup by id ──
+# ── 11. load_capabilities merges layers by descending priority, dedup by id ──
 # Reuses the contract fixtures: `nvm` is defined in both layers and the
-# higher-priority (override) definition must win in the menu, exactly as it does
-# in the engine's capability registry.
+# higher-priority definition must win, as in the engine.
 echo "==> bootstrap capability merge"
 (
     LAYER_CACHE="$REPO_ROOT/tests/fixtures/layers_cache"
@@ -304,11 +249,9 @@ assert_eq "layers merge highest-priority-first, deduped by id" \
 assert_eq "  the higher-priority layer's definition wins" \
     "nvm-from-override" "$(awk -F"$FS_U" '$1=="nvm"{print $4}' "$WORK/merged.tsv")"
 
-# ── 11. Questions: the single-select prompt path ─────────────────────────────
-# Same class of bug as the capability loop, and the same shape of test. Two
-# extra hazards here: ask_select PRINTS its result on stdout, so any prompt text
-# that leaks to stdout is captured as part of the answer; and the question list
-# must again come from FD 3, not stdin.
+# ── 12. Questions: the single-select prompt path ────────────────────────────
+# Same stdin/FD 3 hazard as the capability loop; also ask_select prints its
+# result on stdout, so prompt text leaking there would corrupt the answer.
 echo "==> bootstrap question prompts"
 
 make_questions() {
@@ -545,7 +488,7 @@ assert_eq "run_playbook passes the repo, branch, pull dir and repo URL to ansibl
         "$([[ "$l" == *"-e computer_setup_repo_url=$REPO_URL"* ]] && echo 1)" \
         "$([[ "$l" == *" local.yml" ]] && echo 1)")"
 
-# ── 12. load_questions merges layers by descending priority, dedup by id ─────
+# ── 13. load_questions merges layers by descending priority, dedup by id ─────
 (
     LAYER_CACHE="$REPO_ROOT/tests/fixtures/layers_cache"
     MACHINE_FILE="$REPO_ROOT/tests/fixtures/machine.yml"
@@ -560,7 +503,7 @@ assert_eq "  the higher-priority layer's question wins" \
     "Default editor (override)" \
     "$(awk -F"$FS_U" '$1=="editor"{print $3}' "$WORK/merged-q.tsv")"
 
-# ── 13. Presets ──────────────────────────────────────────────────────────────
+# ── 14. Presets ──────────────────────────────────────────────────────────────
 # A preset is a pure prefill. The risks are that it loads nothing (a yq
 # expression that silently yields no rows looks identical to "no presets
 # declared"), or that declining the review still blocks on a prompt.
@@ -611,7 +554,7 @@ result="$(
 )"
 assert_eq "preset capabilities replace prior selections" "alpha zzz-last" "$result"
 
-# ── 14. --answers: the zero-touch rebuild path ───────────────────────────────
+# ── 15. --answers: the zero-touch rebuild path ───────────────────────────────
 echo "==> bootstrap answers file"
 cat > "$WORK/answers.yml" <<'ANSWERS'
 ---
@@ -663,11 +606,9 @@ result="$(
 assert_eq "a written machine file is a valid --answers file" \
     "rt@example.com|zed|alpha zzz-last" "$result"
 
-# ── 17. offer_restore / offer_backup ─────────────────────────────────────────
-# The ONLY path that runs on a genuinely fresh machine, where nobody is watching
-# it fail. Each guard below is a way it could wrongly fire: prompting during a
-# non-interactive --answers run, or offering to restore over a machine that is
-# already configured, would both hijack a working setup.
+# ── 16. offer_restore / offer_backup ─────────────────────────────────────────
+# Runs only on a genuinely fresh machine; each guard below is a way it could
+# wrongly fire and hijack a working setup.
 echo "==> bootstrap machine restore"
 
 # A real bare repo with one backup in it, so `names` and `pull` are exercised
@@ -759,11 +700,7 @@ assert_eq "an undownloadable helper warns and continues, never fails" "0||0|warn
     "$dl_rc|$dl_set|$dl_tmp|$([[ "$dl_out" == *"Could not read the machine backup repo"* ]] && echo warned || echo "$dl_out")"
 
 # ─── Where bootstrap thinks it is running from ───────────────────────────────
-# Under `curl | bash` there is no file, so BASH_SOURCE is empty and the old
-# fallback resolved SCRIPT_DIR to $PWD. An unrelated $PWD may well hold a
-# `requirements.yml` or a `scripts/` of its own, and bootstrap would have used
-# THOSE — installing from another project's file, silently. Missing is
-# recoverable; wrong is not.
+# Under `curl | bash` no directory may be trusted (architecture.md, "Bootstrap internals").
 assert_eq "a real checkout is trusted" "$REPO_ROOT" \
     "$(resolve_script_dir "$REPO_ROOT/bootstrap.sh")"
 

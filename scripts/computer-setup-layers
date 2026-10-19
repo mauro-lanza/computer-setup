@@ -49,10 +49,7 @@ validate_layer() {
     [[ "$layer_name" == "$name" ]] || die "Layer '$name' layer.yml name is '$layer_name'"
 
     sv="$(yq -r '.schema_version // 1' "$dest/layer.yml")"
-    # Must be a plain integer. Bash arithmetic aborts on anything else — with
-    # `schema_version: 2.0` the `((` throws a syntax error to stderr, the test
-    # evaluates false, and the layer is ACCEPTED here while the playbook's own
-    # check (`| int` = 2) rejects it mid-run. Validate the shape, then compare.
+    # Must be a plain integer: bash `((` errors on `2.0` and would accept the layer.
     [[ "$sv" =~ ^[0-9]+$ ]] \
         || die "Layer '$name' has a non-integer schema_version: '${sv}'"
     if (( sv > schema_version_max )); then
@@ -126,10 +123,8 @@ sync_layers() {
         dest="$cache/$name"
         ref="$(yq -r ".layers[$i].ref // \"\"" "$manifest")"
 
-        # PINNED: the layer is held at one tag/branch/sha instead of following
-        # origin's default branch, so a later push to the layer repo reaches this
-        # machine only when the pin is edited in machine.yml. Always a detached
-        # checkout, which is why the unpinned path below would re-clone it.
+        # Pinned: held at one tag/branch/sha, always a detached checkout (so the
+        # unpinned path below would re-clone it).
         if [[ -n "$ref" ]]; then
             if [[ -e "$dest" && ! -d "$dest/.git" ]]; then
                 warn "Layer '$name': '$dest' exists but is not a git checkout — replacing it"
@@ -155,22 +150,9 @@ sync_layers() {
             continue
         fi
 
-        # The layer cache is a CACHE, not a working copy — nothing is ever
-        # authored here, so the only correct end state is "byte-identical to
-        # origin". Fetch and hard-reset unconditionally rather than `pull`:
-        #
-        #   * `git pull --ff-only` returns SUCCESS when the cache is AHEAD of
-        #     origin ("Already up to date" — there is nothing to fast-forward),
-        #     so a stray local commit in the cache survived every single sync.
-        #     The daily drift check then reported "no drift" while running
-        #     against modified layer content — the exact failure this code was
-        #     written to prevent, for the one case it did not cover.
-        #   * `pull` honours ambient config. The managed ~/.gitconfig sets
-        #     pull.rebase=true, so cache maintenance silently depended on the
-        #     user's global git settings.
-        #
-        # fetch + reset + clean treats ahead, behind, diverged, force-pushed and
-        # dirty identically, and is a cheap no-op when already in sync.
+        # The cache is never authored in, so it must equal origin: fetch and
+        # hard-reset, not `pull` (`--ff-only` succeeds when the cache is ahead,
+        # and `pull` obeys the user's pull.rebase). See architecture.md.
         if [[ -d "$dest/.git" ]]; then
             log "Updating layer '$name'..."
             git -C "$dest" remote set-url origin "$repo" \
@@ -228,11 +210,8 @@ lint_note_count=0
 lint_err()  { printf '  ERROR: %s\n' "$*" >&2; lint_fail_count=$((lint_fail_count + 1)); }
 lint_note() { printf '  note:  %s\n' "$*"; lint_note_count=$((lint_note_count + 1)); }
 
-# An unresolved id is only DEFINITELY wrong when the whole merged set is in
-# view. Linting one directory cannot know whether a sibling layer declares it —
-# cross-layer references are legal and normal (an extension capability in one
-# layer requiring the editor cask from another). So --cache errors and --layer
-# only notes.
+# An unresolved id is only definitely wrong with the whole merged set in view,
+# so --cache errors and --layer only notes (cross-layer references are legal).
 LINT_SCOPE="cache"
 lint_ref_problem() {
     if [[ "$LINT_SCOPE" == "cache" ]]; then

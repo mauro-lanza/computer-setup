@@ -44,7 +44,10 @@ and the machine tier (see below), which stop a layer reaching the engine itself.
 
 What a layer repo is trusted *not to do* is change under you. By default a layer
 follows its repo's default branch, hard-reset on every sync, so a push reaches
-every machine at the next 09:00 run. For a layer you do not control, set `ref:`
+every machine at the next 09:00 run. The sync is fetch plus hard-reset, not `pull`:
+`pull --ff-only` succeeds when the cache is *ahead* of origin, so a stray local
+commit would survive and drift checks would run against modified layer content.
+For a layer you do not control, set `ref:`
 in its `machine.yml` entry (a tag, branch or commit sha). The cache is then held
 at exactly that commit and moves only when the `ref:` is edited. A pinned layer
 is always a detached checkout, so unpinning returns it to the branch.
@@ -261,6 +264,9 @@ it. `uv` installs a standalone interpreter under `~/.local/share/uv/python`,
 keyed on the *minor* so it survives patch upgrades. Verified: the runtime runs
 with `/opt/homebrew` off `PATH` entirely and links no Homebrew dylibs.
 
+**Why Python 3.14, not 3.15.** Mitogen supports 3.15 for its own library but not
+for Ansible, and 3.14 is what Homebrew ships.
+
 **Why `ansible-core`, not `ansible`.** The formula is the 530M community bundle
 of ~800 collections. This playbook uses exactly two — `ansible.builtin` and
 `community.general` — and the second is already installed separately and pinned
@@ -306,6 +312,32 @@ execution model than production is testing something else.
 6. Thereafter the scheduled agents refresh the orchestrator and the layer cache
    before every check, so drift covers layer content too.
 
+### Bootstrap internals
+
+- **No trusted directory under `curl | bash`.** There is no script file, so
+  `$PWD` would be taken for a checkout and an unrelated project's
+  `requirements.yml` used silently. `resolve_script_dir` trusts a directory only
+  if it holds `local.yml` and `scripts/computer-setup-layers`; otherwise every
+  consumer downloads what it needs. `bash <(curl ...)` resolves to `/dev/fd`
+  and takes the same path.
+- **Merged registries use ASCII Unit Separator, not tab.** Tab is IFS
+  whitespace, so `read` collapses an empty middle field (a `feature` has no
+  `packages`) and shifts every later column left.
+- **The GitHub readiness probe is an SSH operation**, not `gh auth status`,
+  which passes on a token-only login and then fails on clone with
+  `Permission denied (publickey)`.
+- **Prompt loops read their list on FD 3**, because a `done < file` redirect
+  also covers the body, so every prompt would eat the next list line.
+
+### Probes under `--check`
+
+`command` and `shell` tasks are skipped under `--check`, so a register read by a
+later condition is undefined and the check reports a converged machine. Read-only
+probes therefore carry `check_mode: false`, and a `debug` task with
+`changed_when: true` states the drift the skipped install would have fixed.
+Probes that need a mutating step first (`brew outdated`) are the exception; see
+`docs/findings.md`.
+
 ## Run state
 
 Everything this system does is otherwise invisible unless you read Ansible's
@@ -317,6 +349,11 @@ directly.
 It is an **aggregate** callback, so it runs alongside the normal stdout callback
 and the human-readable log is unchanged. It is inert unless `CS_STATE_FILE` is
 exported, which the runner does for `apply`, `check` and both scheduled modes.
+
+A callback rather than parsing `ansible-pull` output: it emits two plays with
+interleaved `[WARNING]` lines, so a JSON stdout callback yields concatenated
+JSON documents. When `ansible-pull` reaches the stats hook twice, the state and
+manifest writes are last-write-wins (history replaces by `run_id`).
 
 ```json
 { "schema_version": 1, "mode": "check", "partial": false, "finished": "…",
@@ -525,17 +562,12 @@ replaces the previous line instead of adding one.
 One file per run, in `~/Library/Logs/computer-setup/`, named
 `<YYYYmmdd-HHMMSS>-<mode>.log`.
 
-This replaced a single rolling file trimmed to a line count. That held about
-three days, had no per-run boundaries, and recorded only **scheduled** runs — an
-interactive apply printed to the terminal and was kept nowhere. "Open the log
-for that run" had no answer.
+Every run is kept, scheduled or interactive, so "open the log for that run" always
+has an answer.
 
-Foreground runs are no longer `exec`'d. `exec` replaced the shell, so nothing
-could tee the output or run afterwards — fine while every foreground run had a
-terminal, not fine once the menu bar began launching runs in the background,
-where `exec`'s output would go nowhere and a failure would leave no trace but an
-exit code nobody sees. A run with a TTY still streams to it *and* is kept; one
-without writes only to its log.
+Foreground runs are not `exec`'d, so the runner can tee the output and act
+afterwards. A run with a TTY streams to it *and* is kept; one without (launched
+from the menu bar) writes only to its log.
 
 **Retention keeps failures.** Successful runs are pruned past
 `drift_correction_log_retention_days`; failed runs never are. Which runs failed

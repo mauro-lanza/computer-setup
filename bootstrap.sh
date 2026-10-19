@@ -25,15 +25,10 @@ CONFIG_DIR="$HOME/.config/computer-setup"
 # registry that defines them, so a backup of half of it restores nothing.
 MACHINE_FILE="$CONFIG_DIR/machine.yml"
 LAYER_CACHE="$HOME/.local/share/computer-setup/layers"
-# Must match `computer_setup_pull_dir` in local.yml. Pinned rather than left to
-# ansible-pull's `~/.ansible/pull/<hostname>` default: a Mac's hostname changes
-# with the network (mDNS appends `.home`), so the default silently starts a
-# second checkout per network. Getting this wrong is not fatal — it just means
-# bootstrap clones to one directory and every later run re-clones to another.
+# Pinned (ansible-pull's hostname default forks a checkout per network). Must
+# match `computer_setup_pull_dir` in local.yml.
 PULL_DIR="$HOME/.ansible/pull/computer-setup"
-# The engine's pinned runtime. Must match `computer_setup_runtime_dir` in local.yml — but
-# unlike PULL_DIR the VERSIONS are not duplicated: both this script and the
-# playbook read them from runtime.yml, so there is nothing to drift.
+# Must match `computer_setup_runtime_dir` in local.yml; versions come from runtime.yml.
 RUNTIME_DIR="$HOME/.local/share/computer-setup/runtime"
 RUNTIME_BIN="$RUNTIME_DIR/bin"
 
@@ -54,23 +49,13 @@ REPO_BRANCH="${BOOTSTRAP_BRANCH:-main}"
 # require_tty. One definition so the hint can never name a URL that 404s.
 RAW_BASE="https://raw.githubusercontent.com/${ORCH_OWNER}/${ORCH_NAME}/${REPO_BRANCH}"
 
-# Highest layer schema_version this orchestrator understands.
-#
-# This duplicates `computer_setup_schema_version` in local.yml and the default
-# in scripts/computer-setup-layers. It cannot simply read local.yml: under the
-# `curl | bash` install path no checkout exists yet. scripts/check.sh asserts
-# all three agree, so a bump that misses one fails the suite rather than
-# silently accepting a layer the engine will later reject.
+# Highest layer schema_version understood. Duplicates local.yml and
+# scripts/computer-setup-layers (no checkout exists under `curl | bash`);
+# check.sh asserts all three agree.
 SCHEMA_VERSION_MAX=1
 
-# Field separator for the merged capability/question/preset files.
-#
-# NOT a tab. Tab is an "IFS whitespace" character, so `IFS=$'\t' read` collapses
-# runs of tabs into one: a row with an empty middle field (a `feature`
-# capability has no `packages`; a text question has no `options`) silently
-# shifts every later column left. ASCII Unit Separator is not whitespace, so
-# empty fields survive. yq's @tsv already escapes any literal tab in a value,
-# so the translation below is lossless.
+# Field separator for the merged registry files: not a tab, which `read` collapses
+# when a middle field is empty (architecture.md, "Bootstrap internals").
 FS_U=$'\037'
 
 export HOMEBREW_NO_ANALYTICS=1
@@ -117,21 +102,9 @@ require_tty() {
     fi
 }
 
-# Where this script is running FROM, and only when that is verifiably this repo.
-#
-# Under `curl | bash` there is no file, so BASH_SOURCE is empty, `dirname`
-# yields "." and the old fallback resolved to $PWD. An unrelated $PWD may well
-# have a `requirements.yml` or a `scripts/` of its own — an ansible project, a
-# python project — and bootstrap would have used THOSE, silently, installing
-# from another project's file. Missing is recoverable; wrong is not.
-#
-# So an unverified directory is refused rather than guessed at, and every
-# consumer falls back to downloading the one file it needs. That is also the
-# normal path for the RECOMMENDED invocation: `bash <(curl ...)` resolves to
-# /dev/fd, which is not a checkout either.
-#
-# Takes the source path as an argument so it can be tested for all three cases
-# without having to reproduce each invocation.
+# Where this script runs from, only when verifiably this repo: empty under
+# `curl | bash` or `bash <(curl ...)`, so consumers download instead of trusting
+# $PWD (architecture.md, "Bootstrap internals"). Takes the path so tests can cover each case.
 resolve_script_dir() {
     local src="${1:-}" candidate=""
     if [[ -n "$src" ]]; then
@@ -250,15 +223,8 @@ run_repo_script() {
     return "$rc"
 }
 
-# The engine's own runtime, pinned by runtime.yml — NOT the `ansible` formula.
-#
-# Homebrew's ansible is the 530M community bundle and it moves whenever
-# `brew upgrade` runs, which happens unattended at 09:00. This installs an
-# interpreter uv owns (Homebrew cannot move it) plus an exact ansible-core, so
-# the fleet only changes version when runtime.yml says so.
-#
-# Neither directory is on PATH. This is the engine's private interpreter, not a
-# general-purpose `ansible` for the user.
+# The engine's own runtime, pinned by runtime.yml, not the `ansible` formula
+# (architecture.md, "The engine's own runtime"). Not on PATH.
 install_runtime() {
     local pins python_version core_version ansible_version
     pins="$(fetch_repo_file runtime.yml)" || exit 1
@@ -297,16 +263,9 @@ install_galaxy_collections() {
     ok "Collections installed"
 }
 
-# GitHub auth MUST complete before layers are cloned. Uses the gh device flow
-# (browser) and uploads an SSH key so subsequent SSH clones of layers and
-# repositories work without prompts.
-#
-# The readiness probe is an actual SSH operation, not `gh auth status`. The
-# latter only proves an API token exists — it says nothing about an SSH key
-# being uploaded or port 22 being reachable. A machine authenticated with
-# `--git-protocol https`, or on a token-only login, passes `gh auth status` and
-# then dies `Permission denied (publickey)` inside clone_layers under `set -e`.
-# Probe the transport you are about to use.
+# GitHub auth must complete before layers are cloned (gh device flow, uploads an
+# SSH key). The probe is an SSH operation, not `gh auth status`
+# (architecture.md, "Bootstrap internals").
 github_ssh_ready() {
     GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new" \
         git ls-remote "$REPO_URL" HEAD &>/dev/null
@@ -417,10 +376,8 @@ manage_layers() {
         added=$((added + 1))
     done
 
-    # This runs in Phase 1, BEFORE answers are gathered, and writes the same
-    # file Phase 2 writes. Emitting from memory here would blank the answers of
-    # a machine being reconfigured, so the other sections are carried across
-    # from the file itself.
+    # Runs before answers exist and writes the same file as Phase 2, so the other
+    # sections are carried across from disk rather than blanked.
     machine_write "$tmp"
     rm -f "$tmp"
     if [[ $added -gt 0 ]]; then
@@ -449,14 +406,9 @@ machine_helper() {
         --machine-file "$MACHINE_FILE"
 }
 
-# Offer to rebuild this machine from a backup. Runs BEFORE manage_layers,
-# because a restored declaration names its own layers — that is the whole reason
-# layers live in machine.yml. Restoring writes machine.yml, so manage_layers then
-# finds a manifest and does not have to ask.
-#
-# Skipped entirely when: not interactive, --answers was passed (the caller
-# already said where the answers come from), a declaration already exists (this
-# is a re-run, not an onboarding), or no backup repo is configured.
+# Offer to rebuild from a backup. Runs before manage_layers, because a restored
+# declaration names its own layers. Skipped when non-interactive, when --answers
+# was passed, when a declaration exists already, or when no backup repo is set.
 offer_restore() {
     [[ -n "$ANSWERS_FILE" ]] && return 0
     [[ -f "$MACHINE_FILE" ]] && return 0
@@ -492,9 +444,7 @@ offer_restore() {
 
     local picked="${list[$((choice - 1))]}"
     mkdir -p "$(dirname "$MACHINE_FILE")"
-    # Pulled straight into machine.yml (the helper refuses to overwrite, and none
-    # exists here) so manage_layers finds the layers. ANSWERS_FILE makes Phase 2
-    # validate it against the merged registry and prompt for nothing.
+    # Pulled straight into machine.yml; ANSWERS_FILE makes Phase 2 validate it and not prompt.
     if ! machine_helper pull "$picked" "$MACHINE_FILE" >/dev/null; then
         rm -f "$MACHINE_FILE"
         warn "Could not fetch '${picked}' — continuing without it."
@@ -533,17 +483,10 @@ clone_layers() {
 # ═════════════════════════════════════════════════════════════════════════════
 
 # ─── Layer merge primitive ───────────────────────────────────────────────────
-# Merge one filename across every layer into a single FS_U-delimited file.
-#
-# Layers are visited in DESCENDING priority and rows are deduped on their first
-# field, so the highest-priority layer's definition of any id wins wholesale.
-# That mirrors the engine's union-by-id merge (roles/core/tasks/
-# merge_layer_{capabilities,questions}.yml), which sorts ASCENDING and lets the
-# last write win — the same result reached from the other end.
-#
-# The row is written through verbatim rather than being split into named fields
-# and reassembled: the caller's yq projection is the single definition of the
-# column layout, so adding a column means editing one string, not two.
+# Merge one filename across every layer into one FS_U-delimited file. Layers are
+# visited in descending priority and rows deduped on the first field, so the
+# highest layer wins wholesale (the engine reaches the same result ascending).
+# Rows are written verbatim: the caller's yq projection is the one column layout.
 merge_layer_file() {
     local filename="$1" projection="$2" outfile="$3"
     local seen=" " order name src line id
@@ -577,21 +520,10 @@ merged_count() {
     wc -l < "$1" | tr -d ' '
 }
 
-# Order the merged capability rows so a gated capability always follows the one
-# it `requires:`.
-#
-# `requires:` is a MENU gate resolved in one forward pass: an entry is offered
-# only if its requirement was selected EARLIER in the run (or is already
-# present). So a capability listed before its requirement was silently never
-# offered — no error, no prompt, just missing from a fresh machine. That made
-# the order of two entries in a layer file, across layers merged by priority, a
-# load-bearing invariant nobody could see.
-#
-# A stable topological pass removes the invariant instead of documenting it:
-# emit each row, then immediately emit anything requiring it (recursively).
-# Rows whose requirement is not in the registry at all keep their original
-# position — the prompt loop still gates them on `adopt_if_present`, which is
-# the "requirement supplied by something outside the registry" case.
+# Order merged capability rows so a gated capability follows the one it
+# `requires:`. The menu gate is a single forward pass, so a dependent listed
+# first was silently never offered. Rows whose requirement is not in the
+# registry keep their place and gate on `adopt_if_present`.
 order_capabilities_by_requires() {
     local file="$1" tmp
     tmp="$(mktemp)"
@@ -854,9 +786,8 @@ load_prior_machine() {
 # Prior answer for one question id, empty when unanswered. Read on demand rather
 # than slurped into an array: bash 3.2 has no associative arrays.
 #
-# The id goes through the environment (`strenv`), not string interpolation: this
-# is mikefarah/yq, which has no jq-style `--arg`, and interpolating an id
-# straight into the expression would break on any quoting in it.
+# The id goes through `strenv`: mikefarah/yq has no `--arg`, and interpolating
+# would break on quoting.
 prior_answer() {
     $HAS_PRIOR_MACHINE || return 0
     CS_ANSWER_KEY="$1" yq -r '.answers[strenv(CS_ANSWER_KEY)] // ""' \
@@ -864,17 +795,9 @@ prior_answer() {
 }
 
 
-# Is a capability already present on this machine? Uses the capability's own
-# `adopt_if_present` path — layer data — so bootstrap names no tool.
-#
-# Reads the MERGED registry, not the raw per-layer files: the merge already
-# resolved which layer's definition of an id wins. Globbing the cache directly
-# would resolve by directory name instead, so two layers defining the same id
-# with different probes would disagree with the engine.
-#
-# Only the two path roots a probe cannot avoid are expanded here (`home_dir`,
-# `homebrew_prefix`); the engine templates every other value at apply time. Keep
-# this list in step with the `adopt_if_present` contract in docs/architecture.md.
+# Is a capability already present? Uses its own `adopt_if_present` path from the
+# MERGED registry (the merge already picked the winning layer). Only `home_dir`
+# and `homebrew_prefix` are expanded; keep in step with docs/architecture.md.
 cap_is_present() {
     local id="$1" probe
     [[ -s "${MERGED_CAPABILITIES_FILE:-}" ]] || return 1
@@ -915,14 +838,10 @@ gather_optional_tools() {
     # hardcoded `command -v code` probe and the vscode-only `requires_vscode`.
     local satisfied=" "
 
-    # The list is read on FD 3, not stdin: `ask_yn` in the body reads stdin, and
-    # a `done < file` redirect covers the body too — so every prompt would
-    # consume the next capability line as its answer.
+    # The list is read on FD 3, not stdin, or every prompt eats the next list line.
     local id desc type pkgs requires adopt default
-    # `pkgs`/`adopt` are read but unused here: `read` assigns the remainder of
-    # the line to its LAST variable, so omitting them would fold
-    # adopt_if_present into `requires`. cap_is_present reads that column from
-    # the file directly; packages are derived by the engine, not by bootstrap.
+    # `pkgs`/`adopt` are read but unused: `read` gives the remainder to its last
+    # variable, so omitting them folds adopt_if_present into `requires`.
     # shellcheck disable=SC2034
     while IFS="$FS_U" read -r -u 3 id desc type pkgs requires adopt; do
 
@@ -981,10 +900,8 @@ gather_answers() {
 
     local id type prompt default options validate prior preset reply
     while IFS="$FS_U" read -r -u 3 id type prompt default options validate; do
-        # Precedence: the question's declared default, then this machine's prior
-        # answer, then the preset. The preset wins because choosing one this run
-        # is a deliberate "start from that" — otherwise picking a preset on a
-        # re-run would appear to do nothing.
+        # Precedence: layer default, prior answer, then preset (choosing a preset
+        # this run is a deliberate "start from that").
         prior="$(prior_answer "$id")"
         [[ -n "$prior" ]] && default="$prior"
         preset="$(preset_answer "$id")"
@@ -1079,14 +996,9 @@ ask_text() {
         read -rp "  ${prompt} [${default}]: " reply
         reply="${reply:-$default}"
         [[ -z "$validate" ]] && break
-        # A value containing Jinja cannot be validated here: bootstrap does not
-        # render templates, so what we would test is not what will be used.
-        # `repositories-dir` defaults to `{{ home_dir }}/Projects` precisely so
-        # it resolves per-machine — and that literal contains SPACES inside the
-        # braces, so a perfectly correct `^[^ ]+$` rejected the layer's own
-        # default and forced a hand-typed answer on the first real fresh machine.
-        # Ansible re-validates the rendered value on every apply, which is where
-        # the check belongs.
+        # Skip validating a templated default: bootstrap does not render Jinja, and
+        # the pattern would reject it (`{{ home_dir }}/Projects` has spaces inside
+        # the braces). The engine re-validates the rendered value on every apply.
         [[ "$reply" == *'{{'*'}}'* ]] && break
         [[ "$reply" =~ $validate ]] && break
         # Prompts go to stderr: this function's stdout IS the answer.
@@ -1108,10 +1020,8 @@ yaml_list() {
     fi
 }
 
-# The ONE writer of machine.yml. Both phases go through it: Phase 1 has layers
-# but no answers yet, Phase 2 has answers but must not lose the layers. Whichever
-# section the caller is not supplying is carried across from the file itself, so
-# neither phase can blank the other's work.
+# The one writer of machine.yml; whichever section the caller does not supply is
+# carried across from disk, so neither phase blanks the other's work.
 #
 # $1 — optional file of `layers:` ENTRIES (as written by manage_layers). Omit it
 #      to keep the layers already on disk.
@@ -1225,18 +1135,10 @@ run_playbook() {
     ok "Playbook completed successfully"
 }
 
-# Some casks need root to place a helper outside the Homebrew prefix — Docker
-# Desktop symlinks docker-credential-osxkeychain into /usr/local/bin. Homebrew
-# shells out to sudo, and an Ansible task has no controlling terminal, so that
-# sudo can never prompt and the cask install fails outright.
-#
-# `community.general.homebrew_cask` solves it properly: given `sudo_password` it
-# writes a 0700 askpass script and sets SUDO_ASKPASS so Homebrew can use
-# `sudo -A`. Collect it HERE, where a terminal exists, and hand it over through
-# the environment — never `-e`, which would expose it in the process list.
-#
-# Optional on purpose: Enter skips, those casks are then reported at the end
-# rather than failing the run, and everything else still applies.
+# Casks that place a helper outside the Homebrew prefix need sudo, and an
+# Ansible task has no terminal. `sudo_password` makes homebrew_cask use
+# `sudo -A`; collect it here and pass it via the environment, never `-e`
+# (process list). Optional: Enter skips and those casks are reported at the end.
 collect_sudo_password() {
     [[ -n "$ANSWERS_FILE" ]] && return 0   # non-interactive: no prompt
     local pw

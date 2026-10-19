@@ -1,27 +1,8 @@
-# Managed by ansible — the engine's own callback plugin.
+# Managed by ansible — the engine's own callback plugin (docs/architecture.md, "Run state").
 #
-# Writes a machine-readable summary of a run to CS_STATE_FILE, so that "what
-# changed / what drifted" is a FILE ANYTHING CAN READ rather than something
-# scraped out of Ansible's console output.
-#
-# WHY A PLUGIN AND NOT A PARSER
-# `ansible-pull` emits its own checkout play plus the real play, and prints
-# `[WARNING]` lines interleaved between them. Under the json stdout callback
-# that is two concatenated JSON documents with non-JSON text in the middle —
-# strictly harder to parse than the `changed=N` text it would replace. A
-# callback writes structured data directly and never touches stdout, so the
-# human-readable log is unaffected and there is no parsing step at all.
-#
-# METADATA ONLY, DELIBERATELY
-# Ansible's diffs carry full before/after FILE CONTENTS. That is your gitconfig
-# identity and anything else a managed file happens to hold, so none of it is
-# recorded here: a task name, its role, and the destination path only. Enough to
-# answer "what would change", not enough to leak a file. Do not add `before`,
-# `after`, `stdout`, `msg` from arbitrary tasks, or `_task.args` wholesale.
-#
-# NEVER BREAKS A RUN
-# Every hook is wrapped: a bug in here must not fail a machine's provisioning.
-# Reporting is strictly less important than converging.
+# Metadata only: task name, action, role and destination path. Never add
+# `before`/`after`, `stdout`, `msg` or `_task.args` wholesale; diffs hold file contents.
+# Every hook is wrapped: reporting must never fail a run.
 from __future__ import absolute_import, division, print_function
 
 import json
@@ -146,17 +127,9 @@ class CallbackModule(CallbackBase):
 
     # ── helpers ──────────────────────────────────────────────────────────────
     def _dest_from_args(self, task):
-        """The task's declared destination.
-
-        Authoritative and checked FIRST, because it is the only source that
-        works for a file being created: a new file's diff carries no
-        `before_header` at all.
-
-        Only these two keys are ever read. A module's args also carry every
-        `_ansible_*` internal, and `name` on a package module is a long list —
-        none of which is a path, and none of which belongs in a report.
-        """
+        """The task's declared destination; checked first because a new file's diff has no `before_header`."""
         args = getattr(task, "args", {}) or {}
+        # Only dest/path: other args are `_ansible_*` internals or long name lists.
         for key in ("dest", "path"):
             value = args.get(key)
             # A looped task's dest is still "{{ item.x }}" here; the per-item
@@ -166,16 +139,8 @@ class CallbackModule(CallbackBase):
         return None
 
     def _dest_from_diff(self, diff):
-        """The path a diff refers to.
-
-        `before_header` ONLY. For a template task `after_header` is Ansible's
-        temporary rendered source (…/ansible-local-*/tmp*/foo.j2), not the
-        destination — recording it produced entries pointing at a temp dir that
-        no longer exists.
-
-        The `file` module returns a dict rather than a list, and carries no
-        headers; it is normalised here and simply yields nothing.
-        """
+        """The path a diff refers to: `before_header` only, since `after_header` is a temp render source."""
+        # The file module returns a bare dict diff with no headers.
         if isinstance(diff, dict):
             diff = [diff]
         if not isinstance(diff, list):
@@ -188,16 +153,7 @@ class CallbackModule(CallbackBase):
         return None
 
     def _dest_from_item(self, item):
-        """The path a loop item refers to.
-
-        Needed because a loop CREATING files has neither a usable task-level
-        `dest` (it is still "{{ item.dest }}") nor a `before_header` (nothing
-        exists to diff against). The rendered item is the only place left that
-        names the file.
-
-        Narrow on purpose: a bare path string, or the two conventional keys.
-        Never the whole item, which is arbitrary layer data.
-        """
+        """The path a loop item names: a bare path or its `dest`/`path` key, never the whole item."""
         if isinstance(item, str) and item.startswith("/"):
             return item
         if isinstance(item, dict):
@@ -230,13 +186,7 @@ class CallbackModule(CallbackBase):
         return entry
 
     def _record(self, bucket, result):
-        """Append one entry per changed thing — per ITEM for a looped task.
-
-        A loop reports once at task level with a `results` list, and its
-        task-level `dest` is the unrendered template. Recording the task alone
-        would say "Deploy per-directory identity files" and never say which
-        files, which is most of the value.
-        """
+        """Append one entry per changed thing, per item for a looped task (whose task-level `dest` is unrendered)."""
         if not self.state_file:
             return
         try:
@@ -283,17 +233,7 @@ class CallbackModule(CallbackBase):
         return entry
 
     def _inventory(self, result):
-        """Record every path this run manages, changed or not.
-
-        The difference from `_record` is the whole point: drift is an EVENT, so
-        it only lists what changed. An inventory is a STATE, so a file that is
-        already correct still has to appear — otherwise the manifest would empty
-        itself out on a converged machine, which is exactly when it matters.
-
-        Skipped tasks are deliberately absent. A task skipped because its
-        capability was deselected no longer manages its path, and that path
-        dropping out of the manifest is precisely the signal collection needs.
-        """
+        """Record every path this run manages, changed or not; skipped tasks stay absent (architecture.md, "The manifest")."""
         if not self.manifest_file:
             return
         try:
@@ -331,15 +271,7 @@ class CallbackModule(CallbackBase):
                     state = args.get("state")
                     if isinstance(item, dict) and item.get("state"):
                         state = item["state"]
-                    # Three sources, in order, because no single one covers
-                    # both a converged run and a first one:
-                    #   result dest — present once the file EXISTS
-                    #   diff header — present when it exists and is changing
-                    #   rendered item — the only one that survives creating a
-                    #     file under --check, where the first two are empty
-                    # Without the last, a fresh machine's first manifest was
-                    # missing every loop-created file: eight shell snippets and
-                    # every LaunchAgent plist.
+                    # Result dest, then diff header, then rendered item (architecture.md, "The manifest").
                     dest = sub.get("dest") or sub.get("path")
                     if not isinstance(dest, str) or not dest.startswith("/"):
                         dest = self._dest_from_diff(sub.get("diff"))
@@ -362,17 +294,7 @@ class CallbackModule(CallbackBase):
 
     # ── live progress ────────────────────────────────────────────────────────
     def _estimate_total(self):
-        """How many tasks this run will probably have.
-
-        Ansible does not know its own task count up front — tasks are generated
-        as roles and includes are resolved — so a progress bar has no
-        denominator available from the play itself.
-
-        The previous run of the SAME MODE is a good estimate, and history.jsonl
-        already records one per run. Mode matters: `check` and `upgrade` differ
-        by more than a hundred tasks, and using the wrong one produces a bar
-        that finishes at 60% or runs past the end.
-        """
+        """Task count of the previous run of the same mode (architecture.md, "Live progress")."""
         if not self.history_file:
             return None
         try:
@@ -459,25 +381,11 @@ class CallbackModule(CallbackBase):
         self._record(self.failed, result)
 
     def v2_playbook_on_stats(self, stats):
-        """Write the run's three artifacts, once, at the end of the play.
-
-        `ansible-pull` runs its own checkout play before the real one. Both
-        reach this hook, and the LAST write wins — which is the real play, the
-        one worth recording. History is APPENDED rather than overwritten, so it
-        is keyed on the run id instead of relying on that.
-
-        Each artifact is an independent opt-in and gets its own try block: a
-        caller may want a run summary and no inventory, and a failure to write
-        one must not cost the others — least of all the run itself.
-        """
+        """Write the run's four artifacts (state, manifest, history, progress end marker), each independently."""
         if not (self.state_file or self.manifest_file
                 or self.history_file or self.progress_file):
             return
-        # Ansible's summary calls it `failures`; this file has always
-        # published it as `failed`, to match the `failed` list beside it.
-        # Mapped explicitly — reading `failed` straight out of the summary
-        # silently yields 0 forever, which is how a failed run reported
-        # itself as ok until this was caught.
+        # Ansible's summary key is `failures`, ours is `failed`; reading `failed` yields 0 forever.
         summary_keys = {
             "ok": "ok",
             "changed": "changed",
@@ -493,9 +401,9 @@ class CallbackModule(CallbackBase):
                     totals[ours] += summary.get(theirs, 0)
         except Exception:
             totals = dict.fromkeys(summary_keys, 0)
+        result = "failed" if (totals["failed"] or totals["unreachable"]) else "ok"
 
-        # Its own try: a state file that cannot be written must not take the
-        # totals down with it, or history and the end marker call a failed run ok.
+        # Own try: an unwritable state file must not take the totals down with it.
         try:
             payload = {
                 "schema_version": STATE_SCHEMA_VERSION,
@@ -503,7 +411,7 @@ class CallbackModule(CallbackBase):
                 "partial": self.partial,
                 "finished": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
                 "duration_seconds": round(time.time() - self.started, 1),
-                "result": "failed" if (totals["failed"] or totals["unreachable"]) else "ok",
+                "result": result,
                 "totals": totals,
                 "changed": self.changed,
                 "failed": self.failed,
@@ -515,21 +423,19 @@ class CallbackModule(CallbackBase):
             pass
 
         try:
-            self._write_manifest(totals)
+            self._write_manifest(result)
         except Exception:
             pass
         try:
-            self._append_history(totals)
+            self._append_history(totals, result)
         except Exception:
             pass
 
-        # Last, and always: an `end` line is how a reader tells a finished run
-        # from one that died half way. Without it a killed run leaves a file
-        # that looks like it is still going, forever.
+        # Last, always: the `end` line is how a reader tells a finished run from a dead one.
         try:
             self._progress({
                 "event": "end",
-                "result": "failed" if (totals["failed"] or totals["unreachable"]) else "ok",
+                "result": result,
                 "tasks": self.task_number,
                 "changed": totals["changed"],
                 "failed": totals["failed"],
@@ -541,27 +447,11 @@ class CallbackModule(CallbackBase):
         except Exception:
             pass
 
-    def _write_manifest(self, totals):
-        """The set of paths this system owns, as of the last COMPLETE run.
-
-        Not written at all by a partial or failed run. Such a run saw a fraction
-        of the machine — `--tags git` sees three files of twenty-seven — and
-        writing that fraction would destroy the inventory until the next full
-        run, which is exactly when someone asking "what does this own" gets a
-        wrong answer. The previous complete manifest is a better answer than a
-        fresh incomplete one, so it is left alone.
-
-        `complete` stays in the payload even though it is now always true: a
-        consumer should be able to check the property rather than having to know
-        the rule that guarantees it.
-        """
+    def _write_manifest(self, result):
+        """Write the manifest only for a complete run (not partial, not failed); see architecture.md."""
         if not self.manifest_file:
             return
-        complete = (
-            not self.partial
-            and not totals["failed"]
-            and not totals["unreachable"]
-        )
+        complete = not self.partial and result == "ok"
         if not complete:
             return
 
@@ -584,33 +474,14 @@ class CallbackModule(CallbackBase):
             "complete": complete,
             "files": files,
             "directories": directories,
-            # Ansible's `backup: true` residue. Listed apart from `files`
-            # because they are the one class here that is pure litter: nothing
-            # reads them and nothing else will ever remove them.
+            # Backup litter: nothing reads or removes it, so it is listed apart.
             "backups": sorted(self.managed_backups.values(), key=lambda e: e["path"]),
             "orphans": self._orphans(previous, files),
         }
         self._write(self.manifest_file, payload)
 
     def _orphans(self, previous, files):
-        """Paths this system used to manage, still on disk, no longer written.
-
-        REPORTED ONLY. Nothing deletes them; this is the evidence a collection
-        step would eventually act on, and the point of shipping it first is to
-        watch it be right for a while before anything is destructive.
-
-        Carried forward rather than recomputed from scratch. A naive
-        previous-minus-current diff reports an orphan exactly once — the next
-        run's "previous" no longer lists it either, so it silently disappears
-        while the file is still sitting there. An orphan therefore stays on the
-        list until it stops existing or comes back under management.
-
-        Directories are deliberately not tracked. A directory falling out of the
-        manifest almost always means its contents did too, and removing
-        directories is a categorically larger blast radius than removing the
-        files this system wrote — `~/Library/Logs` and `~/.local/bin` are both
-        in here, and neither is ours to delete.
-        """
+        """Paths once managed, still on disk, no longer written; reported only, carried forward (architecture.md, "Orphans")."""
         current = {entry["path"] for entry in files}
         # Anything the previous run listed as managed, including its own
         # orphans: a path stays reported until it is gone or is managed again.
@@ -647,16 +518,8 @@ class CallbackModule(CallbackBase):
             orphans.append(record)
         return orphans
 
-    def _append_history(self, totals):
-        """One line per run, oldest trimmed.
-
-        JSON Lines rather than a JSON array: appending to an array means reading
-        and rewriting the whole file, and a run that dies mid-write leaves
-        invalid JSON. A truncated last line costs one record.
-
-        The run logs are pruned past a retention window. This is the record that
-        outlives them, deliberately tiny so it can.
-        """
+    def _append_history(self, totals, result):
+        """One line per run, oldest trimmed (architecture.md, "Run history")."""
         if not self.history_file:
             return
         record = {
@@ -664,17 +527,12 @@ class CallbackModule(CallbackBase):
             "finished": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
             "mode": self.run_mode,
             "partial": self.partial,
-            "result": "failed"
-            if (totals["failed"] or totals["unreachable"])
-            else "ok",
+            "result": result,
             "duration_seconds": round(time.time() - self.started, 1),
             "changed": totals["changed"],
             "failed": totals["failed"],
             "ok": totals["ok"],
-            # The denominator for the next run of this mode's progress bar.
-            # Counted by the callback rather than derived from totals: a
-            # looped task is one task but many results, so no combination of
-            # ok/changed/skipped gives the number a progress bar counts up to.
+            # Counted, not derived from totals: a looped task is one task but many results.
             "tasks": self.task_number,
         }
         if self.log_file:
@@ -693,9 +551,7 @@ class CallbackModule(CallbackBase):
             with open(self.history_file, "r") as stream:
                 lines = [line for line in stream.read().splitlines() if line.strip()]
 
-        # Same run, second play: replace rather than append. ansible-pull can
-        # reach this hook more than once per invocation, and two lines for one
-        # run would make every rate or count computed from this file wrong.
+        # Same invocation, second play: replace rather than append.
         if self.run_id and lines:
             try:
                 if json.loads(lines[-1]).get("run_id") == self.run_id:
@@ -720,12 +576,7 @@ class CallbackModule(CallbackBase):
             raise
 
     def _write(self, target, payload):
-        """Atomic, 0600.
-
-        Written to a temp file in the same directory and renamed: a reader (the
-        `status` command, a UI polling it) must never observe a half-written
-        file, and rename is atomic within a filesystem.
-        """
+        """Atomic 0600 write: temp file plus rename, so readers never see a half-written file."""
         directory = os.path.dirname(target) or "."
         try:
             os.makedirs(directory, mode=0o700)
