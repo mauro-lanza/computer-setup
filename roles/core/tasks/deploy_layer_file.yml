@@ -57,50 +57,46 @@
 
 - name: "Select the resolved source for {{ computer_setup_deploy_dest | basename }}"
   ansible.builtin.set_fact:
-    _cs_deploy_src: "{{ _cs_tpl_src | default('', true) or _cs_file_src | default('', true) }}"
+    _cs_deploy_src: "{{ _cs_tpl_src or _cs_file_src or '' }}"
     _cs_deploy_as_template: "{{ (_cs_tpl_src | default('', true) | length) > 0 }}"
 
-# Skipped when the parent is $HOME itself — which happens for any dest sitting
-# directly in the home directory, ~/.zshrc being the one in practice. $HOME
-# always exists, so "create it" is meaningless, and `mode: 0755` would have this
-# role assert a permission on the user's home directory. Harmless while it
-# already matches, a silent re-permissioning of $HOME if it ever does not.
-- name: "Ensure parent directory exists: {{ computer_setup_deploy_dest | dirname }}"
-  ansible.builtin.file:
-    path: "{{ computer_setup_deploy_dest | dirname }}"
-    state: directory
-    mode: "0755"
-  when:
-    - _cs_deploy_src | default('', true) | length > 0
-    - (computer_setup_deploy_dest | dirname) != home_dir
+- name: "Deploy {{ computer_setup_deploy_dest | basename }} when a layer supplies it"
+  when: _cs_deploy_src | length > 0
+  block:
+    # Skipped when the parent is $HOME itself — which happens for any dest sitting
+    # directly in the home directory, ~/.zshrc being the one in practice. $HOME
+    # always exists, so "create it" is meaningless, and `mode: 0755` would have
+    # this role assert a permission on the user's home directory.
+    - name: "Ensure parent directory exists: {{ computer_setup_deploy_dest | dirname }}"
+      ansible.builtin.file:
+        path: "{{ computer_setup_deploy_dest | dirname }}"
+        state: directory
+        mode: "0755"
+      when: (computer_setup_deploy_dest | dirname) != home_dir
 
-# Mode is deliberately UNMANAGED below unless the file has to be executable.
-# Pinning a mode makes any third party that chmods its own config file (an
-# editor, a CLI tightening its own credentials file) show up as drift on every
-# scheduled check, forever. `omit` leaves Ansible to preserve whatever mode the
-# destination already has, so only real content changes register as drift.
-# It is spelled out at both tasks rather than hoisted into a fact: `set_fact`
-# DROPS an omit placeholder, leaving the var undefined and the task erroring.
-- name: "Deploy layer template: {{ computer_setup_deploy_dest | basename }}"
-  ansible.builtin.template:
-    src: "{{ _cs_deploy_src }}"
-    dest: "{{ computer_setup_deploy_dest }}"
-    # Unlike copy, template cannot inherit the source file's executable bit, so
-    # a script only lands runnable if the capability asked for it.
-    mode: "{{ '0755' if (computer_setup_deploy_executable | default(false) | bool) else omit }}"
-    backup: "{{ computer_setup_deploy_backup | default(false) | bool }}"
-  when:
-    - _cs_deploy_as_template | bool
-    - _cs_deploy_src | default('', true) | length > 0
-  notify: "{{ computer_setup_deploy_notify | default([]) }}"
+    # Mode is deliberately UNMANAGED below unless the file has to be executable.
+    # Pinning a mode makes any third party that chmods its own config file (an
+    # editor, a CLI tightening its own credentials file) show up as drift on every
+    # scheduled check, forever. `omit` leaves Ansible to preserve whatever mode the
+    # destination already has, so only real content changes register as drift.
+    # It is spelled out at both tasks rather than hoisted into a fact: `set_fact`
+    # DROPS an omit placeholder, leaving the var undefined and the task erroring.
+    - name: "Deploy layer template: {{ computer_setup_deploy_dest | basename }}"
+      ansible.builtin.template:
+        src: "{{ _cs_deploy_src }}"
+        dest: "{{ computer_setup_deploy_dest }}"
+        # Unlike copy, template cannot inherit the source file's executable bit, so
+        # a script only lands runnable if the capability asked for it.
+        mode: "{{ '0755' if (computer_setup_deploy_executable | default(false) | bool) else omit }}"
+        backup: "{{ computer_setup_deploy_backup | default(false) | bool }}"
+      when: _cs_deploy_as_template | bool
+      notify: "{{ computer_setup_deploy_notify | default([]) }}"
 
-- name: "Deploy layer file: {{ computer_setup_deploy_dest | basename }}"
-  ansible.builtin.copy:
-    src: "{{ _cs_deploy_src }}"
-    dest: "{{ computer_setup_deploy_dest }}"
-    mode: "{{ '0755' if (computer_setup_deploy_executable | default(false) | bool) else omit }}"
-    backup: "{{ computer_setup_deploy_backup | default(false) | bool }}"
-  when:
-    - not (_cs_deploy_as_template | bool)
-    - _cs_deploy_src | default('', true) | length > 0
-  notify: "{{ computer_setup_deploy_notify | default([]) }}"
+    - name: "Deploy layer file: {{ computer_setup_deploy_dest | basename }}"
+      ansible.builtin.copy:
+        src: "{{ _cs_deploy_src }}"
+        dest: "{{ computer_setup_deploy_dest }}"
+        mode: "{{ '0755' if (computer_setup_deploy_executable | default(false) | bool) else omit }}"
+        backup: "{{ computer_setup_deploy_backup | default(false) | bool }}"
+      when: not (_cs_deploy_as_template | bool)
+      notify: "{{ computer_setup_deploy_notify | default([]) }}"
