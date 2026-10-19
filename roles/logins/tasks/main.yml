@@ -22,7 +22,7 @@
          + (_eligible
             | selectattr('requires_capability', 'defined')
             | selectattr('requires_capability', 'in',
-                         computer_setup_active_capabilities | default([]))
+                         computer_setup_active_capabilities)
             | list) }}
   vars:
     _eligible: "{{ logins if (logins_enabled | bool) else [] }}"
@@ -100,7 +100,7 @@
   loop: "{{ _logins_missing }}"
   loop_control:
     label: "{{ item.desc }}"
-  when: computer_setup_interactive | default(true) | bool
+  when: computer_setup_interactive | bool
   changed_when: true
   # A person may cancel a browser flow, and that must not fail the play: the
   # credential is simply still missing and the next run says so again.
@@ -114,4 +114,4 @@
       {{ _logins_missing | map(attribute='remedy') | list }}
   when:
     - _logins_missing | length > 0
-    - not (computer_setup_interactive | default(true) | bool)
+    - not (computer_setup_interactive | bool)

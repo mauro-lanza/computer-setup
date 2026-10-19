@@ -20,7 +20,7 @@
 - name: Check which conditional-defaults apps are installed
   ansible.builtin.stat:
     path: "{{ item.app }}"
-  loop: "{{ macos_conditional_defaults | default([]) }}"
+  loop: "{{ macos_conditional_defaults }}"
   loop_control:
     label: "{{ item.app | basename }}"
   register: macos_conditional_app_stat

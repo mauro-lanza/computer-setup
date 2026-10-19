@@ -84,7 +84,7 @@
 
 - name: Apply the confirmed upgrades
   when:
-    - computer_setup_upgrade_assume_yes | default(false) | bool
+    - computer_setup_upgrade_assume_yes | bool
     - not ansible_check_mode
   block:
     # KEEP THIS FIRST. Every other task in this block runs a community.general
@@ -214,5 +214,5 @@
       (it confirms in your terminal first), or pass `-e computer_setup_upgrade_assume_yes=true`
       to apply non-interactively.
   when: >-
-    not (computer_setup_upgrade_assume_yes | default(false) | bool)
+    not (computer_setup_upgrade_assume_yes | bool)
     or ansible_check_mode

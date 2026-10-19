@@ -279,7 +279,7 @@
   vars:
     _selected: "{{ selected_capabilities | default([], true) }}"
     _present: >-
-      {{ _adopt_probe.results | default([])
+      {{ _adopt_probe.results
          | selectattr('stat.exists') | map(attribute='item.key') | list }}
 
 - name: Derive the role interface from capabilities

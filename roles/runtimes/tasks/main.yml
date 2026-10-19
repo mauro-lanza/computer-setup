@@ -11,7 +11,7 @@
   ansible.builtin.stat:
     path: "{{ homebrew_prefix }}/opt/nvm/nvm.sh"
   register: runtimes_nvm_script
-  when: runtimes_nvm_capability in (computer_setup_active_capabilities | default([]))
+  when: runtimes_nvm_capability in computer_setup_active_capabilities
 
 - name: Read current NVM default alias
   ansible.builtin.slurp:
@@ -48,7 +48,7 @@
   ansible.builtin.stat:
     path: "{{ homebrew_prefix }}/bin/tfenv"
   register: runtimes_tfenv_stat
-  when: runtimes_tfenv_capability in (computer_setup_active_capabilities | default([]))
+  when: runtimes_tfenv_capability in computer_setup_active_capabilities
 
 - name: Read current tfenv Terraform version
   ansible.builtin.command:

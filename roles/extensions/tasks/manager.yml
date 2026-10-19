@@ -23,7 +23,7 @@
     - name: "[{{ _mgr.id }}] Resolve which managed extensions are missing"
       ansible.builtin.set_fact:
         _mgr_missing: >-
-          {{ (extension_optional | default({})).get(_mgr.id, [])
+          {{ extension_optional.get(_mgr.id, [])
              | unique
              | reject('in', _mgr_installed.stdout_lines | default([]))
              | list }}
@@ -39,12 +39,12 @@
       changed_when: true
       when:
         - ansible_check_mode
-        - _mgr_missing | default([]) | length > 0
+        - _mgr_missing | length > 0
 
     - name: "[{{ _mgr.id }}] Install missing extensions"
       ansible.builtin.command:
         argv: "{{ [_mgr.binary] + (_mgr.install_args | default(['--install-extension'])) + [item] }}"
-      loop: "{{ _mgr_missing | default([]) }}"
+      loop: "{{ _mgr_missing }}"
       register: _mgr_install
       changed_when: "'already installed' not in (_mgr_install.stdout | default(''))"
 

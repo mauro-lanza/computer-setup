@@ -31,19 +31,19 @@
 - name: "[{{ _layer.name }}] Assert vars.yml does not define reserved keys"
   ansible.builtin.assert:
     that:
-      - (_incoming_layer_vars.keys() | intersect(computer_setup_reserved_layer_keys | default([])) | length) == 0
+      - (_incoming_layer_vars.keys() | intersect(computer_setup_reserved_layer_keys) | length) == 0
       - (_incoming_layer_vars.keys() | select('match', _reserved_prefix_re) | list | length) == 0
     fail_msg: >-
       Layer '{{ _layer.name }}' defines reserved key(s):
-      {{ ((_incoming_layer_vars.keys() | intersect(computer_setup_reserved_layer_keys | default([])))
+      {{ ((_incoming_layer_vars.keys() | intersect(computer_setup_reserved_layer_keys))
           + (_incoming_layer_vars.keys() | select('match', _reserved_prefix_re) | list)) | unique | join(', ') }}.
       These are machine-local settings (use {{ computer_setup_machine_file }}) or
       engine-owned vars (the
-      {{ computer_setup_reserved_layer_prefixes | default([]) | join('*, ') }}*
+      {{ computer_setup_reserved_layer_prefixes | join('*, ') }}*
       namespaces) — not layer content.
     quiet: true
   vars:
-    _reserved_prefix_re: "^({{ computer_setup_reserved_layer_prefixes | default(['computer_setup_']) | join('|') }})"
+    _reserved_prefix_re: "^({{ computer_setup_reserved_layer_prefixes | join('|') }})"
   when: _layer_vars_stat.stat.exists
 
 - name: "[{{ _layer.name }}] Report scalar overrides (highest priority wins)"

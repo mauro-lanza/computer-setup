@@ -15,20 +15,20 @@
     path: "{{ docker_config_path | dirname }}"
     state: directory
     mode: "0700"
-  when: docker_cli_capability in (computer_setup_active_capabilities | default([]))
+  when: docker_cli_capability in computer_setup_active_capabilities
 
 - name: Check for an existing Docker CLI config
   ansible.builtin.stat:
     path: "{{ docker_config_path }}"
   register: docker_config_stat
-  when: docker_cli_capability in (computer_setup_active_capabilities | default([]))
+  when: docker_cli_capability in computer_setup_active_capabilities
 
 - name: Read the existing Docker CLI config
   ansible.builtin.slurp:
     src: "{{ docker_config_path }}"
   register: docker_config_raw
   when:
-    - docker_cli_capability in (computer_setup_active_capabilities | default([]))
+    - docker_cli_capability in computer_setup_active_capabilities
     - docker_config_stat.stat.exists | default(false)
 
 - name: Merge cliPluginsExtraDirs into the Docker CLI config
@@ -44,4 +44,4 @@
       }}
     dest: "{{ docker_config_path }}"
     mode: "0600"
-  when: docker_cli_capability in (computer_setup_active_capabilities | default([]))
+  when: docker_cli_capability in computer_setup_active_capabilities

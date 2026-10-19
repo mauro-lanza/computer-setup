@@ -44,7 +44,7 @@
   vars:
     _params:
       files: ["{{ computer_setup_lookup_key }}.j2"]
-      paths: "{{ computer_setup_template_search_dirs | default([]) }}"
+      paths: "{{ computer_setup_template_search_dirs }}"
 
 - name: "Resolve layer file: {{ computer_setup_lookup_key }}"
   ansible.builtin.set_fact:
@@ -52,7 +52,7 @@
   vars:
     _params:
       files: ["{{ computer_setup_lookup_key }}"]
-      paths: "{{ computer_setup_file_search_dirs | default([]) }}"
+      paths: "{{ computer_setup_file_search_dirs }}"
   when: _cs_tpl_src | default('', true) | length == 0
 
 - name: "Select the resolved source for {{ computer_setup_deploy_dest | basename }}"

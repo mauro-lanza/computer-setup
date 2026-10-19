@@ -41,7 +41,7 @@
                    ~ (_path | basename | regex_replace('\.j2$', '')),
            'template': _path.endswith('.j2'),
            'enabled': (_cap | length == 0)
-                      or (_cap in (computer_setup_active_capabilities | default([])))
+                      or (_cap in computer_setup_active_capabilities)
          }] }}
   loop: "{{ query('ansible.builtin.fileglob', *_globs) }}"
   loop_control:
@@ -74,7 +74,7 @@
     src: "{{ item.src }}"
     dest: "{{ item.dest }}"
     mode: "0644"
-  loop: "{{ shell_snippet_map | default([]) | rejectattr('template') | list }}"
+  loop: "{{ shell_snippet_map | rejectattr('template') | list }}"
   loop_control:
     label: "{{ item.dest | basename }}"
   notify: Shell config changed
@@ -84,7 +84,7 @@
     src: "{{ item.src }}"
     dest: "{{ item.dest }}"
     mode: "0644"
-  loop: "{{ shell_snippet_map | default([]) | selectattr('template') | list }}"
+  loop: "{{ shell_snippet_map | selectattr('template') | list }}"
   loop_control:
     label: "{{ item.dest | basename }}"
   notify: Shell config changed
@@ -97,10 +97,10 @@
     shell_stale_snippets: >-
       {{ ((lookup('ansible.builtin.file', shell_snippet_manifest_path, errors='ignore')
            | default('', true)).splitlines()
-          + (shell_snippet_candidate_paths | default([])))
+          + shell_snippet_candidate_paths)
          | reject('equalto', '')
          | unique
-         | difference(shell_snippet_map | default([]) | map(attribute='dest') | list) }}
+         | difference(shell_snippet_map | map(attribute='dest') | list) }}
 
 - name: Remove stale shell snippets
   ansible.builtin.file:
@@ -120,7 +120,7 @@
     mode: "0644"
     content: "{{ (_dests | sort | join('\n') ~ '\n') if _dests | length > 0 else '' }}"
   vars:
-    _dests: "{{ shell_snippet_map | default([]) | map(attribute='dest') | list }}"
+    _dests: "{{ shell_snippet_map | map(attribute='dest') | list }}"
 
 # ─── Whole-file shell configs (layer content) ─────────────────────────────────
 # Resolved across layer files/ and templates/ dirs (highest priority wins), each
@@ -138,6 +138,6 @@
     computer_setup_deploy_dest: "{{ item.dest }}"
     computer_setup_deploy_backup: "{{ item.backup | default(false) }}"
     computer_setup_deploy_notify: Shell config changed
-  loop: "{{ shell_config_files | default([]) }}"
+  loop: "{{ shell_config_files }}"
   loop_control:
     label: "{{ item.dest | basename }}"

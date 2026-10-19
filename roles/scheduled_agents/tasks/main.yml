@@ -29,7 +29,7 @@
          + (_eligible
             | selectattr('requires_capability', 'defined')
             | selectattr('requires_capability', 'in',
-                         computer_setup_active_capabilities | default([]))
+                         computer_setup_active_capabilities)
             | list) }}
     _wanted: >-
       {{ _capability_ok | selectattr('enabled', 'defined') | selectattr('enabled') | list
