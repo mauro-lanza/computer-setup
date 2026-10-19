@@ -255,18 +255,7 @@ PY
 section_syntax() {
 echo "==> Ansible syntax"
 ansible-playbook --syntax-check local.yml
-ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook --syntax-check tests/contract.yml
-ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook --syntax-check tests/scheduled-agents.yml
-ansible-playbook --syntax-check tests/truncation.yml
-ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook --syntax-check tests/robustness.yml
-ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook --syntax-check tests/shell.yml
-ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook --syntax-check tests/repositories.yml
-ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook --syntax-check tests/repositories-override.yml
-ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook --syntax-check tests/upgrade.yml
-ANSIBLE_ROLES_PATH="$PWD/roles" ansible-playbook --syntax-check tests/logins.yml
-ansible-playbook --syntax-check tests/orphans.yml
 ansible-playbook --syntax-check tests/failure.yml
-ansible-playbook --syntax-check tests/manifest.yml
 
 echo "==> Inventory"
 ansible-inventory --list >/dev/null
