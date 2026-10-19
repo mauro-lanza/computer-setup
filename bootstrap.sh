@@ -9,7 +9,7 @@ set -euo pipefail
 #
 #   Phase 0  Prerequisites + GitHub auth (no repo access required)
 #   Phase 1  Layer selection & fetch (define manifest, clone to layer cache)
-#   Phase 2  Build preferences (merge capabilities → prompts → ~/.config/computer-setup/machine.yml)
+#   Phase 2  Build the machine declaration (merge capabilities → prompts → ~/.config/computer-setup/machine.yml)
 #   Phase 3  Run Ansible (ansible-pull the orchestrator with merged input)
 #
 # Usage: curl -fsSL <raw-url>/bootstrap.sh | bash
@@ -248,7 +248,7 @@ fetch_repo_file() {
 # Neither directory is on PATH. This is the engine's private interpreter, not a
 # general-purpose `ansible` for the user.
 install_runtime() {
-    local pins python_version core_version
+    local pins python_version core_version ansible_version
     pins="$(fetch_repo_file runtime.yml)"
     python_version="$(yq -r '.python' "$pins")"
     core_version="$(yq -r '.ansible_core' "$pins")"
@@ -258,8 +258,8 @@ install_runtime() {
         exit 1
     fi
 
-    if [[ -x "$RUNTIME_BIN/ansible-pull" ]] \
-       && "$RUNTIME_BIN/ansible" --version 2>/dev/null | grep -qF "core ${core_version}]"; then
+    ansible_version="$("$RUNTIME_BIN/ansible" --version 2>/dev/null || true)"
+    if [[ -x "$RUNTIME_BIN/ansible-pull" && "$ansible_version" == *"core ${core_version}]"* ]]; then
         ok "Engine runtime already pinned (ansible-core $core_version)"
         return
     fi
@@ -343,7 +343,7 @@ show_layers() {
     fi
 }
 
-# Interactively define/modify the layer manifest, persisted to layers.yml.
+# Interactively define/modify the layer list, persisted to machine.yml.
 manage_layers() {
     # A non-interactive run cannot answer "which layers?". An existing manifest
     # is used as-is; a missing one is fatal rather than a silently empty setup.
@@ -537,7 +537,7 @@ clone_layers() {
 }
 
 # ═════════════════════════════════════════════════════════════════════════════
-# PHASE 2 — Build preferences
+# PHASE 2 — Build the machine declaration
 # ═════════════════════════════════════════════════════════════════════════════
 
 # ─── Layer merge primitive ───────────────────────────────────────────────────
@@ -852,7 +852,7 @@ is_prior_selected() {
     [[ "$PRIOR_SELECTED_IDS" == *" $1 "* ]]
 }
 
-load_prior_prefs() {
+load_prior_machine() {
     [[ ! -f "$MACHINE_FILE" ]] && return
     HAS_PRIOR_PREFS=true
 
@@ -1113,7 +1113,7 @@ ask_text() {
     printf '%s' "$reply"
 }
 
-# ─── Write preferences file ──────────────────────────────────────────────────
+# ─── Write the machine file ──────────────────────────────────────────────────
 yaml_list() {
     local key="$1"; shift
     echo "${key}:"
@@ -1328,7 +1328,7 @@ main() {
     load_capabilities
     load_questions
     load_presets
-    load_prior_prefs
+    load_prior_machine
     if [[ -n "$ANSWERS_FILE" ]]; then
         load_answers_file "$ANSWERS_FILE"
     else

@@ -20,7 +20,7 @@
 #      capability was selected and wasn't literally `vscode`, the while loop —
 #      and therefore the function — returned 1. Under `set -e` that aborts
 #      bootstrap AFTER the final prompt but BEFORE write_machine, leaving no
-#      preferences file at all.
+#      machine file at all.
 #
 # Both are invisible to a human running bootstrap (it looks like it worked) and
 # both are trivially caught by driving the loop with a scripted answer file.
@@ -141,7 +141,7 @@ assert_eq "answering no selects nothing" "0|" "$result"
 # ── 4. Bare Enter defaults to no on a first run ──────────────────────────────
 printf '\n\n\n\n\n\n' > "$WORK/all-enter"
 result="$(run_prompts "$WORK/all-enter")"
-assert_eq "Enter defaults to no when there are no prior prefs" "0|" "$result"
+assert_eq "Enter defaults to no when there is no prior machine file" "0|" "$result"
 
 # ── 5. Bare Enter keeps prior answers on a re-run ────────────────────────────
 # Before the fix this path did not merely mis-prompt, it silently DISCARDED a

@@ -51,7 +51,7 @@ chmod +x "$T/bin/git" "$T/bin/ansible-pull"
 
 run() { HOME="$T/home" PROBE_RETRY_DELAY=0 PATH="$T/bin:$PATH" "$T/bin/computer-setup" "$@"; }
 fail() { echo "ERROR: $*" >&2; exit 1; }
-latest_log() { ls -t "$T"/logs/*.log | head -1; }
+latest_log() { printf '%s\n' "$T"/logs/*.log | sort | tail -n 1; }
 
 # 1. Unreachable: 3 attempts, the git error survives in the log, nothing runs,
 #    and no success stamp is written.
@@ -84,7 +84,8 @@ run _scheduled-check
 echo "  ok  check stamps last-success only"
 
 # 4. status: BEHIND appears only for an old upgrade stamp, and --json carries it.
-run status | grep -q "BEHIND" && fail "BEHIND shown with no upgrade stamp" || true
+out="$(run status)"
+[[ "$out" != *BEHIND* ]] || fail "BEHIND shown with no upgrade stamp"
 date -v-5d '+%Y-%m-%dT%H:%M:%S%z' > "$T/state/last-success-upgrade"
 echo '{"mode":"check","result":"ok","finished":"x"}' > "$T/state/last-run.json"
 out="$(run status)"
@@ -139,3 +140,13 @@ cp -R "$OLDPWD/examples/example-layer" "$T/pull/examples/example-layer" 2>/dev/n
 (cd "$T" && run layers new acme >/dev/null 2>&1) && fail "layers new overwrote an existing dir"
 (cd "$T" && run layers new ../x >/dev/null 2>&1) && fail "layers new accepted a bad name"
 echo "  ok  layers new scaffolds a lintable layer, refuses overwrite and bad names"
+
+# 9. Pruning removes old successful logs and never an old failed one. A failed run
+#    is identified by history.jsonl, so the log paths below must match it exactly.
+printf '{"result":"failed","log":"%s"}\n{"result":"ok","log":"%s"}\n' \
+    "$T/logs/old-failed.log" "$T/logs/old-ok.log" > "$T/state/history.jsonl"
+touch -t 202001010000 "$T/logs/old-failed.log" "$T/logs/old-ok.log"
+run apply >/dev/null 2>&1 || fail "apply failed before pruning"
+[[ -e "$T/logs/old-failed.log" ]] || fail "pruning deleted a failed run's log"
+[[ ! -e "$T/logs/old-ok.log" ]] || fail "pruning kept an old successful log"
+echo "  ok  prune: an old failed log is kept, an old successful one removed"

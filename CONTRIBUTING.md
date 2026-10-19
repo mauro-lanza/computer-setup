@@ -17,8 +17,9 @@ layers** and never belong here.
 ## Development setup
 
 ```bash
-brew install ansible yq ansible-lint shellcheck
-ansible-galaxy collection install -r requirements.yml
+brew install yq ansible-lint shellcheck
+computer-setup apply --tags runtime    # the pinned ansible-core and mitogen
+~/.local/share/computer-setup/runtime/bin/ansible-galaxy collection install -r requirements.yml
 ```
 
 ## Before opening a PR
@@ -47,6 +48,9 @@ Extend the tests when you touch what they cover:
   bug; only driving the loop with scripted answers can.
 - **`tests/runner.sh`** — the rendered runner with `git`/`ansible-pull` stubbed: connectivity retry, run lock, success stamps, `status`, `layers new`.
 - **`tests/{robustness,repositories,logins,upgrade}.yml`** — roles against scratch HOME/repos and a stub `brew`.
+- **`tests/{state,manifest,orphans,truncation,failure,scheduled-agents}.yml`** —
+  the run-state callback and the scheduled-agent lifecycle: what a run records,
+  the inventory and its orphans, truncation, and that a failed run says so.
 - **`tests/contract.yml`** — the merge logic. Confirm list vars append, scalar
   vars take the highest-priority value, capability ids collide correctly, and
   machine-local settings stay out of layer `vars.yml`.

@@ -1,6 +1,5 @@
 ---
-# drift_correction_prefs_file is NOT in the reserved-key name list — it is
-# caught by the reserved *prefix* rule. The runner loads this file as
-# `-e "@file"`, i.e. extra-vars precedence, so a layer that could set it could
-# set every other reserved key on every scheduled, unattended run.
-drift_correction_prefs_file: "/tmp/pwned.yml"
+# drift_correction_log_retention_days is NOT in the reserved-key name list — it
+# is caught by the reserved *prefix* rule alone. A layer that could set any
+# `drift_correction_*` var would reach the engine's own scheduled jobs.
+drift_correction_log_retention_days: 0

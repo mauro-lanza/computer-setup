@@ -46,16 +46,10 @@ else
     exit 1
 fi
 
-echo "==> Bash syntax"
-bash -n bootstrap.sh
-bash -n scripts/computer-setup-layers
-bash -n tests/bootstrap-prompts.sh
-
-# `bash -n` only proves the file parses. shellcheck is the actual gate for the
-# ~1,900 lines of bash here, and a FAILURE when absent for the same reason
-# ansible-lint is: a fresh machine is where the tool is missing and where
-# "passed" has to mean it. Findings are waived inline, at the line, with a
-# reason — never globally.
+# Every bash file here is linted by shellcheck (a parse error fails it too), and a
+# FAILURE when absent for the same reason ansible-lint is: a fresh machine is
+# where the tool is missing and where "passed" has to mean it. Findings are
+# waived inline, at the line, with a reason — never globally.
 echo "==> shellcheck"
 if ! command -v shellcheck >/dev/null 2>&1; then
     echo "ERROR: shellcheck is not installed, so this gate cannot run." >&2
@@ -63,8 +57,7 @@ if ! command -v shellcheck >/dev/null 2>&1; then
     echo "       (it is also the 'shellcheck' capability in the public layer)" >&2
     exit 1
 fi
-shellcheck -S style -x bootstrap.sh scripts/computer-setup-layers scripts/check.sh \
-    tests/bootstrap-prompts.sh
+shellcheck -S style -x bootstrap.sh scripts/* tests/*.sh
 echo "  ok  no findings"
 
 # `bash -n` proves bootstrap.sh parses, not that the prompt loop works — and
@@ -192,7 +185,7 @@ echo "  ok  an agent deleted from a layer is torn down, not orphaned"
 # a UI would too. Assert its shape, and — the point of the whole design — that
 # no file CONTENT reaches it. Ansible's diffs carry before/after payloads; the
 # plugin must record only task, action and dest.
-# `computer-setup prefs` is git plumbing that only ever runs by hand, which is
+# `computer-setup machine` is git plumbing that only ever runs by hand, which is
 # where bit-rot hides. Driven against a LOCAL bare repo — no network, no gh, no
 # GitHub account — so the gate works on a fresh machine and in CI. `init` is the
 # only subcommand not covered: it is the one that needs an authenticated gh.
@@ -254,13 +247,26 @@ cs_m_flags=(--config "$cs_m_tmp/cfg/backup.yml"
             --machine-file "$cs_m_tmp/cfg/machine.yml")
 cs_m() { scripts/computer-setup-machine "$@" "${cs_m_flags[@]}"; }
 
+# A refusal has to name its reason: a bare non-zero exit also happens when the
+# guard is deleted and a later command fails on its own.
+cs_m_expect_failure() {
+    local expect="$1" out
+    shift
+    if out="$(scripts/computer-setup-machine "$@" 2>&1)"; then
+        echo "ERROR: accepted, expected a refusal: $*" >&2
+        return 1
+    fi
+    if [[ "$out" != *"$expect"* ]]; then
+        echo "ERROR: '$*' failed, but not for the expected reason" >&2
+        echo "       expected to find: $expect" >&2
+        echo "       got: $out" >&2
+        return 1
+    fi
+}
+
 # An unconfigured machine must say so, not traceback.
-if scripts/computer-setup-machine push --config "$cs_m_tmp/nope.yml" \
-        --repo-dir "$cs_m_tmp/clone" \
-        --machine-file "$cs_m_tmp/cfg/machine.yml" >/dev/null 2>&1; then
-    echo "ERROR: push succeeded without configuration" >&2
-    exit 1
-fi
+cs_m_expect_failure "No backup configured" push --config "$cs_m_tmp/nope.yml" \
+    --repo-dir "$cs_m_tmp/clone" --machine-file "$cs_m_tmp/cfg/machine.yml"
 
 # Captured into variables rather than piped into `grep -q`. `grep -q` exits the
 # moment it matches, SIGPIPE-ing the still-writing producer (141), and this
@@ -295,14 +301,8 @@ done
     echo "ERROR: restored declaration carries no layers" >&2; exit 1; }
 
 # Never clobber: a bad restore must always be recoverable.
-if cs_m pull alpha "$cs_m_tmp/out.yml" >/dev/null 2>&1; then
-    echo "ERROR: pull overwrote an existing file" >&2
-    exit 1
-fi
-if cs_m pull nonexistent "$cs_m_tmp/x.yml" >/dev/null 2>&1; then
-    echo "ERROR: pull accepted an unknown machine name" >&2
-    exit 1
-fi
+cs_m_expect_failure "Refusing to overwrite" pull alpha "$cs_m_tmp/out.yml" "${cs_m_flags[@]}"
+cs_m_expect_failure "No backup named" pull nonexistent "$cs_m_tmp/x.yml" "${cs_m_flags[@]}"
 rm -rf "$cs_m_tmp"
 echo "  ok  push, idempotent re-push, list, names, pull, and both refusals"
 
@@ -547,6 +547,22 @@ assert f"{base}/looped-a.conf" not in orphans, "a deleted orphan is still report
 assert f"{base}/looped-b.conf" in orphans, "deleting one orphan dropped the others"
 print("  ok  an orphan removed from disk stops being reported")
 PYEOF
+
+# The failure to read a previous manifest is swallowed, so one of the wrong SHAPE
+# would otherwise block every later manifest without a word.
+for cs_garbage in '[]' '{"files": null, "orphans": "x"}'; do
+    printf '%s\n' "$cs_garbage" > "$cs_mdir/managed-paths.json"
+    CS_MANIFEST_FILE="$cs_mdir/managed-paths.json" CS_RUN_MODE=apply CS_RUN_PARTIAL=0 \
+        CS_RUN_ID=contract-6 ansible-playbook tests/orphans.yml >/dev/null
+    "$CS_PY" - "$cs_mdir" "$cs_garbage" <<'PYEOF'
+import json, os, sys
+
+m = json.load(open(os.path.join(os.path.abspath(sys.argv[1]), "managed-paths.json")))
+assert isinstance(m, dict) and m["files"], \
+    f"a previous manifest {sys.argv[2]} blocked the next one: {m}"
+PYEOF
+done
+echo "  ok  a malformed previous manifest does not stop the next one being written"
 rm -rf -- "$cs_mdir" "$cs_mscratch"
 
 # A progress file is only useful if a reader can distinguish "running" from
@@ -764,6 +780,27 @@ assert h[-1]["failed"] == 1, h[-1]
 assert not os.path.exists(os.path.join(d, "managed-paths.json")), \
     "a failed run wrote a manifest"
 print("  ok  failed runs say so, and write no inventory at all")
+PYEOF
+
+# A state file that cannot be written must not turn a failed run into an ok one:
+# history and the end marker are derived from the same totals.
+: > "$cs_fdir/blocker"
+if CS_STATE_FILE="$cs_fdir/blocker/last-run.json" CS_HISTORY_FILE="$cs_fdir/history.jsonl" \
+   CS_RUN_MODE=apply CS_RUN_PARTIAL=0 CS_RUN_ID=fail-2 \
+   ansible-playbook tests/failure.yml >/dev/null 2>&1; then
+    echo "ERROR: tests/failure.yml was expected to fail and did not" >&2
+    exit 1
+fi
+"$CS_PY" - "$cs_fdir" <<'PYEOF'
+import json, os, sys
+
+d = os.path.abspath(sys.argv[1])
+h = [json.loads(l) for l in
+     open(os.path.join(d, "history.jsonl")).read().splitlines() if l.strip()]
+assert h[-1].get("run_id") == "fail-2", h[-1]
+assert h[-1]["result"] == "failed" and h[-1]["failed"] == 1, \
+    f"an unwritable state file hid a failed run: {h[-1]}"
+print("  ok  an unwritable state file does not hide a failed run")
 PYEOF
 rm -rf -- "$cs_fdir" "$cs_fscratch"
 

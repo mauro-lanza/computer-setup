@@ -21,7 +21,6 @@ drift_correction_schedule_minute: 0
 drift_correction_upgrade_schedule_hour: 9
 drift_correction_upgrade_schedule_minute: 0
 
-# Maximum lines to retain in the rolling log file (per run, the wrapper trims).
 # Successful runs' logs are deleted after this many days. Failed runs are never
 # pruned: the run that went wrong is the one you come back to weeks later.
 drift_correction_log_retention_days: 30

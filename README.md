@@ -59,7 +59,7 @@ explicit message rather than silently accepting every default.
 1. **Layer selection & fetch** — define your layers (persisted to
    `~/.config/computer-setup/machine.yml`), then clone each layer into
    `~/.local/share/computer-setup/layers/<name>/`, validating `schema_version`.
-2. **Build preferences** — offer the layers' presets as a starting point, then
+2. **Build the machine declaration** — offer the layers' presets as a starting point, then
    merge every layer's `questions.yml` into one set of decisions and every
    `capabilities.yml` into one menu, prompt for both, and write
    the same `machine.yml`. Git identity is one of those decisions, so a private
@@ -102,12 +102,15 @@ so the scheduled agents and everything you type by hand can never drift apart.
   confirmation. The 09:00 agent already upgrades formulae, Galaxy collections
   and Node; casks are left to this command because they can raise a `sudo`
   prompt that an unattended agent has no TTY to answer.
-- `computer-setup log [n]` — tail the rolling log.
+- `computer-setup log [n]` — tail the most recent run's log; `log --list` shows
+  every log kept.
 - `computer-setup status` — what the last run did, and how long since the last
   successful scheduled one. Reads a state file rather than re-running anything,
   so it is instant. `--json` for machines. The scheduled modes exit 0 when the
   repo is unreachable — a closed laptop is not a fault — so this is what makes a
   machine that quietly stopped syncing distinguishable from a healthy one.
+- `computer-setup manifest`, `history [n]` and `progress` — what this system
+  manages, the last runs, and what a run is doing now.
 - `computer-setup machine <init|push|list|pull>` — back up this machine's
   `machine.yml` to a **private** repo, one file per machine, and restore
   another machine's. `bootstrap.sh` offers the same restore on a fresh Mac,

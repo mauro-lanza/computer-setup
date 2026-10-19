@@ -203,7 +203,7 @@
           # address instead of it being retyped at every rebuild.
           - git_user_email == 'layer-default@example.com'
           # `validate` is registered so the engine can re-check a hand-edited
-          # prefs file, not just the bootstrap prompt.
+          # machine.yml, not just the bootstrap prompt.
           - computer_setup_question_registry['git-email'].validate is defined
           # An unprovided key deploys nothing and does not create the parent dir.
           # This runs AFTER several successful deploys, so it also asserts the

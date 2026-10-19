@@ -507,7 +507,7 @@ an ordering requirement no path-based collector can honour.
 records the path to that run's own log, which is what lets a list of recent runs
 be navigable rather than decorative.
 
-Nine fields per run, so 500 runs is a few hundred KB and covers most of a year.
+One short record per run, so 500 runs is a few hundred KB and covers most of a year.
 It is what makes "when did this machine last actually change anything"
 answerable, and it survives the logs themselves being pruned.
 
@@ -614,9 +614,11 @@ Shell snippets are globbed rather than looked up, so they follow the same rule
 with a different path: `files/shell/*.zsh.j2` is rendered, `*.zsh` is copied,
 and both land at the same managed destination.
 
-The remaining roles (`homebrew`, `git`, `shell`, `extensions`, `capability_configs`,
-`macos`, `runtimes`, `repositories`, `upgrade`, `drift_correction`,
-`scheduled_agents`) are ordinary consumers of that interface. Before adding one,
+The remaining roles (`runtime`, `homebrew`, `git`, `shell`, `extensions`,
+`capability_configs`, `macos`, `runtimes`, `docker`, `repositories`, `upgrade`,
+`logins`, `drift_correction`, `scheduled_agents`) are ordinary consumers of that
+interface. `runtime` is the engine's own pinned toolchain; `runtimes` is the
+version managers. Before adding one,
 apply the litmus test: if configuring a tool is just placing a file, it is
 **data** — a capability `config:` entry — not a new role.
 
@@ -690,7 +692,7 @@ The split between them is an invariant, not a judgement call:
 
 The consequence is what matters: **adding an engine variable never requires
 editing the reserved list.** A new `computer_setup_*` or `drift_correction_*`
-var is protected the moment it exists. Only the seven public-interface names are
+var is protected the moment it exists. Only the public-interface names are
 enumerated, and that list should essentially never grow.
 
 `ansible_` is a prefix for the same reason. It used to be five hand-picked names

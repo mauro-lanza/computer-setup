@@ -14,25 +14,9 @@
 # set (machine declaration, layer cache) is defined exactly once. Add a
 # variable here, not per caller.
 #
-#   computer-setup apply [args]   Reconcile now. Streams to your terminal: no
-#                                 log capture, no notification, no connectivity
-#                                 guard — you can watch it fail.
-#   computer-setup check [args]   Drift detection (--check --diff). Never
-#                                 mutates. Logs, trims, notifies only on drift.
-#                                 This is what the scheduled agent runs.
-#   computer-setup upgrade        Upgrade managed tools INCLUDING casks, after
-#                                 confirming in your terminal.
-#   computer-setup log [n]        Tail the rolling log (default 100 lines).
-#   computer-setup status [--json] What the last run did, and how long since the
-#                                 last successful scheduled one.
-#   computer-setup machine <sub>  Back up this machine's machine.yml to a
-#                                 private repo, and restore another machine's.
-#   computer-setup repos          Print a repositories.yml scaffolded from the
-#                                 checkouts already on this machine.
-#   computer-setup capture [...]  Diff live macOS defaults against the declared
-#                                 values (delegates to macos-capture).
-#   computer-setup layers <...>   Sync or lint the content layers (delegates
-#                                 to computer-setup-layers).
+#   Verbs: see usage() below, the one list of them.
+#   `apply` streams to your terminal with no connectivity guard, so you can watch
+#   it fail; `check` never mutates and is what the scheduled agent runs.
 #
 # INTERNAL MODES, invoked by the LaunchAgents — not for interactive use:
 #   computer-setup _scheduled-check    `check` with logging + notification
@@ -50,14 +34,8 @@ REPO_BRANCH="{{ computer_setup_repo_branch }}"
 # without the layer registry that defines them).
 MACHINE_FILE="{{ computer_setup_machine_file }}"
 LAYER_CACHE="{{ computer_setup_layer_cache }}"
-# ONE LOG PER RUN, in a directory of their own. Previously every scheduled run
-# appended to a single rolling file trimmed to a line count — which held about
-# three days, had no per-run boundaries, and recorded only SCHEDULED runs: an
-# interactive apply printed to your terminal and was never kept at all.
-#
-# Per-run files make "open the log for THAT run" answerable, which a menu that
-# lists recent runs needs, and they make retention a policy rather than a
-# guillotine that drops whatever fell off the end.
+# ONE LOG PER RUN, in a directory of their own, so "open the log for THAT run" is
+# answerable and retention is a policy (see "Run logs" in docs/architecture.md).
 LOG_DIR="{{ computer_setup_log_dir }}"
 # Successful runs are pruned past this. FAILED RUNS ARE NEVER PRUNED: the whole
 # point of keeping logs is the run that went wrong, and those are exactly the
@@ -75,9 +53,7 @@ STATE_FILE="{{ computer_setup_state_dir }}/last-run.json"
 # stopped owning. Separate from last-run.json because it answers a different
 # question: that file is what HAPPENED, this is what IS.
 MANIFEST_FILE="{{ computer_setup_state_dir }}/managed-paths.json"
-# One JSON line per run, oldest trimmed. The rolling log holds about three days
-# because it stores full Ansible output; this holds most of a year because it
-# stores nine fields.
+# One short JSON line per run, oldest trimmed; it outlives the pruned run logs.
 HISTORY_FILE="{{ computer_setup_state_dir }}/history.jsonl"
 # LIVE progress, rewritten by every run: one line per task, flushed as it goes.
 # What a UI tails to show a run happening rather than a spinner. Transient by
@@ -247,8 +223,7 @@ prune_logs() {
     keep="$(yq -p json -r 'select(.result != "ok") | .log // ""' \
         "$HISTORY_FILE" 2>/dev/null | grep -v '^$' || true)"
     while IFS= read -r old_log; do
-        [[ -z "$old_log" ]] && continue
-        if [[ -n "$keep" ]] && printf '%s\n' "$keep" | grep -qxF -- "$old_log"; then
+        if [[ -n "$keep" ]] && grep -qxF -- "$old_log" <<<"$keep"; then
             continue
         fi
         rm -f -- "$old_log"
@@ -615,9 +590,8 @@ cmd_manifest() {
 }
 
 # ─── Run history ─────────────────────────────────────────────────────────────
-# The rolling log holds about three days because it stores full Ansible output.
-# This holds most of a year because it stores nine fields, so "when did this
-# machine last actually apply anything" stays answerable.
+# Keeps "when did this machine last actually apply anything" answerable after the
+# run logs are pruned.
 cmd_history() {
     if [[ ! -f "$HISTORY_FILE" ]]; then
         echo "No history yet. It is appended to by every run."

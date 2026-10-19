@@ -255,7 +255,7 @@ lint_read() {
     yq -r "$expr" "$file" 2>/dev/null | grep -v '^null$' || true
 }
 
-lint_has()   { printf '%s\n' "$2" | grep -qxF -- "$1"; }
+lint_has()   { [[ $'\n'"$2"$'\n' == *$'\n'"$1"$'\n'* ]]; }
 lint_count() { printf '%s\n' "$1" | grep -cv '^$' || true; }
 
 lint_layers() {

@@ -16,6 +16,27 @@ repositories:
 # homebrew_baseline_formulae: [ripgrep, fd]
 # homebrew_baseline_casks: [iterm2]
 # homebrew_adopt_casks: [iterm2]
+# homebrew_baseline_taps: [example-org/tap]    # taps for capabilities come from their `tap:`
+
+# ─── git ─────────────────────────────────────────────────────────────────────
+# git_default_branch: main
+# git_config_sections:                 # section: {key: "value"}, merged recursively
+#   pull: {rebase: "true"}
+# git_global_gitignore_entries: [.DS_Store]
+#
+# A work address for repositories whose remote matches. `condition` is passed to
+# git verbatim; prefer `hasconfig:remote.*.url:` over `gitdir:` (symlinks).
+# git_conditional_identities:
+#   - condition: "hasconfig:remote.*.url:git@github.com:example-org/**"
+#     email: me@example.org
+#     name: Example Me                   # optional, defaults to the global name
+
+# ─── Whole-file shell configs ────────────────────────────────────────────────
+# `key` is resolved like any layer file (templates/<key>.j2, else files/<key>).
+# shell_config_files:
+#   - key: zshrc
+#     dest: "{{ home_dir }}/.zshrc"
+#     backup: true                     # optional: keep the previous file
 
 # ─── Editor extensions ───────────────────────────────────────────────────────
 # Editors are layer data — the engine names none. Declaring a manager is what
@@ -29,6 +50,25 @@ repositories:
 #     install_args: [--install-extension]
 #     settings_key: vscode/settings.json
 #     settings_dest: "{{ home_dir }}/Library/Application Support/Code/User/settings.json"
+
+# ─── macOS defaults ──────────────────────────────────────────────────────────
+# Native YAML types, not strings. `notify` is optional, for Dock and Finder.
+# macos_defaults:
+#   - { domain: com.apple.dock, key: show-recents, type: bool, value: false,
+#       notify: Restart Dock and Finder }
+#
+# Applied only when the app is installed:
+# macos_conditional_defaults:
+#   - app: /Applications/Example.app
+#     defaults:
+#       - { domain: com.example.app, key: launchOnLogin, type: bool, value: true }
+
+# ─── Runtimes, Docker, upgrades ──────────────────────────────────────────────
+# runtimes_nvm_default_node: "lts/*"
+# runtimes_tfenv_terraform_version: "1.12.2"   # empty (the default) leaves tfenv alone
+# docker_cli_plugins_extra_dirs: ["{{ homebrew_prefix }}/lib/docker/cli-plugins"]
+# upgrade_casks_exclude: [example-cask]        # casks whose own updater owns the job
+# upgrade_casks_greedy: false
 
 # ─── Scheduled jobs (list — appends across layers) ───────────────────────────
 # Recurring work is layer data too: the engine schedules jobs, it does not know
@@ -51,14 +91,19 @@ repositories:
 #     enabled: true              # optional, default true
 #     requires_capability: example-tidy   # optional
 
+# ─── Credentials a person has to obtain (list — appends across layers) ───────
+# Reported as drift only while the credential is missing, by name in `status`.
+# The remedy runs only on an interactive run, never from a scheduled one.
+# logins:
+#   - id: example-cli
+#     desc: "example-cli"
+#     requires_capability: example-cli      # optional
+#     detect_file: "{{ home_dir }}/.config/example/credentials.json"
+#     detect_key: "https://example.com"     # optional, JSON stores only
+#     remedy: "example-cli login"
+
 # ─── Layer-private vars (NOT an engine interface) ────────────────────────────
 # Anything the orchestrator doesn't consume is still merged into scope, so your
-# own templates/ can read it. These dbt values are a private convention between
-# a layer's vars.yml and that same layer's templates/profiles.yml.j2 — the
-# engine has no dbt role and no knowledge of these keys.
-# dbt_bigquery_project: "my-gcp-project"
-# dbt_bigquery_dev_schema: "dbt_dev_me"
-# dbt_bigquery_threads: 8
-
+# own templates/ can read it.
 # Referenced by templates/example.conf.j2 in this layer.
 # example_greeting: "hello"

@@ -473,25 +473,30 @@ class CallbackModule(CallbackBase):
         if not (self.state_file or self.manifest_file
                 or self.history_file or self.progress_file):
             return
+        # Ansible's summary calls it `failures`; this file has always
+        # published it as `failed`, to match the `failed` list beside it.
+        # Mapped explicitly — reading `failed` straight out of the summary
+        # silently yields 0 forever, which is how a failed run reported
+        # itself as ok until this was caught.
+        summary_keys = {
+            "ok": "ok",
+            "changed": "changed",
+            "failed": "failures",
+            "unreachable": "unreachable",
+            "skipped": "skipped",
+        }
+        totals = dict.fromkeys(summary_keys, 0)
         try:
-            # Ansible's summary calls it `failures`; this file has always
-            # published it as `failed`, to match the `failed` list beside it.
-            # Mapped explicitly — reading `failed` straight out of the summary
-            # silently yields 0 forever, which is how a failed run reported
-            # itself as ok until this was caught.
-            summary_keys = {
-                "ok": "ok",
-                "changed": "changed",
-                "failed": "failures",
-                "unreachable": "unreachable",
-                "skipped": "skipped",
-            }
-            totals = dict.fromkeys(summary_keys, 0)
             for host in stats.processed.keys():
                 summary = stats.summarize(host)
                 for ours, theirs in summary_keys.items():
                     totals[ours] += summary.get(theirs, 0)
+        except Exception:
+            totals = dict.fromkeys(summary_keys, 0)
 
+        # Its own try: a state file that cannot be written must not take the
+        # totals down with it, or history and the end marker call a failed run ok.
+        try:
             payload = {
                 "schema_version": STATE_SCHEMA_VERSION,
                 "mode": self.run_mode,
@@ -507,8 +512,7 @@ class CallbackModule(CallbackBase):
             if self.state_file:
                 self._write(self.state_file, payload)
         except Exception:
-            totals = {k: 0 for k in
-                      ("ok", "changed", "failed", "unreachable", "skipped")}
+            pass
 
         try:
             self._write_manifest(totals)
@@ -564,9 +568,11 @@ class CallbackModule(CallbackBase):
         previous = {}
         try:
             with open(self.manifest_file) as stream:
-                previous = json.load(stream)
+                loaded = json.load(stream)
+            if isinstance(loaded, dict):
+                previous = loaded
         except Exception:
-            previous = {}
+            pass
 
         files = sorted(self.managed_files.values(), key=lambda e: e["path"])
         directories = sorted(self.managed_dirs.values(), key=lambda e: e["path"])
@@ -609,7 +615,12 @@ class CallbackModule(CallbackBase):
         # Anything the previous run listed as managed, including its own
         # orphans: a path stays reported until it is gone or is managed again.
         candidates = {}
-        for entry in previous.get("files", []) + previous.get("orphans", []):
+        listed = []
+        for key in ("files", "orphans"):
+            value = previous.get(key)
+            if isinstance(value, list):
+                listed += value
+        for entry in listed:
             if not isinstance(entry, dict):
                 continue
             path = entry.get("path")
@@ -643,8 +654,8 @@ class CallbackModule(CallbackBase):
         and rewriting the whole file, and a run that dies mid-write leaves
         invalid JSON. A truncated last line costs one record.
 
-        The full log is capped at 5000 lines, which is about three days. This is
-        the record that outlives it — deliberately tiny, so it can.
+        The run logs are pruned past a retention window. This is the record that
+        outlives them, deliberately tiny so it can.
         """
         if not self.history_file:
             return
