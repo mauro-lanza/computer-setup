@@ -1,5 +1,5 @@
 ---
-# Editor extension managers, supplied as layer data — adding Cursor or VSCodium
+# Editor extension managers, supplied as layer data — adding another editor
 # is a layer edit, not an engine change. See "The engine names no tool" in
 # docs/architecture.md.
 #

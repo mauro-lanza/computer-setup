@@ -2,7 +2,7 @@
 # Credentials a person has to obtain, declared by layers.
 #
 # These exist because a reminder is the wrong tool for the job. A reminder is
-# unconditional: "Run: gcloud auth login (if using GCP)" prints on every run
+# unconditional: "Run: <tool> auth login (if using it)" prints on every run
 # forever, whether or not you did it, so it is noise the day after you read it.
 # A login entry is CHECKED — it reports only while the credential is actually
 # missing, and goes quiet once it is not.

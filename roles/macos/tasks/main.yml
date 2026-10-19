@@ -16,7 +16,7 @@
 # ~/Library/Preferences/ByHost and are invisible to a plain `defaults read`;
 # those entries declare `host: currentHost`.
 # App-conditional defaults. The app paths are layer data: the engine names no
-# application, so window managers other than Rectangle need no engine change.
+# application, so swapping one app for another needs no engine change.
 - name: Check which conditional-defaults apps are installed
   ansible.builtin.stat:
     path: "{{ item.app }}"

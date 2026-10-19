@@ -3,8 +3,8 @@
 # a person is actually there.
 #
 # WHY THIS IS NOT JUST A COMMAND TASK
-# The remedy is interactive — `opencode auth login` and `gcloud auth login` open
-# a browser or prompt, and there is no token flag on either. Running one from the
+# The remedy is interactive — typically a CLI `auth login` command — opens
+# a browser or prompt, with no token flag. Running one from the
 # 10:00 LaunchAgent would hang it with no TTY and nobody watching, which is the
 # same trap as `sudo` in an unattended task (see docs/findings.md). So the two
 # halves are split: DETECTION always runs, including under --check, and the

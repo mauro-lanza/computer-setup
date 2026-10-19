@@ -7,7 +7,7 @@
 macos_defaults: []
 
 # Defaults applied only when a given app is installed. Pure layer data, so
-# app-conditional defaults (Rectangle, Raycast, Amethyst, AeroSpace, Moom) need
+# app-conditional defaults (e.g. a window manager's preferences) need
 # no engine change.
 #
 # Item schema: { app: <path>, defaults: [ {domain, key, type, value, notify?} ] }

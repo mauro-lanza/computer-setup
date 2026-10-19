@@ -17,28 +17,7 @@ shell_priority_width: 3
 # managed based on their filename alone.
 shell_snippet_manifest_path: "{{ shell_zsh_config_dir }}/.computer-setup-snippets"
 
-# Whole-file shell configs resolved across layers. Keys are layer data, so a
-# layer using starship instead of Powerlevel10k just changes this list.
+# Whole-file shell configs, set by layers.
 #
 # Item schema: { key: <layer file key>, dest: <path>, backup?: bool }
-shell_config_files:
-  - key: zshrc
-    dest: "{{ home_dir }}/.zshrc"
-    # A file the user may have authored themselves.
-    backup: true
-  - key: p10k.zsh
-    # Under the managed shell dir rather than loose in $HOME, but in a
-    # `configs/` SUBFOLDER — ~/.zsh holds two different kinds of file:
-    #
-    #   ~/.zsh/*.zsh          snippets: auto-sourced by the layer's zshrc glob,
-    #                         and garbage-collected via the snippet manifest
-    #   ~/.zsh/configs/*      whole-file configs: sourced explicitly by name,
-    #                         and NOT garbage-collected (config deploys never
-    #                         are — see "Asymmetry" in docs/operations.md)
-    #
-    # The glob is `"$HOME"/.zsh/*.zsh(N)`, non-recursive, so a file here is
-    # neither auto-sourced nor removed by the stale-snippet reaper. Both
-    # properties are wanted: sourcing p10k.zsh at glob time would run it before
-    # the theme loads, and reaping it would delete a file no snippet manifest
-    # ever listed.
-    dest: "{{ shell_zsh_config_dir }}/configs/p10k.zsh"
+shell_config_files: []

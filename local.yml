@@ -148,7 +148,7 @@
             • {{ f.item }}: {{ (f.msg | default('')) | trim | truncate(300) }}
           {% endfor %}
           "sudo: a terminal is required" means the cask needs root to place a
-          helper (Docker Desktop symlinks docker-credential-osxkeychain into
+          helper (e.g. a container app symlinking a credential helper into
           /usr/local/bin). An Ansible task never has a terminal, so sudo cannot
           prompt. Either:
             • re-run bootstrap.sh and give your password when it asks, or

@@ -32,11 +32,14 @@ repositories:
 #     name: Example Me                   # optional, defaults to the global name
 
 # ─── Whole-file shell configs ────────────────────────────────────────────────
-# `key` is resolved like any layer file (templates/<key>.j2, else files/<key>).
+# The engine default is empty; the layer lists what it ships. `key` is resolved
+# like any layer file (templates/<key>.j2, else files/<key>).
 # shell_config_files:
 #   - key: zshrc
 #     dest: "{{ home_dir }}/.zshrc"
 #     backup: true                     # optional: keep the previous file
+#   - key: prompt.zsh
+#     dest: "{{ home_dir }}/.zsh/configs/prompt.zsh"
 
 # ─── Editor extensions ───────────────────────────────────────────────────────
 # Editors are layer data — the engine names none. Declaring a manager is what

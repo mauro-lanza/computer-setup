@@ -8,17 +8,12 @@ layer can override a file shipped by a public one.
 Any key below may instead be supplied as `../templates/<key>.j2`, which is
 rendered rather than copied. The key is unchanged; see `docs/architecture.md`.
 
-## Engine-recognized file keys
+## Whole-file shell configs
 
-Path relative to this `files/` directory. These two are the only keys the
-orchestrator looks up by name:
-
-- `zshrc` → `~/.zshrc` (sources `~/.zsh/*.zsh`, prompt, plugins)
-- `p10k.zsh` → Powerlevel10k prompt config
-
-Both are named by `shell_config_files` (shell role defaults). Editor settings are
-NOT an engine key: each `extension_managers` entry names its own `settings_key`,
-so `vscode/settings.json` is layer data too.
+The engine looks up no file key by name. A layer lists the whole-file shell
+configs it ships in `shell_config_files` (see `../vars.yml`), each entry a `key`
+resolved against this directory and a `dest`. Editor settings work the same way:
+each `extension_managers` entry names its own `settings_key`.
 
 ## Keys your layer invents
 
