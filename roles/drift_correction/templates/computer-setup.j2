@@ -525,6 +525,9 @@ cmd_history() {
 }
 
 # ─── Live progress ───────────────────────────────────────────────────────────
+# Seconds without progress before `progress` reports a run as stalled.
+PROGRESS_STALLED_SECONDS=300
+
 # For runs you did not start (09:00 upgrade, 10:00 check): otherwise invisible
 # while they run. Interactive runs print their own progress.
 cmd_progress() {
@@ -532,7 +535,6 @@ cmd_progress() {
         echo "No run has recorded progress yet."
         return 0
     fi
-    local PROGRESS_STALLED_SECONDS=300
     local head last head_event mode total last_event result tasks n current
     head="$(head -n1 "$PROGRESS_FILE")"
     last="$(tail -n1 "$PROGRESS_FILE")"

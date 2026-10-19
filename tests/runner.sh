@@ -31,9 +31,11 @@ v = dict(
     repositories_base_dir=t + "/repos",
 )
 src = open("roles/drift_correction/templates/computer-setup.j2").read()
-open(t + "/bin/computer-setup", "w").write(env.from_string(src).render(**v))
+tpl = env.from_string(src)
+open(t + "/bin/computer-setup", "w").write(tpl.render(**v))
+open(t + "/bin/computer-setup-cached", "w").write(tpl.render(**dict(v, computer_setup_layer_cache=t + "/cache")))
 PY
-chmod +x "$T/bin/computer-setup"
+chmod +x "$T/bin/computer-setup" "$T/bin/computer-setup-cached"
 
 # Stubs. The git stub counts calls and fails while $GIT_FAIL is set.
 cat > "$T/bin/git" <<STUB
@@ -51,6 +53,7 @@ STUB
 chmod +x "$T/bin/git" "$T/bin/ansible-pull"
 
 run() { HOME="$T/home" PROBE_RETRY_DELAY=0 PATH="$T/bin:$PATH" "$T/bin/computer-setup" "$@"; }
+runc() { HOME="$T/home" PATH="$T/bin:$PATH" "$T/bin/computer-setup-cached" "$@"; }
 fail() { echo "ERROR: $*" >&2; exit 1; }
 latest_log() { printf '%s\n' "$T"/logs/*.log | sort | tail -n 1; }
 
@@ -151,6 +154,8 @@ touch "$T/none.yml"
 [[ "$(run layers sync --manifest y.yml)" == "sync --manifest y.yml" ]] || fail "layers sync overrode --manifest"
 [[ "$(run layers lint)" == "lint --manifest $T/none.yml --machine $T/none.yml" ]] || fail "layers lint args wrong"
 [[ "$(run layers lint --layer x)" == "lint --manifest $T/none.yml --layer x" ]] || fail "layers lint --layer got --machine"
+[[ "$(runc layers sync)" == "sync --manifest $T/none.yml --cache $T/cache" ]] || fail "layers sync did not default --cache"
+[[ "$(runc layers sync --cache X)" == "sync --manifest $T/none.yml --cache X" ]] || fail "layers sync did not keep explicit --cache"
 rm "$T/none.yml" "$T/bin/computer-setup-layers"
 echo "  ok  layers sync/lint pass the manifest and respect explicit flags"
 
@@ -259,7 +264,9 @@ out="$(run log)"
 [[ "$(run log --list)" == "$T/logs/20260102-000000-apply.log"$'\n'"$T/logs/20260101-000000-check.log" ]] || fail "log --list not newest first"
 err="$(run log abc 2>&1)" && fail "log abc accepted"
 [[ "$err" == *"log: expected a number, got 'abc'"* ]] || fail "bad log n not explained: $err"
-run log -1 >/dev/null 2>&1 && fail "log -1 accepted"
+rc=0; err="$(run log -1 2>&1)" || rc=$?
+[[ "$rc" == 64 ]] || fail "log -1 exit $rc, want 64"
+[[ "$err" == *"log: expected a number, got '-1'"* ]] || fail "log -1 not rejected: $err"
 echo "  ok  log: empty, latest, n, --list, bad n rejected"
 
 # 14. manifest: counts and sections from a fixture; missing file is a message.
