@@ -994,6 +994,19 @@ if [[ "$pull_bootstrap" != "$pull_playbook" ]]; then
 fi
 echo "  ok  bootstrap.sh and local.yml agree on ~/$pull_bootstrap"
 
+# Same reason for the data directory: bootstrap spells it per subdirectory.
+echo "==> Data directory agreement"
+data_playbook="$(yq -r '.[0].vars.computer_setup_data_dir' local.yml | sed 's|^{{ home_dir }}/||')"
+for v in LAYER_CACHE RUNTIME_DIR BACKUP_REPO_DIR; do
+    # shellcheck disable=SC2016  # $HOME is matched literally in the source line
+    d="$(sed -n "s|^${v}=\"\\\$HOME/\(.*\)/[a-z]*\"\$|\1|p" bootstrap.sh)"
+    if [[ -z "$data_playbook" || "$d" != "$data_playbook" ]]; then
+        echo "ERROR: $v in bootstrap.sh ('$d') disagrees with computer_setup_data_dir ('$data_playbook')" >&2
+        exit 1
+    fi
+done
+echo "  ok  bootstrap.sh and local.yml agree on ~/$data_playbook"
+
 # A gate, not an advisory: .ansible-lint waives the two rules that contradict
 # this architecture, so any finding is real. Missing ansible-lint is a FAILURE —
 # a fresh machine is where the tool is absent and where "passed" must mean it.

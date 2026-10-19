@@ -31,7 +31,7 @@ LAYER_CACHE="$HOME/.local/share/computer-setup/layers"
 # second checkout per network. Getting this wrong is not fatal — it just means
 # bootstrap clones to one directory and every later run re-clones to another.
 PULL_DIR="$HOME/.ansible/pull/computer-setup"
-# The engine's pinned runtime. Must match `runtime_dir` in roles/runtime — but
+# The engine's pinned runtime. Must match `computer_setup_runtime_dir` in local.yml — but
 # unlike PULL_DIR the VERSIONS are not duplicated: both this script and the
 # playbook read them from runtime.yml, so there is nothing to drift.
 RUNTIME_DIR="$HOME/.local/share/computer-setup/runtime"

@@ -31,13 +31,14 @@
     # Cache lives outside this checkout so the drift re-clone cannot wipe it.
     # Each layer is <cache>/<name>/ with layer.yml + vars.yml + capabilities.yml
     # + files/.
-    computer_setup_layer_cache: "{{ home_dir }}/.local/share/computer-setup/layers"
+    computer_setup_data_dir: "{{ home_dir }}/.local/share/computer-setup"
+    computer_setup_layer_cache: "{{ computer_setup_data_dir }}/layers"
     # Clone of the private repo holding each machine's declaration. In
     # `share`, not `cache`, for a concrete reason: a push that fails leaves a
     # local commit here, so deleting it can lose work. Beside the layer cache
     # but emphatically NOT a layer — `computer-setup-layers sync` force-syncs
     # layers with a hard reset, which would destroy exactly those commits.
-    computer_setup_backup_repo_dir: "{{ home_dir }}/.local/share/computer-setup/backups"
+    computer_setup_backup_repo_dir: "{{ computer_setup_data_dir }}/backups"
     # Where ansible-pull keeps its checkout of THIS repo. Pinned, because the
     # default is `~/.ansible/pull/<hostname>` and a Mac's hostname is not
     # stable — joining a network that appends an mDNS suffix silently starts a
@@ -47,14 +48,17 @@
     # costs a duplicate clone per network. Stays under `~/.ansible/` — the tool
     # already looks there, per "What this system puts in $HOME".
     computer_setup_pull_dir: "{{ home_dir }}/.ansible/pull/computer-setup"
-    # The engine's pinned runtime (see runtime.yml and roles/runtime). Declared
-    # here as well as in the role's defaults because the runner template needs
-    # the path even when the role itself is skipped by --tags.
-    computer_setup_runtime_bin: "{{ home_dir }}/.local/share/computer-setup/runtime/bin"
-    computer_setup_runtime_tools: "{{ home_dir }}/.local/share/computer-setup/runtime/tools"
-    # Read from the same runtime.yml the role pins from, so the runner's path to
-    # the mitogen strategy plugin cannot name a python the runtime is not on.
-    computer_setup_python_version: "{{ (lookup('ansible.builtin.file', playbook_dir ~ '/runtime.yml') | from_yaml).python }}"
+    # The engine's pinned runtime (see runtime.yml and roles/runtime). `share`,
+    # not `state`: fully regenerable but the working set every run executes
+    # from, and ~/.cache is somewhere cleaners delete from under a running job.
+    # uv's tool venvs and shims sit inside it; NEITHER is on PATH.
+    computer_setup_runtime_dir: "{{ computer_setup_data_dir }}/runtime"
+    computer_setup_runtime_bin: "{{ computer_setup_runtime_dir }}/bin"
+    computer_setup_runtime_tools: "{{ computer_setup_runtime_dir }}/tools"
+    # One read of runtime.yml, shared by the runtime role and the runner's path
+    # to the mitogen strategy plugin, so neither can name a different python.
+    computer_setup_runtime_pins: "{{ lookup('ansible.builtin.file', playbook_dir ~ '/runtime.yml') | from_yaml }}"
+    computer_setup_python_version: "{{ computer_setup_runtime_pins.python }}"
     # Where this system installs the executables it owns (the runner, the layer
     # sync helper, macos-capture, and any capability shipping a script). One
     # play var because three roles create and write into it; two independent
