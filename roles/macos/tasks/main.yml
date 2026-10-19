@@ -15,21 +15,6 @@
 # / Control Center item visibility, screensaver) are stored per-machine under
 # ~/Library/Preferences/ByHost and are invisible to a plain `defaults read`;
 # those entries declare `host: currentHost`.
-- name: Apply macOS system defaults
-  community.general.osx_defaults:
-    domain: "{{ item.domain }}"
-    key: "{{ item.key }}"
-    type: "{{ item.type }}"
-    value: "{{ item.value }}"
-    host: "{{ item.host | default(omit) }}"
-    state: present
-  loop: "{{ macos_defaults }}"
-  loop_control:
-    label: "{{ item.domain }} {{ item.key }}"
-  notify: "{{ item.notify | default([], true) }}"
-  register: macos_defaults_results
-  ignore_errors: true
-
 # App-conditional defaults. The app paths are layer data: the engine names no
 # application, so window managers other than Rectangle need no engine change.
 - name: Check which conditional-defaults apps are installed
@@ -40,23 +25,25 @@
     label: "{{ item.app | basename }}"
   register: macos_conditional_app_stat
 
-- name: Apply defaults for installed apps
+- name: Apply macOS system defaults
   community.general.osx_defaults:
-    domain: "{{ item.1.domain }}"
-    key: "{{ item.1.key }}"
-    type: "{{ item.1.type }}"
-    value: "{{ item.1.value }}"
-    host: "{{ item.1.host | default(omit) }}"
+    domain: "{{ item.domain }}"
+    key: "{{ item.key }}"
+    type: "{{ item.type }}"
+    value: "{{ item.value }}"
+    host: "{{ item.host | default(omit) }}"
     state: present
   loop: >-
-    {{ macos_conditional_app_stat.results | default([])
-       | selectattr('stat.exists')
-       | map(attribute='item')
-       | subelements('defaults', skip_missing=True) }}
+    {{ macos_defaults
+       + (macos_conditional_app_stat.results
+          | selectattr('stat.exists')
+          | map(attribute='item')
+          | subelements('defaults', skip_missing=True)
+          | map('last') | list) }}
   loop_control:
-    label: "{{ item.0.app | basename }}: {{ item.1.domain }} {{ item.1.key }}"
-  notify: "{{ item.1.notify | default([], true) }}"
-  register: macos_conditional_results
+    label: "{{ item.domain }} {{ item.key }}"
+  notify: "{{ item.notify | default([], true) }}"
+  register: macos_defaults_results
   ignore_errors: true
 
 # macos-capture: a read-only helper to diff this machine's live defaults against

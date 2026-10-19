@@ -169,13 +169,10 @@
     - name: Report macOS defaults that could not be applied
       ansible.builtin.fail:
         msg: |-
-          {{ (_failed | length) + (_failed_cond | length) }} macOS default(s) could not be applied. Everything
+          {{ _failed | length }} macOS default(s) could not be applied. Everything
           else completed, including the scheduled agents.
           {% for f in _failed %}
             • {{ f.item.domain }} {{ f.item.key }} (declared {{ f.item.type }}): {{ (f.msg | default('')) | trim }}
-          {% endfor %}
-          {% for f in _failed_cond %}
-            • {{ f.item.1.domain }} {{ f.item.1.key }} (declared {{ f.item.1.type }}): {{ (f.msg | default('')) | trim }}
           {% endfor %}
           "Type mismatch" means the key already exists with a different type, and
           osx_defaults will not convert it. macOS writes some keys as `int` that
@@ -188,10 +185,7 @@
         _failed: >-
           {{ (macos_defaults_results | default({})).get('results', [])
              | selectattr('failed', 'defined') | selectattr('failed') | list }}
-        _failed_cond: >-
-          {{ (macos_conditional_results | default({})).get('results', [])
-             | selectattr('failed', 'defined') | selectattr('failed') | list }}
-      when: (_failed | length > 0) or (_failed_cond | length > 0)
+      when: _failed | length > 0
       tags: [macos]
 
     - name: Check GitHub CLI auth status

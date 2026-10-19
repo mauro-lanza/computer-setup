@@ -79,7 +79,7 @@
 # A wrong `type:` in an app-conditional default must not abort the play: the
 # role promises one bad default never stops the later roles. A plist PATH is
 # accepted as the domain, so the scratch file stands in for a real app's.
-- name: A bad conditional default does not abort the play
+- name: A bad baseline or conditional default does not abort the play
   hosts: localhost
   connection: local
   gather_facts: false
@@ -95,7 +95,8 @@
 
     - name: Apply a conditional default declaring the wrong type
       vars:
-        macos_defaults: []
+        macos_defaults:
+          - {domain: "{{ scratch.path }}/t.plist", key: K, type: int, value: 1}
         computer_setup_bin_dir: "{{ scratch.path }}/bin"
         home_dir: "{{ scratch.path }}"
         macos_conditional_defaults:
@@ -108,7 +109,7 @@
     - name: The role reached the end and recorded the failure
       ansible.builtin.assert:
         that:
-          - macos_conditional_results.results | selectattr('failed', 'defined') | selectattr('failed') | list | length == 1
+          - macos_defaults_results.results | selectattr('failed', 'defined') | selectattr('failed') | list | length == 2
 
     - name: Remove the scratch dir
       ansible.builtin.file:

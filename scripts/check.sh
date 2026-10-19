@@ -695,10 +695,10 @@ echo "==> macOS defaults failure report"
 mr_dir="$(mktemp -d)"
 yq '[.[0].post_tasks[] | select(.name == "Report macOS defaults that could not be applied")]' local.yml > "$mr_dir/task.yml"
 yq -n '[{"hosts":"localhost","connection":"local","gather_facts":false,"vars":{
-  "macos_defaults_results":{"results":[{"failed":true,"msg":"mismatch-A","item":{"domain":"dom1","key":"key1","type":"bool"}}]},
-  "macos_conditional_results":{"results":[
-    {"failed":true,"msg":"mismatch-B","item":[{"app":"/x"},{"domain":"dom2","key":"key2","type":"int"}]},
-    {"failed":false,"item":[{"app":"/y"},{"domain":"fine","key":"fine","type":"int"}]}]}},
+  "macos_defaults_results":{"results":[
+    {"failed":true,"msg":"mismatch-A","item":{"domain":"dom1","key":"key1","type":"bool"}},
+    {"failed":true,"msg":"mismatch-B","item":{"domain":"dom2","key":"key2","type":"int"}},
+    {"failed":false,"item":{"domain":"fine","key":"fine","type":"int"}}]}},
   "tasks":[]}]' > "$mr_dir/pb.yml"
 yq -i ".[0].tasks = load(\"$mr_dir/task.yml\")" "$mr_dir/pb.yml"
 mr_out="$(ansible-playbook "$mr_dir/pb.yml" 2>&1 || true)"
