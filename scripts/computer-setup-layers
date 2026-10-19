@@ -258,6 +258,16 @@ lint_read() {
 lint_has()   { [[ $'\n'"$2"$'\n' == *$'\n'"$1"$'\n'* ]]; }
 lint_count() { printf '%s\n' "$1" | grep -cv '^$' || true; }
 
+# A layer file key resolves to files/<key> or templates/<key>.j2 in any given dir.
+lint_file_resolves() {
+    local key="$1" d
+    shift
+    for d in "$@"; do
+        [[ -e "$d/files/$key" || -e "$d/templates/$key.j2" ]] && return 0
+    done
+    return 1
+}
+
 lint_layers() {
     local cache="" single="" machine=""
     while [[ $# -gt 0 ]]; do
@@ -360,6 +370,14 @@ lint_layers() {
         # yq v4 reports YAML tags, so a real boolean is "!!bool" -- NOT jq's
         # "boolean", which would match nothing and pass everything.
         done <<< "$(lint_read "$d/capabilities.yml" '.capabilities[]? | select([.config[]? | select(has("executable")) | select(.executable | type != "!!bool")] | length > 0) | .id')"
+
+        # shell_config_files[].key -> a file in files/ or templates/; an
+        # unresolved key is silently skipped at deploy time
+        while IFS= read -r ref; do
+            [[ -z "$ref" ]] && continue
+            lint_file_resolves "$ref" "${dirs[@]}" \
+                || lint_ref_problem "[$name] shell_config_files key '$ref' matches no files/$ref or templates/$ref.j2"
+        done <<< "$(lint_read "$d/vars.yml" '.shell_config_files[]?.key')"
 
         # preset.capabilities -> a real capability
         while IFS= read -r ref; do

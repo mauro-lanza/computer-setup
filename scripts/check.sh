@@ -1040,14 +1040,15 @@ for expect in \
     "names a tapped package but declares no tap" \
     "has a config: entry missing src: or dest:" \
     "config: uses mode:" \
-    "config: has a non-boolean executable:"
+    "config: has a non-boolean executable:" \
+    "shell_config_files key 'no-such-shell-file' matches no files/"
 do
     if ! grep -qF "$expect" <<<"$lint_out"; then
         echo "ERROR: linter did not report: $expect" >&2
         exit 1
     fi
 done
-echo "  ok  all 10 broken references rejected"
+echo "  ok  all 11 broken references rejected"
 }
 
 # The highest supported layer schema_version is stated in three places that

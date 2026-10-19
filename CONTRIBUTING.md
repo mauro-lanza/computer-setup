@@ -73,6 +73,8 @@ Lint your own layers after editing them:
 computer-setup layers lint --cache ~/.local/share/computer-setup/layers
 ```
 
+Every `shell_config_files` key must resolve to `files/<key>` or `templates/<key>.j2` (in the linted layer, or anywhere in the stack with `--cache`).
+
 It also reports capabilities that appear in no preset — a report, not an error,
 since presets are curated on purpose.
 

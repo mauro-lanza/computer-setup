@@ -1,0 +1,3 @@
+---
+shell_config_files:
+  - {key: no-such-shell-file, dest: /tmp/no-such-shell-file}

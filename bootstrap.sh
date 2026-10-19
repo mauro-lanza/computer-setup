@@ -1241,8 +1241,8 @@ collect_sudo_password() {
     [[ -n "$ANSWERS_FILE" ]] && return 0   # non-interactive: no prompt
     local pw
     echo
-    info "Some casks need root to install (e.g. Docker Desktop places a helper"
-    info "in /usr/local/bin). Ansible cannot answer a sudo prompt on its own."
+    info "Some casks need root to install (e.g. to place a helper in"
+    info "/usr/local/bin). Ansible cannot answer a sudo prompt on its own."
     printf "  macOS password (Enter to skip those casks): "
     read -rs pw
     echo
