@@ -1107,11 +1107,12 @@ machine_write() {
 }
 
 # The `layers:` entries already on disk, re-indented under the key the caller
-# just printed. Empty output is valid — it yields `layers:` with nothing under
-# it, which YAML reads as null and the engine defaults to [].
+# just printed. A `ref:` pin is carried over: dropping it would move a pinned
+# layer back to its default branch on the next sync. Empty output is valid.
 machine_existing_layers() {
     [[ -f "$MACHINE_FILE" ]] || return 0
-    yq -r '.layers // [] | .[] | "  - name: \"" + .name + "\"\n    repo: \"" + .repo + "\"\n    priority: " + (.priority | tostring)' \
+    yq -r '.layers // [] | .[] | "  - name: \"" + .name + "\"\n    repo: \"" + .repo + "\"\n    priority: " + (.priority | tostring)
+           + (((.ref // "") | select(. != "") | "\n    ref: \"" + . + "\"") // "")' \
         "$MACHINE_FILE" 2>/dev/null || true
 }
 

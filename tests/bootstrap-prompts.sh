@@ -427,6 +427,14 @@ run_layers "$WORK/layers-reconf" "$WORK/new-config/machine-reconf.yml"
 assert_eq "  reconfiguring layers keeps the answers on disk" "zed" \
     "$(yq -r '.answers.editor' "$WORK/new-config/machine-reconf.yml" 2>/dev/null)"
 
+# A `ref:` pin survives a rewrite; dropping it silently moved a pinned layer
+# back to its default branch on the next sync.
+printf -- 'layers:\n  - {name: a, repo: r, priority: 10, ref: some-branch}\n  - {name: b, repo: s, priority: 20}\n' \
+    > "$WORK/new-config/machine-ref.yml"
+( MACHINE_FILE="$WORK/new-config/machine-ref.yml"; machine_write ) >/dev/null 2>&1
+assert_eq "  a layer's ref: pin survives a rewrite, and no ref is invented" "some-branch|false" \
+    "$(yq -r '.layers[0].ref + "|" + (.layers[1] | has("ref") | tostring)' "$WORK/new-config/machine-ref.yml" 2>/dev/null)"
+
 # main must refuse before installing anything when there is neither a terminal
 # nor an --answers file. Every first Phase 0 step (macOS: Xcode CLT; Linux:
 # prerequisites) is stubbed so a missing guard shows up as "reached phase 0"
