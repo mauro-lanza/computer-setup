@@ -1,0 +1,3 @@
+---
+# Merged only on Linux; contract.yml asserts this host's file won.
+contract_platform: Linux

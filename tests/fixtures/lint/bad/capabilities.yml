@@ -5,41 +5,37 @@
 capabilities:
   # Two entries with one id: the merge collapses them to whichever it reaches
   # last, so one of these silently does not exist.
-  - {id: dup, desc: "first", type: formula, packages: a}
-  - {id: dup, desc: "second", type: formula, packages: b}
+  - {id: dup, desc: "first", packages: {brew: a}}
+  - {id: dup, desc: "second", packages: {brew: b}}
   # Gated on a capability no layer declares -> never offered, no error.
-  - {id: gated, desc: "gated on a ghost", type: formula, packages: g, requires: nonexistent}
-  # type: extension without a manager -> the engine groups by `manager`, so this
-  # never reaches any installer.
-  - {id: noext, desc: "extension without a manager", type: extension, packages: some.ext}
-  # A tapped package with no tap declared. This exact shape broke the first real
-  # fresh-machine bootstrap: it resolves on a machine where the tap was added by
-  # hand once, and nowhere else.
-  - {id: notap, desc: "tapped package, no tap", type: formula, packages: owner/tap/thing}
+  - {id: gated, desc: "gated on a ghost", packages: {brew: g}, requires: nonexistent}
+  # The pre-unification shape: a string `packages` with `type:`. The engine
+  # reads only mappings, so this would install nothing anywhere.
+  - {id: oldshape, desc: "string packages", type: formula, packages: thing}
+  # A key no engine role reads: `tap` is derived from owner/tap/name now.
+  - {id: oldtap, desc: "obsolete tap key", packages: {brew: owner/tap/thing}, tap: owner/tap}
+  # An unknown manager installs nothing on any platform.
+  - {id: badmgr, desc: "unknown package manager", packages: {apt: thing}}
   # `mode:` was the old spelling of the executable flag. An unknown key in a
   # config: entry is silently ignored, so the script would deploy without its
   # executable bit and the scheduled agent invoking it would just never fire.
   - id: oldmode
     desc: "config entry still using mode:"
-    type: feature
     config:
       - {src: scripts/thing, dest: /tmp/thing, mode: "0755"}
   # executable: as a string is truthy in Jinja whichever word it holds, so
   # `executable: "false"` would silently deploy 0755.
   - id: strexec
     desc: "non-boolean executable"
-    type: feature
     config:
       - {src: scripts/thing2, dest: /tmp/thing2, executable: "true"}
   # A config: entry with no dest has nowhere to go and is silently skipped.
   - id: nodest
     desc: "config entry missing dest"
-    type: feature
     config:
       - {src: scripts/thing3}
   # A src matching no files/ or templates/ entry is silently skipped at deploy.
   - id: nosrc
     desc: "config src resolves to nothing"
-    type: feature
     config:
       - {src: no-such-config-file, dest: /tmp/nosrc}

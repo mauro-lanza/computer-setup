@@ -24,9 +24,11 @@ answers:
 # from these ids against the merged capability registry (the layers. capabilities).
 selected_capabilities:
   - nvm             # defined in BOTH layers — override must win
-  - opencode        # base: formula anomalyco/tap/opencode
+  - opencode        # base: brew anomalyco/tap/opencode
   - zed             # base: cask zed
   - vscode          # override: cask visual-studio-code
-  - dbt             # override: feature (no package)
-  - vscode-peacock  # override: type extension (manager: vscode)
+  - dbt             # override: config only, no package
+  - vscode-peacock  # override: extensions (manager: vscode)
+  - ripgrep         # override: brew + pacman + flatpak
+  - pacman-only     # override: pacman only
   - ghost           # not in any active layer's capabilities — must be ignored, and reported

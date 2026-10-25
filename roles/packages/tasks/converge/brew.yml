@@ -1,0 +1,20 @@
+---
+# Taps first: `owner/tap/name` cannot resolve until its tap is added. The tap is
+# derived from the name, for formulae and casks alike, so it cannot be forgotten.
+- name: "[brew] Ensure taps"
+  community.general.homebrew_tap:
+    name: "{{ _taps }}"
+    state: present
+  vars:
+    _taps: >-
+      {{ (_pkg_names + computer_setup_packages.get('cask', []))
+         | select('match', '^[^/]+/[^/]+/[^/]+$')
+         | map('regex_replace', '^([^/]+/[^/]+)/.*$', '\1') | unique | list }}
+  when: _taps | length > 0
+
+- name: "[brew] Install formulae (and refresh Homebrew first)"
+  community.general.homebrew:
+    name: "{{ _pkg_names }}"
+    state: present
+    # No refresh under --check: the module then never reaches the install step and names zero packages.
+    update_homebrew: "{{ packages_brew_update | bool and not ansible_check_mode }}"

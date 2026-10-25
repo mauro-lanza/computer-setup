@@ -8,6 +8,10 @@
     computer_setup_layer_cache: "{{ playbook_dir }}/fixtures/layers_cache"
     computer_setup_machine_file: "{{ playbook_dir }}/fixtures/machine.yml"
     computer_setup_schema_version: 1
+    # Deterministic on any host: brew "present", pacman absent.
+    computer_setup_package_manager_probes:
+      brew: "{{ playbook_dir }}/contract.yml"
+      pacman: /nonexistent/pacman
   pre_tasks:
     - name: Initialize computer-setup orchestration
       ansible.builtin.import_role:
@@ -119,16 +123,34 @@
           - computer_setup_active_layers | map(attribute='name') | list == ['base', 'override']
           - contract_list == ['base', 'override']
           - contract_scalar == 'override'
+          # vars/<platform>.yml merges after vars.yml, and only this platform's.
+          - contract_platform == ansible_facts['system']
           # Union-by-id: `nvm` exists in both layers; the higher-priority one
           # replaces it wholesale, so the package is override's, not base's.
-          - computer_setup_capability_registry['nvm'].packages == 'nvm-from-override'
+          - computer_setup_capability_registry['nvm'].packages.brew == 'nvm-from-override'
           - "'override wins' in computer_setup_capability_registry['nvm'].desc"
           # Packages derive from SELECTED capabilities only. 'ghost' is selected
           # but unregistered (silently ignored); 'adopted' is registered and
           # active but never selected, so its package must NOT appear here.
-          - homebrew_optional_formulae == ['nvm-from-override', 'anomalyco/tap/opencode']
-          - homebrew_optional_casks == ['zed', 'visual-studio-code']
-          # type: extension routes to its MANAGER's bucket, not formulae/casks.
+          # Each manager's names land in that manager's list, for every manager.
+          - computer_setup_packages_optional['brew'] == ['nvm-from-override', 'anomalyco/tap/opencode', 'ripgrep']
+          - computer_setup_packages_optional['cask'] == ['zed', 'visual-studio-code']
+          - computer_setup_packages_optional['pacman'] == ['ripgrep', 'only-pacman', 'extra-pacman']
+          - computer_setup_packages_optional['flatpak'] == ['org.example.Rg']
+          - "'aur' not in computer_setup_packages_optional"
+          # What gets installed: baseline (appended across layers) + optional,
+          # deduplicated, for DETECTED managers only (the probes say brew, not pacman).
+          - computer_setup_packages['brew'] == ['base-formula', 'ripgrep', 'nvm-from-override', 'anomalyco/tap/opencode']
+          - "'pacman' not in computer_setup_packages"
+          # Detection follows the probes; a selection no detected manager can
+          # install is named, not silently dropped (casks are too, off macOS).
+          - "'brew' in computer_setup_package_managers"
+          - "'pacman' not in computer_setup_package_managers"
+          - "'pacman-only' in computer_setup_uninstallable_selections"
+          - "'ripgrep' not in computer_setup_uninstallable_selections"
+          - "'nvm' not in computer_setup_uninstallable_selections"
+          - "'dbt' not in computer_setup_uninstallable_selections"
+          # `extensions:` is keyed by extension manager, not package manager.
           # The engine names no editor; 'vscode' here is the layer's manager id.
           - extension_optional.keys() | list == ['vscode']
           - extension_optional['vscode'] == ['johnpapa.vscode-peacock']

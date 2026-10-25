@@ -3,20 +3,10 @@
 # confirms in the terminal (a guaranteed TTY) then sets this via -e.
 computer_setup_upgrade_assume_yes: false
 
-# Force-upgrade casks that manage their own updates. Left false: `greedy` makes
-# Homebrew replace an app bundle the app may be updating itself, and the two
-# race — a failed swap can leave an empty .app and an untracked cask. Set true
-# only with the apps quit.
-upgrade_casks_greedy: false
-
-# Casks never upgraded automatically, by token — for apps whose own updater
-# should own the job. Still installed and kept present by the homebrew role.
-upgrade_casks_exclude: []
-
 # Whether cask upgrades are attempted at all. Casks can trigger a sudo prompt,
 # which is fatal for a TTY-less LaunchAgent, so the scheduled morning upgrade
 # sets this false and touches only formulae, Galaxy and Node. Interactive
-# `computer-setup upgrade` leaves it true.
+# `computer-setup upgrade` leaves it true. Read by the packages role.
 computer_setup_upgrade_include_casks: true
 
 # Node line to re-resolve to the newest available version on upgrade.

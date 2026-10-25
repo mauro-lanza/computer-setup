@@ -1,0 +1,5 @@
+#!/bin/sh
+# SUDO_ASKPASS helper for tasks that need root. Holds no secret: it echoes the
+# password the runner already validated and passed through the environment.
+# See "sudo on Linux" in docs/architecture.md.
+printf '%s\n' "${CS_SUDO_PASSWORD:-}"

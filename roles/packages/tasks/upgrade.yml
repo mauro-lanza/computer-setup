@@ -1,0 +1,12 @@
+---
+# Called by the upgrade role. Each manager previews what it would upgrade and
+# upgrades it once `computer_setup_upgrade_assume_yes` is set.
+- name: Upgrade each package manager
+  ansible.builtin.include_tasks: "upgrade/{{ _pkg_mgr }}.yml"
+  loop: "{{ computer_setup_package_managers }}"
+  loop_control:
+    loop_var: _pkg_mgr
+  vars:
+    _pkg_names: "{{ computer_setup_packages.get(_pkg_mgr, []) }}"
+    _pkg_apply: "{{ (computer_setup_upgrade_assume_yes | bool) and not ansible_check_mode }}"
+  when: computer_setup_packages.get(_pkg_mgr, []) | length > 0

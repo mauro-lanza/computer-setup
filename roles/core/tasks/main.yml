@@ -1,13 +1,37 @@
 ---
-- name: Assert supported platform (macOS Apple Silicon)
+- name: Assert supported platform (macOS Apple Silicon, or Linux)
   ansible.builtin.assert:
     that:
-      - ansible_facts['system'] == 'Darwin'
-      - ansible_facts['architecture'] == 'arm64'
+      - (ansible_facts['system'] == 'Darwin' and ansible_facts['architecture'] == 'arm64')
+        or ansible_facts['system'] == 'Linux'
     fail_msg: >-
-      This playbook supports macOS on Apple Silicon (arm64) only.
+      This playbook supports macOS on Apple Silicon (arm64) and Linux.
       Detected: {{ ansible_facts['system'] }} / {{ ansible_facts['architecture'] }}.
-    success_msg: "Platform check passed: macOS arm64"
+    success_msg: "Platform check passed: {{ ansible_facts['system'] }} {{ ansible_facts['architecture'] }}"
+
+# Everything platform-specific comes from this one profile; see "Platforms and
+# package managers" in docs/architecture.md.
+- name: Load the platform profile
+  ansible.builtin.include_vars:
+    file: "platform/{{ ansible_facts['system'] }}.yml"
+
+# Only the profile's candidates are probed; content for an absent manager is skipped.
+- name: Probe for package managers
+  ansible.builtin.stat:
+    path: "{{ item.value }}"
+  loop: "{{ _probes | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  register: _cs_manager_probe
+  vars:
+    # Overridable with -e (tests).
+    _probes: "{{ computer_setup_package_manager_probes | default(computer_setup_platform.package_managers) }}"
+
+- name: Resolve the package managers this machine has
+  ansible.builtin.set_fact:
+    computer_setup_package_managers: >-
+      {{ _cs_manager_probe.results | selectattr('stat.exists')
+         | map(attribute='item.key') | list }}
 
 - name: Check if the machine declaration exists
   ansible.builtin.stat:
@@ -245,24 +269,26 @@
 
 - name: Derive the role interface from capabilities
   ansible.builtin.set_fact:
-    # Packages from SELECTED capabilities; config and reminders from ACTIVE ones.
-    homebrew_optional_formulae: >-
-      {{ _selected_entries | selectattr('type', 'eq', 'formula')
-         | map(attribute='packages') | map('split') | flatten | list }}
-    homebrew_optional_casks: >-
-      {{ _selected_entries | selectattr('type', 'eq', 'cask')
-         | map(attribute='packages') | map('split') | flatten | list }}
-    # Extensions grouped by manager (`type: extension`, `manager: <id>`).
+    # Packages and extensions from SELECTED capabilities; config and reminders
+    # from ACTIVE ones. Both are mappings of manager -> space-separated names,
+    # folded here into manager -> list across every selected capability.
+    computer_setup_packages_optional: >-
+      {%- set ns = namespace(out={}) -%}
+      {%- for e in _selected_entries if e.packages is defined -%}
+        {%- for m, names in e.packages.items() -%}
+          {%- set ns.out = ns.out | combine({m: ns.out.get(m, []) + (names | split)}) -%}
+        {%- endfor -%}
+      {%- endfor -%}
+      {{ ns.out }}
     extension_optional: >-
-      {{ dict(_ext_grouped | map(attribute=0)
-              | zip(_ext_grouped | map(attribute=1)
-                    | map('map', attribute='packages')
-                    | map('join', ' ') | map('split') | list)) }}
-    # Third-party taps for SELECTED capabilities: a hand-run `brew tap` hides the dependency.
-    homebrew_optional_taps: >-
-      {{ (_selected_entries | selectattr('tap', 'defined')
-          | map(attribute='tap') | list) | unique | list }}
-    # Flattened list of config deploys ({src, dest, mode?}) from active caps.
+      {%- set ns = namespace(out={}) -%}
+      {%- for e in _selected_entries if e.extensions is defined -%}
+        {%- for m, names in e.extensions.items() -%}
+          {%- set ns.out = ns.out | combine({m: ns.out.get(m, []) + (names | split)}) -%}
+        {%- endfor -%}
+      {%- endfor -%}
+      {{ ns.out }}
+    # Flattened list of config deploys ({src, dest, executable?}) from active caps.
     computer_setup_config_deploys: >-
       {{ _active_entries | selectattr('config', 'defined')
          | map(attribute='config') | flatten | list }}
@@ -279,7 +305,44 @@
     _active_entries: >-
       {{ _active | select('in', computer_setup_capability_registry)
          | map('extract', computer_setup_capability_registry) | list }}
-    # [(manager, [entries])]; packages are joined and re-split so several capabilities feed one manager.
-    _ext_grouped: >-
-      {{ _selected_entries | selectattr('type', 'eq', 'extension')
-         | groupby('manager') }}
+
+# What the packages role installs: the layers' `packages_baseline` plus the
+# selected capabilities' packages, for the managers this machine has only.
+- name: Resolve the managed packages per detected manager
+  ansible.builtin.set_fact:
+    computer_setup_packages: >-
+      {%- set ns = namespace(out={}) -%}
+      {%- for m in computer_setup_package_managers -%}
+        {%- set ns.out = ns.out | combine({m: ((_baseline[m] | default([], true))
+                                               + computer_setup_packages_optional.get(m, [])) | unique | list}) -%}
+      {%- endfor -%}
+      {{ ns.out }}
+  vars:
+    _baseline: "{{ packages_baseline | default({}, true) }}"
+
+- name: Find selected capabilities with no package for this machine's managers
+  # A brew-only capability selected on Linux (or the reverse) installs nothing; say so rather than pass silently.
+  ansible.builtin.set_fact:
+    computer_setup_uninstallable_selections: >-
+      {%- set ns = namespace(ids=[]) -%}
+      {%- for e in _entries -%}
+        {%- if not (e.packages.keys() | list | intersect(computer_setup_package_managers)) -%}
+          {%- set ns.ids = ns.ids + [e.id] -%}
+        {%- endif -%}
+      {%- endfor -%}
+      {{ ns.ids }}
+  vars:
+    _entries: >-
+      {{ selected_capabilities | default([], true)
+         | select('in', computer_setup_capability_registry)
+         | map('extract', computer_setup_capability_registry)
+         | selectattr('packages', 'defined') | list }}
+
+- name: Warn about them
+  ansible.builtin.debug:
+    msg: >-
+      Selected capability id(s) declare no package for any package manager on
+      this machine ({{ computer_setup_package_managers | join(', ') or 'none detected' }}),
+      so nothing is installed for them: {{ computer_setup_uninstallable_selections | join(', ') }}.
+      Their config still deploys.
+  when: computer_setup_uninstallable_selections | length > 0

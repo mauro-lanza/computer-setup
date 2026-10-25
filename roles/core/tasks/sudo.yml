@@ -1,0 +1,29 @@
+---
+# Resolve once per run how a task may get root. Sets:
+#   computer_setup_sudo_ready  true when sudo works without a prompt
+#   computer_setup_sudo_argv   the sudo prefix to put before the command
+#   computer_setup_sudo_env    environment for the askpass path
+# A task never prompts: no NOPASSWD rule and no password means it is reported.
+# See "sudo on Linux" in docs/architecture.md.
+
+- name: Probe for passwordless sudo
+  ansible.builtin.command:
+    argv: [sudo, -n, "true"]
+  register: _cs_sudo_probe
+  changed_when: false
+  failed_when: false
+  # Read-only; see "Probes under --check" in docs/architecture.md.
+  check_mode: false
+  when: computer_setup_sudo_ready is not defined
+
+- name: Decide how tasks get root
+  ansible.builtin.set_fact:
+    computer_setup_sudo_ready: "{{ _nopasswd or _has_password }}"
+    computer_setup_sudo_argv: "{{ ['sudo', '-n'] if _nopasswd else ['sudo', '-A'] }}"
+    # The password itself stays in the inherited environment, never in a fact (`-v` prints facts).
+    computer_setup_sudo_env:
+      SUDO_ASKPASS: "{{ playbook_dir }}/scripts/askpass"
+  vars:
+    _nopasswd: "{{ (_cs_sudo_probe.rc | default(1)) == 0 }}"
+    _has_password: "{{ lookup('ansible.builtin.env', 'CS_SUDO_PASSWORD') | default('', true) | length > 0 }}"
+  when: computer_setup_sudo_ready is not defined

@@ -1,0 +1,34 @@
+---
+# Apps go to the user installation: no root, so this also runs unattended. An
+# app already present in EITHER installation counts as installed, so a
+# system-wide copy is never duplicated.
+- name: "[flatpak] List installed apps"
+  ansible.builtin.command:
+    argv: [flatpak, list, --app, --columns=application]
+  register: _flatpak_installed
+  changed_when: false
+  # Read-only; see "Probes under --check" in docs/architecture.md.
+  check_mode: false
+
+- name: "[flatpak] Resolve the missing set"
+  ansible.builtin.set_fact:
+    _flatpak_missing: >-
+      {{ _pkg_names
+         | reject('in', _flatpak_installed.stdout_lines | default([]) | map('trim') | list)
+         | list }}
+
+- name: "[flatpak] Ensure the user remote"
+  community.general.flatpak_remote:
+    name: "{{ packages_flatpak_remote }}"
+    flatpakrepo_url: "{{ packages_flatpak_remote_url }}"
+    method: user
+    state: present
+  when: _flatpak_missing | length > 0
+
+- name: "[flatpak] Install missing apps"
+  community.general.flatpak:
+    name: "{{ _flatpak_missing }}"
+    remote: "{{ packages_flatpak_remote }}"
+    method: user
+    state: present
+  when: _flatpak_missing | length > 0

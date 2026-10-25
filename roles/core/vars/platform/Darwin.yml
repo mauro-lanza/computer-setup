@@ -1,0 +1,36 @@
+---
+# The Darwin platform profile: every value that differs between platforms, in
+# one place. core loads it by `ansible_facts['system']`; see "Platforms and
+# package managers" in docs/architecture.md. Keep keys in step with Linux.yml
+# (check.sh asserts they match).
+computer_setup_platform:
+  name: Darwin
+  # Apple Silicon; bootstrap.sh's HOMEBREW_PREFIX must match (check.sh asserts it).
+  homebrew_prefix: /opt/homebrew
+  uv_bin: /opt/homebrew/bin/uv
+  # Relative to home_dir: where Console looks for user logs.
+  log_dir: Library/Logs/computer-setup
+  # Which role owns recurring jobs (scheduled_agents) and system settings (macos).
+  scheduler: launchd
+  system_settings: osx_defaults
+  # Candidate package managers, in install order, and the path whose existence
+  # means "present". cask is brew's other half, so it probes brew.
+  package_managers:
+    brew: /opt/homebrew/bin/brew
+    cask: /opt/homebrew/bin/brew
+  # Rendered into the runner, so it carries only this platform's commands.
+  runner:
+    # $1 = path; prints epoch seconds.
+    mtime: stat -f %m "$1"
+    # $1 = a %Y-%m-%dT%H:%M:%S%z stamp; prints epoch seconds.
+    stamp_epoch: date -j -f '%Y-%m-%dT%H:%M:%S%z' "$1" '+%s'
+    # $1 = title, $2 = message.
+    notify: /usr/bin/osascript -e "display notification \"${2}\" with title \"${1}\""
+    # apply never prompts here: casks that need root are reported instead.
+    sudo_on_apply: false
+    upgrade_summary: Homebrew formulae + casks, Ansible Galaxy collections, Node LTS.
+    upgrade_warning: >-
+      Quit any app being upgraded first — replacing a running app can fail and
+      leave it half-installed.
+    # Asked before `computer-setup upgrade`; empty (Linux) means no prompt.
+    upgrade_sudo_prompt: "Some casks need root to upgrade (e.g. Docker Desktop). macOS password (Enter to skip those casks): "

@@ -1,3 +1,6 @@
 ---
 shell_config_files:
   - {key: no-such-shell-file, dest: /tmp/no-such-shell-file}
+# A pre-unification name: no role reads it any more, so the formula would
+# silently never be installed.
+homebrew_baseline_formulae: [jq]

@@ -8,6 +8,9 @@
   hosts: localhost
   connection: local
   gather_facts: false
+  vars:
+    # Core detects these; this test simulates a Homebrew machine on any host.
+    computer_setup_package_managers: [brew, cask]
   tasks:
     - name: Scratch dir
       ansible.builtin.tempfile:
@@ -27,9 +30,8 @@
 
     - name: Preview with casks, one excluded
       vars:
-        homebrew_managed_formulae: [gitx, rg]
-        homebrew_managed_casks: [appa, appb]
-        upgrade_casks_exclude: [appb]
+        computer_setup_packages: {brew: [gitx, rg], cask: [appa, appb]}
+        packages_cask_upgrade_exclude: [appb]
         runtimes_nvm_default_node: lts/*
         runtimes_nvm_capability: nvm
         computer_setup_active_capabilities: [nvm]
@@ -94,9 +96,7 @@
 
     - name: Apply with and without nvm
       vars:
-        homebrew_managed_formulae: []
-        homebrew_managed_casks: []
-        upgrade_casks_exclude: []
+        computer_setup_packages: {}
         runtimes_nvm_default_node: lts/*
         runtimes_nvm_capability: nvm
         runtimes_nvm_script_path: "{{ s.path }}/nvm.sh"

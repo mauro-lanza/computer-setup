@@ -1,0 +1,26 @@
+---
+# Only user-installation apps: a system-wide app needs root (polkit) to update.
+- name: "[flatpak] List managed apps in the user installation"
+  ansible.builtin.command:
+    argv: [flatpak, list, --user, --app, --columns=application]
+  register: _flatpak_user_apps
+  changed_when: false
+  # Read-only; see "Probes under --check" in docs/architecture.md.
+  check_mode: false
+
+- name: "[flatpak] Show what would be updated"
+  ansible.builtin.debug:
+    msg: "Flatpak apps (user installation): {{ _apps | join(', ') or '(none installed there)' }}"
+  vars:
+    _apps: "{{ _pkg_names | select('in', _flatpak_user_apps.stdout_lines | map('trim') | list) | list }}"
+
+- name: "[flatpak] Update managed apps"
+  ansible.builtin.command:
+    argv: "{{ ['flatpak', 'update', '--user', '--noninteractive', '-y'] + _apps }}"
+  vars:
+    _apps: "{{ _pkg_names | select('in', _flatpak_user_apps.stdout_lines | map('trim') | list) | list }}"
+  register: _flatpak_update
+  changed_when: "'Nothing to do' not in _flatpak_update.stdout"
+  when:
+    - _pkg_apply | bool
+    - _apps | length > 0

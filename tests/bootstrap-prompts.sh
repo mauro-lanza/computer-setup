@@ -30,6 +30,11 @@ FAILURES=0
 pass() { printf '  ok  %s\n' "$1"; }
 fail() { printf '  FAIL %s\n     %s\n' "$1" "$2" >&2; FAILURES=$((FAILURES + 1)); }
 
+# Octal permission bits; BSD and GNU stat spell it differently.
+file_mode() {
+    if [[ "$(uname -s)" == Darwin ]]; then stat -f '%OLp' "$1"; else stat -c '%a' "$1"; fi 2>/dev/null
+}
+
 assert_eq() {
     local label="$1" expected="$2" actual="$3"
     if [[ "$expected" == "$actual" ]]; then
@@ -40,7 +45,7 @@ assert_eq() {
 }
 
 # One merged-registry row, fields joined by FS_U via IFS so the column count
-# (id, desc, type, packages, requires, adopt_if_present) is right by construction.
+# (id, desc, requires, adopt_if_present) is right by construction.
 caps_row() {
     local IFS="$FS_U"
     printf '%s\n' "$*"
@@ -50,13 +55,12 @@ caps_row() {
 # and not `vscode`, the shape that made the loop return 1.
 # $1 (optional): the adopt_if_present path for the `vscode` row.
 make_caps() {
-    caps_row alpha      "Alpha tool"            formula   alpha                ""       ""
-    caps_row vscode     "Visual Studio Code"    cask      visual-studio-code   ""       "${1:-}"
-    caps_row ext-pack   "Editor extension pack" extension some.extension       vscode   ""
-    caps_row zzz-last   "Last capability"       formula   zzz                  ""       ""
-    # A `feature` has no packages but declares `requires`: an empty field that a
-    # tab separator would collapse, reading `vscode` as the package list.
-    caps_row feat-gated "Config-only tool"      feature   ""                   vscode   ""
+    caps_row alpha      "Alpha tool"            ""       ""
+    caps_row vscode     "Visual Studio Code"    ""       "${1:-}"
+    caps_row ext-pack   "Editor extension pack" vscode   ""
+    caps_row zzz-last   "Last capability"       ""       ""
+    # A second capability gated on vscode, after zzz-last.
+    caps_row feat-gated "Config-only tool"      vscode   ""
 }
 
 # Drive gather_optional_tools with a scripted answer file and echo the result.
@@ -127,16 +131,17 @@ result="$(run_prompts "$WORK/vscode-no")"
 assert_eq "entries are skipped when their requirement is unmet" \
     "0|alpha zzz-last" "$result"
 
-# A `feature` has an empty `packages` field; with a tab separator `requires` is
-# read as `packages` and the gate disappears. The trailing `y` is the trap:
-# correct parsing never offers feat-gated, so it goes unread.
+# A second gated entry after the last ungated one must stay gated too. The
+# trailing `y` is the trap: correct gating never offers feat-gated, so it goes unread.
 printf 'y\nn\ny\ny\n' > "$WORK/vscode-no-trap"
 result="$(run_prompts "$WORK/vscode-no-trap")"
-assert_eq "  a feature capability's requires survives an empty packages field" \
+assert_eq "  a later gated capability stays gated" \
     "0|alpha zzz-last" "$result"
 
 # An ALREADY-INSTALLED requirement satisfies the gate via the capability's own
 # adopt_if_present, read from the merged registry column (staged here as data).
+# The vscode row then has an empty `requires` before a set adopt path: a tab
+# separator would collapse it and read the path as `requires`.
 touch "$WORK/present-marker"
 make_caps "$WORK/present-marker" > "$WORK/caps.tsv"
 printf 'y\nn\ny\nn\n' > "$WORK/vscode-present"
@@ -159,9 +164,9 @@ make_caps > "$WORK/caps.tsv"
 # `requires` resolves in one forward pass, so load_capabilities reorders topologically.
 echo "==> capability requires-ordering"
 {
-    caps_row ext-early "Extension, declared first" extension some.ext vscode ""
-    caps_row alpha     "Alpha tool"                formula   alpha     ""     ""
-    caps_row vscode    "Visual Studio Code"        cask      vscode    ""     ""
+    caps_row ext-early "Extension, declared first" vscode ""
+    caps_row alpha     "Alpha tool"                ""     ""
+    caps_row vscode    "Visual Studio Code"        ""     ""
 } > "$WORK/caps-unordered.tsv"
 cp "$WORK/caps-unordered.tsv" "$WORK/caps-ordered.tsv"
 order_capabilities_by_requires "$WORK/caps-ordered.tsv"
@@ -179,8 +184,8 @@ assert_eq "  and is then offered, instead of silently vanishing" \
 # A requirement that no layer declares must NOT be reordered away; the entry
 # keeps its place and stays gated on adopt_if_present.
 {
-    caps_row orphan "Needs something unregistered" formula o external-thing ""
-    caps_row alpha  "Alpha tool"                   formula alpha ""          ""
+    caps_row orphan "Needs something unregistered" external-thing ""
+    caps_row alpha  "Alpha tool"                   ""             ""
 } > "$WORK/caps-orphan.tsv"
 order_capabilities_by_requires "$WORK/caps-orphan.tsv"
 assert_eq "  an unregistered requirement leaves the row in place" \
@@ -216,7 +221,7 @@ if [[ -f "$WORK/machine.yml" ]]; then
     # top-level git_user_* key — that shape was the old special case.
     assert_eq "  machine file has no top-level git identity keys" "false false" \
         "$(yq -r '[has("git_user_name"), has("git_user_email")] | join(" ")' "$WORK/machine.yml" 2>/dev/null)"
-    mode="$(stat -f '%OLp' "$WORK/machine.yml" 2>/dev/null)"
+    mode="$(file_mode "$WORK/machine.yml")"
     assert_eq "  machine file is created 0600" "600" "$mode"
 else
     fail "write_machine is reachable after the prompt loop" "no machine file was written"
@@ -245,9 +250,9 @@ echo "==> bootstrap capability merge"
 )
 merged_ids="$(cut -d"$FS_U" -f1 "$WORK/merged.tsv" | tr '\n' ' ' | sed 's/ $//')"
 assert_eq "layers merge highest-priority-first, deduped by id" \
-    "nvm vscode dbt vscode-peacock opencode zed adopted" "$merged_ids"
+    "nvm vscode dbt vscode-peacock ripgrep pacman-only opencode zed adopted" "$merged_ids"
 assert_eq "  the higher-priority layer's definition wins" \
-    "nvm-from-override" "$(awk -F"$FS_U" '$1=="nvm"{print $4}' "$WORK/merged.tsv")"
+    "Node Version Manager (override wins)" "$(awk -F"$FS_U" '$1=="nvm"{print $2}' "$WORK/merged.tsv")"
 
 # ── 12. Questions: the single-select prompt path ────────────────────────────
 # Same stdin/FD 3 hazard as the capability loop; also ask_select prints its
@@ -423,12 +428,14 @@ assert_eq "  reconfiguring layers keeps the answers on disk" "zed" \
     "$(yq -r '.answers.editor' "$WORK/new-config/machine-reconf.yml" 2>/dev/null)"
 
 # main must refuse before installing anything when there is neither a terminal
-# nor an --answers file. install_xcode_clt is stubbed so a missing guard shows up
-# as "reached phase 0" instead of running the installer.
+# nor an --answers file. Every first Phase 0 step (macOS: Xcode CLT; Linux:
+# prerequisites) is stubbed so a missing guard shows up as "reached phase 0"
+# instead of running an installer.
 no_tty_main() {
     (
         reattach_stdin() { INTERACTIVE=0; }
         install_xcode_clt() { echo "reached phase 0"; exit 0; }
+        ensure_prereqs() { echo "reached phase 0"; exit 0; }
         main "$@" 2>&1
     )
 }
@@ -669,7 +676,7 @@ if [[ -n "$got" && -f "$got" ]]; then
     pass "choosing a backup sets ANSWERS_FILE to the fetched declaration"
     assert_eq "  the restored file carries the layers" "2" \
         "$(yq -r '.layers | length' "$got" 2>/dev/null)"
-    assert_eq "  and is private" "600" "$(stat -f '%OLp' "$got" 2>/dev/null)"
+    assert_eq "  and is private" "600" "$(file_mode "$got")"
 else
     fail "choosing a backup sets ANSWERS_FILE to the fetched declaration" "got [$got]"
 fi

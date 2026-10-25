@@ -1,4 +1,0 @@
----
-# `homebrew_managed_*` come from the layer merge at runtime, so this resolves
-# lazily at each point of use.
-upgrade_managed_casks: "{{ homebrew_managed_casks | reject('in', upgrade_casks_exclude) | list }}"

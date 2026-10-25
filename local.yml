@@ -1,5 +1,5 @@
 ---
-- name: Configure macOS workstation
+- name: Configure workstation
   hosts: localhost
   connection: local
   become: false
@@ -8,7 +8,8 @@
     # SSH: scheduled pulls are non-interactive and HTTPS can prompt for keychain credentials.
     computer_setup_repo_url: "git@github.com:mauro-lanza/computer-setup.git"
     computer_setup_repo_branch: main
-    homebrew_prefix: /opt/homebrew
+    # From the platform profile core loads (roles/core/vars/platform/); layers template against it.
+    homebrew_prefix: "{{ computer_setup_platform.homebrew_prefix }}"
     home_dir: "{{ ansible_facts['env']['HOME'] }}"
 
     # Play-scoped because the layer merge templates repository entries against it.
@@ -40,8 +41,8 @@
     computer_setup_interactive: true
     # Entry point for every ansible-pull; deployed by drift_correction, invoked by the agents.
     computer_setup_command_path: "{{ computer_setup_bin_dir }}/computer-setup"
-    # One log per run; see LOG_DIR in the runner.
-    computer_setup_log_dir: "{{ home_dir }}/Library/Logs/computer-setup"
+    # One log per run; see LOG_DIR in the runner. Where per the platform profile.
+    computer_setup_log_dir: "{{ home_dir }}/{{ computer_setup_platform.log_dir }}"
     # Highest layer schema_version this orchestrator understands.
     computer_setup_schema_version: 1
 
@@ -54,14 +55,16 @@
   roles:
     # First: everything after runs under the interpreter it pins.
     - { role: runtime, tags: [runtime] }
-    - { role: homebrew, tags: [homebrew] }
+    # One role for every package manager, each run only where core detected it;
+    # see "Platforms and package managers" in docs/architecture.md.
+    - { role: packages, tags: [packages] }
     - { role: git, tags: [git] }
     - { role: shell, tags: [shell] }
     # Loops over layer-declared `extension_managers`; no editor is named here.
     - { role: extensions, tags: [extensions] }
     # One loop over all bundles, so it has no per-tool tag.
     - { role: capability_configs, tags: [capability_configs] }
-    - { role: macos, tags: [macos] }
+    - { role: macos, tags: [macos], when: "computer_setup_platform.system_settings == 'osx_defaults'" }
     - { role: runtimes, tags: [runtimes] }
     # Merges into ~/.docker/config.json, which holds auths/credsStore this orchestrator must not own;
     # see "path_helper can defeat the PATH snippet's own prepend logic" in docs/findings.md.
@@ -76,10 +79,22 @@
     - { role: drift_correction, tags: [drift_correction] }
     # Last, after drift_correction and capability_configs, whose programs the agents invoke;
     # see "Partial failures are reported at the end of the play" in docs/findings.md.
-    - { role: scheduled_agents, tags: [scheduled_agents] }
+    # The profile names the scheduler; Linux has none yet, so its runs are interactive.
+    - { role: scheduled_agents, tags: [scheduled_agents], when: "computer_setup_platform.scheduler == 'launchd'" }
 
   post_tasks:
     # Reported here so every role runs first; see "Partial failures are reported at the end of the play" in docs/findings.md.
+    - name: Report packages that need root and got no sudo password
+      ansible.builtin.fail:
+        msg: |-
+          {{ _missing | length }} package(s) need root to install and no sudo
+          password was given: {{ _missing | join(', ') }}.
+          Everything else completed. Re-run `computer-setup apply` from a
+          terminal and enter your password when asked.
+      vars:
+        _missing: "{{ packages_unprivileged_missing | default([]) }}"
+      when: _missing | length > 0
+      tags: [packages]
     - name: Report casks that could not be installed
       ansible.builtin.fail:
         msg: |-
@@ -98,10 +113,10 @@
           Everything else is already configured; re-running is safe and cheap.
       vars:
         _failed: >-
-          {{ (homebrew_cask_results | default({})).get('results', [])
+          {{ (packages_cask_results | default({})).get('results', [])
              | selectattr('failed', 'defined') | selectattr('failed') | list }}
       when: _failed | length > 0
-      tags: [homebrew]
+      tags: [packages]
 
     # Same reason as the casks: osx_defaults fails hard on a wrong `type:`.
     - name: Report macOS defaults that could not be applied

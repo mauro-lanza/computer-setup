@@ -76,10 +76,12 @@ so the engine hardcodes no package names or paths:
 
 - **active capabilities** = `selected_capabilities` ∪ any capability whose
   `adopt_if_present` path exists (adopting an already-installed tool).
-- **packages** (`homebrew_optional_*`, `extension_optional`) come from the
-  *selected* capabilities' `packages`, split by `type`. `type: extension`
-  entries also carry a `manager:` and are grouped by it — the engine names no
-  editor, and the managers themselves are layer data (`extension_managers`).
+- **packages** (`computer_setup_packages_optional`, manager -> names) come from
+  the *selected* capabilities' `packages:` mapping, and **extensions**
+  (`extension_optional`, extension manager -> ids) from their `extensions:`
+  mapping. The engine names no editor; extension managers are layer data
+  (`extension_managers`). There is no `type`: what a capability installs is
+  exactly the keys it declares.
 - a capability may declare `requires: <id>`, and is then **offered** only when
   that one is selected earlier in the run or already present (via its
   `adopt_if_present` path). This replaced a hardcoded `command -v code` probe.
@@ -102,9 +104,75 @@ so the engine hardcodes no package names or paths:
 That selected/active split is deliberate: install only what you asked for, but
 manage the config of anything already present.
 
-Always-on **baseline** content (`homebrew_baseline_*`, `macos_defaults`,
+Always-on **baseline** content (`packages_baseline`, `macos_defaults`,
 `git_config_sections`, …) is plain flat layer vars, separate from opt-in
 capabilities.
+
+## Platforms and package managers
+
+The engine runs on macOS (Apple Silicon) and Arch-based Linux. Two rules keep
+platform differences in one place and out of the files it writes.
+
+**One platform profile.** Everything that differs between platforms is in
+`roles/core/vars/platform/<system>.yml`, which `core` loads first by
+`ansible_facts['system']`: `homebrew_prefix`, the uv and log paths, which role
+owns scheduling (`launchd` or none) and system settings (`osx_defaults` or
+none), the candidate package managers with their probe paths, and the few
+commands the runner needs (`stat`, `date`, notification). `local.yml` and the
+roles read the profile; nothing else branches on the OS. `check.sh` asserts
+every profile has the same keys, and that `bootstrap.sh` (which runs before any
+profile can be read) agrees on `homebrew_prefix`.
+
+**Render for the platform, never branch at runtime.** Templates take their
+platform-specific parts from the profile (engine) or from per-platform layer
+vars (layers), so a deployed file contains only this machine's code: the Linux
+runner has no `osascript`, the Linux `.zshrc` names no Homebrew path. Layers do
+this with `vars/<platform>.yml`, merged after `vars.yml` on that platform only;
+a template reads a plain value (`zsh_theme`) instead of testing which platform
+it is on. `check.sh` renders the runner once per profile and checks each.
+
+**Package managers are detected, not declared.** `core` stats the profile's
+candidate managers (macOS: `brew`, `cask`; Linux: `pacman`, `aur` via paru,
+`flatpak`) into `computer_setup_package_managers`, then resolves
+`computer_setup_packages` (manager -> names): each layer's `packages_baseline`
+plus the selected capabilities' `packages:`, for detected managers only. The
+`packages` role loops over those, one task file per manager and action
+(`converge/<m>.yml`, `upgrade/<m>.yml`), so adding a manager is a profile entry
+plus two task files. A selected capability with no key for any detected manager
+is reported (`computer_setup_uninstallable_selections`) rather than silently
+installing nothing; its config still deploys. Homebrew taps are derived from
+`owner/tap/name`, so a tapped package cannot forget its tap.
+
+Detection was chosen over a layer-declared platform list because a declared list
+is one more string that can be wrong, and the failure is the same silent "found
+nothing" every other id lookup here suffers from. Layers split by owner
+(public, personal, work), never by platform: a platform-only value goes in that
+layer's `vars/<platform>.yml`.
+
+**pacman is install-only.** Missing names come from `pacman -T` (local database,
+honours `provides`, no root), and installs use `pacman -S --needed` against the
+current sync database. Never `-Sy`: refreshing the database without upgrading is
+a partial upgrade, which Arch does not support. For the same reason the upgrade
+role does not upgrade pacman or AUR packages one by one; that is the system
+updater's job (`pacman -Syu`, `paru`, Shelly). Flatpak apps go to the **user**
+installation, which needs no root; an app already present system-wide counts
+as installed and is not duplicated. Nothing is ever removed.
+
+### sudo on Linux
+
+pacman, AUR installs and `chsh` need root, and an Ansible task never has a
+terminal to prompt on. On Linux, `computer-setup apply` (and `bootstrap.sh`)
+asks for the sudo password up front, **validates it once** with
+`sudo -S -k true`, and exports it as `CS_SUDO_PASSWORD` — never `-e`, which
+would show it in the process list. Tasks run `sudo -A` with `scripts/askpass` as
+`SUDO_ASKPASS`; the script holds no secret, it echoes the variable the task
+inherited. The password is never put in a fact (`-v` prints facts).
+
+Validating in the runner matters: a wrong password replayed by askpass is tried
+`passwd_tries` times per task, and PAM's faillock then locks the account.
+Passwordless sudo (`sudo -n true` succeeds) skips all of this. With neither,
+the steps that need root are skipped and reported at the end of the play, like
+casks that need a password on macOS.
 
 ## The question model
 
@@ -678,7 +746,7 @@ layer data, reached through one of these interfaces:
 
 | Decision | Layer interface |
 |---|---|
-| Which editor(s) to manage — binary, settings key, extension install command | `extension_managers`; a capability declares `type: extension` + `manager:` |
+| Which editor(s) to manage — binary, settings key, extension install command | `extension_managers`; a capability declares `extensions: {<manager>: ids}` |
 | Whether a capability is offered at all | `requires: <capability-id>`, resolved against `adopt_if_present` (bootstrap-side; see the capability model above) |
 | App-conditional macOS defaults (Rectangle, Raycast, …) | `macos_conditional_defaults[].app` |
 | Which whole-file shell configs exist (`zshrc`, `p10k.zsh`, …) | `shell_config_files` |
@@ -829,7 +897,7 @@ Split by the XDG question — who owns it, and what does losing it cost:
 | `~/.local/state/computer-setup/last-success-upgrade` | when the scheduled upgrade last succeeded | `status` shows no upgrade line until the next one |
 | `~/.local/state/computer-setup/galaxy-core-version` | which ansible-core the collections were resolved against | a redundant re-resolve |
 | `~/.local/state/computer-setup/progress.jsonl` | what the current run is doing | nothing; transient by design |
-| `~/Library/Logs/computer-setup/` | one log per run | failed runs' output, which nothing else keeps |
+| `~/Library/Logs/computer-setup/` (macOS), `~/.local/state/computer-setup/logs/` (Linux) | one log per run | failed runs' output, which nothing else keeps |
 
 Both `~/.config` entries are configuration because a HUMAN decided them and no
 run can reconstruct them. `backup.yml` is config despite describing where state

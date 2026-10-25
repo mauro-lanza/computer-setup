@@ -4,8 +4,8 @@ set -euo pipefail
 # ─────────────────────────────────────────────────────────────────────────────
 # computer-setup bootstrap (orchestrator)
 #
-# Run on a fresh Mac to install prerequisites, define/clone content layers, and
-# kick off the Ansible playbook.
+# Run on a fresh Mac (Apple Silicon) or an Arch-based Linux machine to install
+# prerequisites, define/clone content layers, and kick off the Ansible playbook.
 #
 #   Phase 0  Prerequisites + GitHub auth (no repo access required)
 #   Phase 1  Layer selection & fetch (define manifest, clone to layer cache)
@@ -32,10 +32,18 @@ PULL_DIR="$HOME/.ansible/pull/computer-setup"
 RUNTIME_DIR="$HOME/.local/share/computer-setup/runtime"
 RUNTIME_BIN="$RUNTIME_DIR/bin"
 
-# Apple silicon prefix. Asserted in main() and in the playbook, so this is a
-# constant rather than a `brew --prefix` call that must run before Homebrew is
-# installed. Layers reference it as `{{ homebrew_prefix }}`.
-HOMEBREW_PREFIX="/opt/homebrew"
+# Darwin or Linux; Phase 0 is the only part that differs.
+CS_OS="$(uname -s)"
+
+# Apple silicon prefix (Linuxbrew's elsewhere, matching local.yml). Asserted in
+# main() and in the playbook, so this is a constant rather than a `brew --prefix`
+# call that must run before Homebrew is installed. Layers reference it as
+# `{{ homebrew_prefix }}`.
+if [[ "$CS_OS" == Darwin ]]; then
+    HOMEBREW_PREFIX="/opt/homebrew"
+else
+    HOMEBREW_PREFIX="/home/linuxbrew/.linuxbrew"
+fi
 
 # Orchestrator repo. Bootstrap authenticates GitHub before cloning layers or
 # running ansible-pull, so GitHub repos are accessed over SSH consistently.
@@ -184,6 +192,10 @@ install_homebrew() {
 
 # yq/git/gh are needed before we can read capabilities or clone layers.
 ensure_prereqs() {
+    if [[ "$CS_OS" == Linux ]]; then
+        ensure_prereqs_pacman
+        return
+    fi
     local pkg
     for pkg in yq git gh; do
         if ! command -v "$pkg" &>/dev/null; then
@@ -192,6 +204,33 @@ ensure_prereqs() {
         fi
     done
     ok "Core prerequisites present (yq, git, gh)"
+}
+
+# Arch's `yq` package is a different tool (a jq wrapper); `go-yq` is mikefarah's,
+# which everything here is written against. uv is installed here too: there is
+# no brew to fall back to in install_runtime.
+ensure_prereqs_pacman() {
+    if ! command -v pacman &>/dev/null; then
+        error "No pacman found. On Linux, only Arch-based distributions are supported."
+        exit 1
+    fi
+    local -a missing=()
+    command -v git &>/dev/null || missing+=(git)
+    command -v gh &>/dev/null || missing+=(github-cli)
+    command -v uv &>/dev/null || missing+=(uv)
+    if [[ "$(yq --version 2>/dev/null || true)" != *mikefarah* ]]; then
+        missing+=(go-yq)
+    fi
+    if [[ ${#missing[@]} -gt 0 ]]; then
+        info "Installing ${missing[*]} with pacman (sudo will ask for your password)..."
+        # No -y: refreshing the database without upgrading is a partial upgrade.
+        sudo pacman -S --needed "${missing[@]}"
+    fi
+    if [[ "$(yq --version 2>/dev/null || true)" != *mikefarah* ]]; then
+        error "yq on PATH is not mikefarah's yq. Remove the other one: sudo pacman -R yq"
+        exit 1
+    fi
+    ok "Core prerequisites present (yq, git, gh, uv)"
 }
 
 # Fetch a file from the repo: the local checkout when there is a verified one,
@@ -528,7 +567,7 @@ order_capabilities_by_requires() {
     local file="$1" tmp
     tmp="$(mktemp)"
     awk -F"$FS_U" -v OFS="$FS_U" '
-        { id[NR] = $1; req[NR] = $5; line[NR] = $0; known[$1] = NR; n = NR }
+        { id[NR] = $1; req[NR] = $3; line[NR] = $0; known[$1] = NR; n = NR }
         END {
             for (i = 1; i <= n; i++) {
                 # Emit only roots here: a row whose requirement exists in the
@@ -547,8 +586,9 @@ order_capabilities_by_requires() {
 }
 
 # Merged capabilities. Columns:
-#   id  desc  type  packages  requires  adopt_if_present
+#   id  desc  requires  adopt_if_present
 # `id` is the capability token written to ~/.config/computer-setup/machine.yml as a selection.
+# Packages are not read here: the engine derives them from the registry at apply time.
 load_capabilities() {
     MERGED_CAPABILITIES_FILE="$(mktemp)"
 
@@ -558,8 +598,7 @@ load_capabilities() {
     fi
 
     merge_layer_file capabilities.yml \
-        '.capabilities[]? | [.id, .desc, .type, (.packages // ""), (.requires // ""),
-                             (.adopt_if_present // "")] | @tsv' \
+        '.capabilities[]? | [.id, .desc, (.requires // ""), (.adopt_if_present // "")] | @tsv' \
         "$MERGED_CAPABILITIES_FILE"
 
     order_capabilities_by_requires "$MERGED_CAPABILITIES_FILE"
@@ -801,7 +840,7 @@ prior_answer() {
 cap_is_present() {
     local id="$1" probe
     [[ -s "${MERGED_CAPABILITIES_FILE:-}" ]] || return 1
-    probe="$(awk -F"$FS_U" -v want="$id" '$1 == want { print $6; exit }' \
+    probe="$(awk -F"$FS_U" -v want="$id" '$1 == want { print $4; exit }' \
         "$MERGED_CAPABILITIES_FILE")"
     [[ -z "$probe" ]] && return 1
     # Collapse any inner whitespace first ({{ home_dir }}, {{home_dir}}, and
@@ -839,11 +878,11 @@ gather_optional_tools() {
     local satisfied=" "
 
     # The list is read on FD 3, not stdin, or every prompt eats the next list line.
-    local id desc type pkgs requires adopt default
-    # `pkgs`/`adopt` are read but unused: `read` gives the remainder to its last
-    # variable, so omitting them folds adopt_if_present into `requires`.
+    local id desc requires adopt default
+    # `adopt` is read but unused: `read` gives the remainder to its last
+    # variable, so omitting it folds adopt_if_present into `requires`.
     # shellcheck disable=SC2034
-    while IFS="$FS_U" read -r -u 3 id desc type pkgs requires adopt; do
+    while IFS="$FS_U" read -r -u 3 id desc requires adopt; do
 
         # A capability may require another. It is offered only when that one is
         # satisfied — selected earlier in this run, or already present. Order in
@@ -1141,6 +1180,10 @@ run_playbook() {
 # (process list). Optional: Enter skips and those casks are reported at the end.
 collect_sudo_password() {
     [[ -n "$ANSWERS_FILE" ]] && return 0   # non-interactive: no prompt
+    if [[ "$CS_OS" == Linux ]]; then
+        collect_sudo_password_linux
+        return 0
+    fi
     local pw
     echo
     info "Some casks need root to install (e.g. to place a helper in"
@@ -1155,6 +1198,34 @@ collect_sudo_password() {
         info "Skipping — casks needing root will be reported at the end."
     fi
     unset pw
+}
+
+# pacman and chsh need root. Checked here, once, so the askpass helper never
+# replays a wrong password into a PAM lockout (same as the runner's `apply`).
+collect_sudo_password_linux() {
+    sudo -n true 2>/dev/null && return 0
+    local pw try
+    echo
+    info "System packages and the login shell need root. Ansible cannot answer"
+    info "a sudo prompt on its own."
+    for try in 1 2; do
+        printf "  sudo password (Enter to skip those steps): "
+        read -rs pw
+        echo
+        if [[ -z "$pw" ]]; then
+            info "Skipping — steps needing root will be reported at the end."
+            return 0
+        fi
+        if printf '%s\n' "$pw" | sudo -S -k -p '' true 2>/dev/null; then
+            export CS_SUDO_PASSWORD="$pw"
+            unset pw
+            ok "Password captured for this run only"
+            return 0
+        fi
+        warn "Incorrect password (attempt ${try}/2)."
+    done
+    unset pw
+    warn "Continuing without root; steps needing it will be reported at the end."
 }
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1177,19 +1248,20 @@ main() {
 
     echo
     echo "╔══════════════════════════════════════════════╗"
-    echo "║   macOS Workstation Setup — orchestrator     ║"
+    echo "║   Workstation Setup — orchestrator           ║"
     echo "║   github.com/${ORCH_OWNER}/${ORCH_NAME}"
     echo "╚══════════════════════════════════════════════╝"
     echo
 
-    if [[ "$(uname -s)" != "Darwin" || "$(uname -m)" != "arm64" ]]; then
-        error "Unsupported platform: $(uname -s) $(uname -m) — Apple Silicon macOS required."
+    if [[ "$CS_OS" == Darwin && "$(uname -m)" == arm64 ]]; then
+        install_xcode_clt
+        install_homebrew
+    elif [[ "$CS_OS" != Linux ]]; then
+        error "Unsupported platform: ${CS_OS} $(uname -m) — Apple Silicon macOS or Arch-based Linux required."
         exit 1
     fi
 
     # ── Phase 0 ──────────────────────────────────────────────────────────────
-    install_xcode_clt
-    install_homebrew
     ensure_prereqs
     install_runtime
     install_galaxy_collections

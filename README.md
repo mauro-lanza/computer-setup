@@ -1,10 +1,10 @@
 # computer-setup
 
-Generalized macOS provisioning framework. An Ansible **orchestrator** (the
+Generalized macOS and Arch Linux provisioning framework. An Ansible **orchestrator** (the
 engine) consumes pluggable **content layers** (your data), so the core stays
 public and shareable while personal and work data live in separate repos.
 
-Scheduled LaunchAgents run each morning: at 09:00 managed tools are upgraded, at
+Scheduled LaunchAgents (macOS) run each morning: at 09:00 managed tools are upgraded, at
 10:00 the playbook re-runs in check mode and notifies you when the machine has
 drifted from the declared state — across the orchestrator *and* every layer.
 Layers can schedule jobs of their own on the same mechanism (see
@@ -27,9 +27,15 @@ Changing jobs = swap one layer, touch nothing else.
 
 ## Requirements
 
-- **macOS 13 Ventura or newer**, **Apple Silicon (arm64)**. The playbook asserts
-  `Darwin` + `arm64`; `homebrew_prefix` is `/opt/homebrew`.
-- **Xcode Command Line Tools** — Homebrew's installer triggers the OS dialog.
+- **macOS 13 Ventura or newer, Apple Silicon (arm64)**, with Homebrew at
+  `/opt/homebrew` and the **Xcode Command Line Tools** (Homebrew's installer
+  triggers the OS dialog); **or**
+- **Arch-based Linux** (pacman; tested on CachyOS). `paru` and `flatpak` are used
+  when present. No scheduled runs on Linux yet: run `check`/`apply` by hand.
+
+The playbook asserts one of those; package managers are detected, and layer
+content for an absent one is skipped (see "Platforms and package managers" in
+[docs/architecture.md](docs/architecture.md)).
 
 ## Quick start
 

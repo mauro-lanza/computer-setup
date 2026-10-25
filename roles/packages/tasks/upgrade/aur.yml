@@ -1,0 +1,5 @@
+---
+# Same reason as upgrade/pacman.yml: an AUR upgrade is part of the system upgrade.
+- name: "[aur] Explain why AUR packages are not upgraded here"
+  ansible.builtin.debug:
+    msg: "AUR packages: not upgraded here; `paru` (or Shelly) upgrades them with the system."

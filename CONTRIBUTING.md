@@ -12,12 +12,17 @@ layers** and never belong here.
 - **No secrets anywhere.** Tokens and keys stay in the environment, keychain, or
   a password manager and are referenced at runtime — never committed, even to a
   private layer.
-- **macOS / Apple Silicon only.** The playbook asserts `Darwin` + `arm64`.
+- **macOS on Apple Silicon, or Arch-based Linux.** The playbook asserts one of
+  them. Anything platform-specific is gated on a detected fact (OS or package
+  manager), never on a layer saying which platform it is; see "Platforms and
+  package managers" in `docs/architecture.md`. CI runs macOS only, so run
+  `check.sh` on Linux by hand after touching a platform branch.
 
 ## Development setup
 
 ```bash
-brew install yq ansible-lint shellcheck
+brew install yq ansible-lint shellcheck          # macOS
+sudo pacman -S go-yq ansible-lint shellcheck     # Arch (go-yq, not yq)
 computer-setup apply --tags runtime    # the pinned ansible-core and mitogen
 ~/.local/share/computer-setup/runtime/bin/ansible-galaxy collection install -r requirements.yml
 ```

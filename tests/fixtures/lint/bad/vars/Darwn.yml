@@ -1,0 +1,3 @@
+---
+# A misspelt platform: merged on no machine at all.
+packages_baseline: {brew: [jq]}

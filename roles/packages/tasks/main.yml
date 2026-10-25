@@ -1,0 +1,24 @@
+---
+# Names reach argv, never a shell; a leading `-` would still be read as an
+# option, so the shape is checked before any manager sees them.
+- name: Validate declared package names
+  ansible.builtin.assert:
+    that:
+      - item is string
+      - item is match('^[A-Za-z0-9@_+][A-Za-z0-9@._+/-]*$')
+    fail_msg: >-
+      '{{ item }}' is not a valid package name. Check the layers'
+      packages_baseline and the capabilities' `packages:` mappings.
+    quiet: true
+  loop: "{{ computer_setup_packages.values() | flatten }}"
+
+# Profile order, so e.g. pacman runs before aur (an AUR package's repo
+# dependencies are then already present).
+- name: Converge each package manager
+  ansible.builtin.include_tasks: "converge/{{ _pkg_mgr }}.yml"
+  loop: "{{ computer_setup_package_managers }}"
+  loop_control:
+    loop_var: _pkg_mgr
+  vars:
+    _pkg_names: "{{ computer_setup_packages.get(_pkg_mgr, []) }}"
+  when: computer_setup_packages.get(_pkg_mgr, []) | length > 0

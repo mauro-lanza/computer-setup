@@ -141,3 +141,53 @@
   loop: "{{ shell_config_files }}"
   loop_control:
     label: "{{ item.dest | basename }}"
+
+# ─── Login shell ─────────────────────────────────────────────────────────────
+- name: Set the login shell
+  when:
+    - shell_login_shell | length > 0
+    - ansible_facts['user_shell'] | default('') != shell_login_shell
+  block:
+    # chsh rejects a shell missing from /etc/shells; fail here with the reason.
+    - name: Assert the login shell is a permitted shell
+      ansible.builtin.assert:
+        that:
+          - shell_login_shell in (lookup('ansible.builtin.file', '/etc/shells').splitlines() | map('trim') | list)
+        fail_msg: >-
+          shell_login_shell '{{ shell_login_shell }}' is not listed in /etc/shells
+          (is it installed?). Install it, or correct the path in the layer.
+        quiet: true
+
+    - name: Report the login shell as drift
+      ansible.builtin.debug:
+        msg: >-
+          Login shell is {{ ansible_facts['user_shell'] | default('unknown') }};
+          the layers declare {{ shell_login_shell }}.
+      changed_when: true
+      when: ansible_check_mode
+
+    - name: Resolve sudo
+      ansible.builtin.include_role:
+        name: core
+        tasks_from: sudo
+      when: not ansible_check_mode
+
+    - name: Change the login shell
+      ansible.builtin.command:
+        argv: "{{ computer_setup_sudo_argv + ['chsh', '-s', shell_login_shell, ansible_facts['user_id']] }}"
+      environment: "{{ computer_setup_sudo_env }}"
+      changed_when: true
+      notify: Shell config changed
+      when:
+        - not ansible_check_mode
+        - computer_setup_sudo_ready | bool
+
+    - name: Explain why the login shell was not changed
+      ansible.builtin.debug:
+        msg: >-
+          The login shell needs root to change and no sudo password was given.
+          Re-run `computer-setup apply` and enter it, or run:
+          chsh -s {{ shell_login_shell }}
+      when:
+        - not ansible_check_mode
+        - not (computer_setup_sudo_ready | bool)

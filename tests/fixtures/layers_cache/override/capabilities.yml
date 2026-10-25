@@ -7,24 +7,35 @@ capabilities:
   # exercised — a regression making the LOWER layer win passed the whole suite.
   - id: nvm
     desc: "Node Version Manager (override wins)"
-    type: formula
-    packages: nvm-from-override
+    packages:
+      brew: nvm-from-override
   - id: vscode
     desc: "Visual Studio Code"
-    type: cask
-    packages: visual-studio-code
+    packages:
+      cask: visual-studio-code
     reminders: ["Sign into VS Code settings sync"]
   # A capability with no package (feature) — e.g. a config-only tool.
   - id: dbt
     desc: "dbt (BigQuery profile)"
-    type: feature
     config:
-      - { src: profiles.yml, dest: "/tmp/cs-contract/dbt-profiles.yml" }
-  # type: extension — the third branch of the package split. Asserted by
-  # identity, not just "== []", which would pass even if the branch returned
-  # nothing.
+      - {src: profiles.yml, dest: "/tmp/cs-contract/dbt-profiles.yml"}
+  # `extensions:` is keyed by the layer's extension manager, not a package
+  # manager. Asserted by identity, not just "== {}", which would pass even if
+  # the derivation returned nothing.
   - id: vscode-peacock
     desc: "VS Code: Peacock"
-    type: extension
-    manager: vscode
-    packages: johnpapa.vscode-peacock
+    extensions:
+      vscode: johnpapa.vscode-peacock
+  # One capability, several managers: each manager's names land in its own list,
+  # and brew's join the other capabilities' brew names.
+  - id: ripgrep
+    desc: "ripgrep (both platforms)"
+    packages:
+      brew: ripgrep
+      pacman: ripgrep
+      flatpak: org.example.Rg
+  # Installs nothing on a machine without pacman; core must name it.
+  - id: pacman-only
+    desc: "Only packaged for pacman"
+    packages:
+      pacman: only-pacman extra-pacman

@@ -1,0 +1,33 @@
+---
+# One role for every package manager. core detects which managers this machine
+# has (from the platform profile) and resolves `computer_setup_packages`:
+# manager -> names, from the layers' `packages_baseline` plus the selected
+# capabilities' `packages:`. Each manager is one task file per action:
+#   tasks/converge/<manager>.yml  install what is missing (or report it under --check)
+#   tasks/upgrade/<manager>.yml   preview, and upgrade once confirmed (upgrade role)
+# Only declared packages are touched; nothing is ever removed.
+
+# Layer data (lists append across layers):
+#   packages_baseline:
+#     brew: [git]           # Homebrew formulae; `owner/tap/name` adds the tap
+#     cask: [rectangle]     # Homebrew casks
+#     pacman: [git]         # Arch repositories
+#     aur: [paru-bin]       # AUR, built with paru
+#     flatpak: [org.x.App]  # flathub, user installation
+packages_baseline: {}
+
+# Refresh Homebrew before installing; the scheduled check passes false.
+packages_brew_update: true
+
+# Casks safe to `--adopt` when already installed by hand; see "Casks with
+# protected payloads" in docs/findings.md before adding one.
+packages_cask_adopt: []
+# Never upgraded automatically: apps whose own updater owns the job.
+packages_cask_upgrade_exclude: []
+# Force-upgrade casks that update themselves. False: `greedy` races the app's
+# own updater and a failed swap can leave an empty .app.
+packages_cask_upgrade_greedy: false
+
+# Flatpak apps go to the user installation from this remote, so no root.
+packages_flatpak_remote: flathub
+packages_flatpak_remote_url: https://dl.flathub.org/repo/flathub.flatpakrepo

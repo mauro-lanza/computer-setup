@@ -12,3 +12,7 @@ shell_snippet_manifest_path: "{{ shell_zsh_config_dir }}/.computer-setup-snippet
 
 # Whole-file shell configs, set by layers. Item schema: { key: <layer file key>, dest: <path>, backup?: bool }
 shell_config_files: []
+
+# Absolute path of the login shell to set for the current user (chsh), e.g.
+# /usr/bin/zsh. Empty leaves the login shell alone. It must be listed in /etc/shells.
+shell_login_shell: ""

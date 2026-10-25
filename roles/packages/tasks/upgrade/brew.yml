@@ -1,0 +1,37 @@
+---
+# With no package arguments `brew outdated` reports every outdated package on the
+# machine, managed or not, so only the managed set is queried.
+- name: "[brew] Refresh the package index"
+  ansible.builtin.command: brew update
+  changed_when: false
+
+- name: "[brew] Determine which managed formulae are outdated"
+  ansible.builtin.command:
+    argv: "{{ ['brew', 'outdated', '--formula', '--verbose'] + _pkg_names }}"
+  register: _brew_outdated
+  changed_when: false
+  failed_when: false
+
+# `brew outdated` exits 1 to mean "something IS outdated", like diff(1), so rc
+# is useless as an error signal. A real failure (unknown formula, missing tap)
+# also exits non-zero but writes "Error:" to stderr and nothing to stdout — and
+# `brew outdated` is all-or-nothing, so one bad name means nothing was checked.
+- name: "[brew] Show pending upgrades"
+  ansible.builtin.debug:
+    msg: |-
+      Homebrew formulae:
+      {% if _brew_outdated.skipped | default(false) %}
+        (not checked — `brew outdated` cannot run under --check)
+      {% elif 'Error:' in (_brew_outdated.stderr | default('')) %}
+        (CHECK FAILED — brew could not resolve the managed set, so NOTHING was
+         verified. Usually an unknown/renamed formula or an uninstalled tap:)
+      {{ _brew_outdated.stderr | default('') | trim | indent(4, true) }}
+      {% else %}
+      {{ _brew_outdated.stdout | default('') | trim or '  (up to date)' }}
+      {% endif %}
+
+- name: "[brew] Upgrade managed formulae to latest"
+  community.general.homebrew:
+    name: "{{ _pkg_names }}"
+    state: latest
+  when: _pkg_apply | bool

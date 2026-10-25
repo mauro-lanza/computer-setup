@@ -101,8 +101,19 @@ ARGS=(-U "$REPO_URL" -C "$REPO_BRANCH" -d "$PULL_DIR"
 [[ -f "$MACHINE_FILE" ]] && ARGS+=(-e "@${MACHINE_FILE}" -e "computer_setup_machine_file=${MACHINE_FILE}")
 [[ -n "$LAYER_CACHE" ]] && ARGS+=(-e "computer_setup_layer_cache=${LAYER_CACHE}")
 
+# The three platform-specific commands, rendered from the platform profile.
 notify() {
-    /usr/bin/osascript -e "display notification \"${2}\" with title \"${1}\"" 2>/dev/null || true
+    {{ computer_setup_platform.runner.notify }} 2>/dev/null || true
+}
+
+# Epoch mtime of a path.
+file_mtime() {
+    {{ computer_setup_platform.runner.mtime }} 2>/dev/null
+}
+
+# Epoch seconds of a `%Y-%m-%dT%H:%M:%S%z` stamp.
+stamp_epoch() {
+    {{ computer_setup_platform.runner.stamp_epoch }} 2>/dev/null
 }
 
 notify_failed() {
@@ -134,7 +145,7 @@ acquire_lock() {
             # No pid yet: mid-write (milliseconds), or died in that gap. Only the
             # latter is older than a minute.
             local age
-            age=$(( $(date +%s) - $(stat -f %m "$LOCK_DIR" 2>/dev/null || date +%s) ))
+            age=$(( $(date +%s) - $(file_mtime "$LOCK_DIR" || date +%s) ))
             (( age > 60 )) || return 1
         fi
         rm -rf -- "$LOCK_DIR"
@@ -202,7 +213,9 @@ computer-setup — operate this machine's configuration.
   progress         What a run is doing right now, if one is running.
   machine <sub>    Back up / restore this machine's declaration (init|push|list|pull).
   repos [dir]      Print a repositories.yml scaffolded from existing checkouts.
+{% if computer_setup_platform.system_settings == 'osx_defaults' %}
   capture [args]   Diff live macOS defaults against the declared values.
+{% endif %}
   layers sync      Refresh the content-layer cache.
   layers lint      Check that layer cross-references actually resolve.
   layers new NAME [DIR]  Scaffold a layer from the reference example (DIR defaults to ./NAME).
@@ -286,12 +299,48 @@ cmd_apply() {
         printf '%s\n' "apply: --check is a dry run; use 'computer-setup check' (it accepts the same args)" >&2
         return 64
     done
+{% if computer_setup_platform.runner.sudo_on_apply %}
+    collect_sudo_password
+{% endif %}
     run_foreground apply "$(( $# > 0 ))" local.yml "$@"
+    local rc=$?
+    unset CS_SUDO_PASSWORD
+    return "$rc"
 }
+{% if computer_setup_platform.runner.sudo_on_apply %}
+
+# Rendered where the platform profile sets `sudo_on_apply` (pacman and chsh
+# need root, and a task never prompts). The password is asked here, checked once
+# (a wrong one retried by askpass would count several failures toward a PAM
+# lockout), and passed by environment, never `-e`. See "sudo on Linux" in
+# docs/architecture.md.
+collect_sudo_password() {
+    [[ -t 0 ]] || return 0
+    sudo -n true 2>/dev/null && return 0
+    local pw try
+    for try in 1 2; do
+        printf "sudo password, for system packages and the login shell (Enter to skip): "
+        read -rs pw
+        echo
+        if [[ -z "$pw" ]]; then
+            echo "Skipping — anything that needs root is reported at the end."
+            return 0
+        fi
+        if printf '%s\n' "$pw" | sudo -S -k -p '' true 2>/dev/null; then
+            export CS_SUDO_PASSWORD="$pw"
+            unset pw
+            return 0
+        fi
+        echo "Incorrect password (attempt ${try}/2)." >&2
+    done
+    unset pw
+    echo "Continuing without root; anything that needs it is reported at the end." >&2
+}
+{% endif %}
 
 # ─── Interactive drift check ─────────────────────────────────────────────────
 cmd_check() {
-    run_foreground check "$(( $# > 0 ))" -e homebrew_update=false --check --diff local.yml "$@"
+    run_foreground check "$(( $# > 0 ))" -e packages_brew_update=false --check --diff local.yml "$@"
 }
 
 # ─── Upgrade managed tools, including casks ──────────────────────────────────
@@ -308,10 +357,11 @@ cmd_upgrade() {
         return 1
     fi
     echo "computer-setup upgrade brings managed tools to their latest versions:"
-    echo "  Homebrew formulae + casks, Ansible Galaxy collections, Node LTS."
+    echo {{ ('  ' ~ computer_setup_platform.runner.upgrade_summary) | quote }}
+{% if computer_setup_platform.runner.upgrade_warning %}
     echo
-    echo "Quit any app being upgraded first — replacing a running app can fail"
-    echo "and leave it half-installed."
+    echo {{ computer_setup_platform.runner.upgrade_warning | quote }}
+{% endif %}
     printf "Proceed? [y/N]: "
     local reply
     read -r reply
@@ -319,17 +369,18 @@ cmd_upgrade() {
         echo "Aborted — nothing changed."
         return 0
     fi
+{% if computer_setup_platform.runner.upgrade_sudo_prompt %}
     # Casks that need root (Docker Desktop) get the password from the environment,
     # not `-e`, which would show it in the process list. The homebrew_cask module
     # feeds it to sudo through an askpass helper.
     local sudo_pw
     echo
-    echo "Some casks need root to upgrade (e.g. Docker Desktop)."
-    printf "macOS password (Enter to skip those casks): "
+    printf '%s' {{ computer_setup_platform.runner.upgrade_sudo_prompt | quote }}
     read -rs sudo_pw
     echo
     [[ -n "$sudo_pw" ]] && export CS_SUDO_PASSWORD="$sudo_pw"
     unset sudo_pw
+{% endif %}
 
     # Taken after the prompts so a refusal wastes no confirmation. Logged like any
     # run: this is the one most likely to fail.
@@ -354,12 +405,12 @@ read_stamp() {
 }
 
 # Whole days since the last successful scheduled run; empty if there has never
-# been one. BSD `date -j`: macOS only.
+# been one.
 days_since_success() {
     local stamp then_ts now
     stamp="$(read_stamp "${1:-$LAST_SUCCESS_FILE}")"
     [[ -n "$stamp" ]] || return 0
-    then_ts=$(date -j -f '%Y-%m-%dT%H:%M:%S%z' "$stamp" '+%s' 2>/dev/null) || return 0
+    then_ts=$(stamp_epoch "$stamp") || return 0
     now=$(date '+%s')
     echo $(( (now - then_ts) / 86400 ))
 }
@@ -564,7 +615,7 @@ cmd_progress() {
     # No end marker does not mean live: the run may have been killed. mtime tells
     # the two apart.
     local age
-    age=$(( $(date +%s) - $(stat -f %m "$PROGRESS_FILE" 2>/dev/null || echo 0) ))
+    age=$(( $(date +%s) - $(file_mtime "$PROGRESS_FILE" || echo 0) ))
     if [[ "$age" -gt "$PROGRESS_STALLED_SECONDS" ]]; then
         printf 'Stalled or interrupted — no progress for %sm, stopped at task %s.\n' \
             "$(( age / 60 ))" "${n:-?}"
@@ -652,10 +703,12 @@ cmd_repos() {
         echo "    remote: \"${remote}\""
     done
 }
+{% if computer_setup_platform.system_settings == 'osx_defaults' %}
 
 cmd_capture() {
     exec "${BIN_DIR}/macos-capture" "$@"
 }
+{% endif %}
 
 # ─── Scheduled modes (LaunchAgents) ──────────────────────────────────────────
 # Retried: the network is often not up at 09:00 (wake, VPN). Stderr is logged,
@@ -704,7 +757,7 @@ run_scheduled() {
 
     sync_layers >> "$RUN_LOG" 2>&1 || log "WARN: layer sync failed; continuing with cached content"
 
-    # check:   -e homebrew_update=false: `state=present` never upgrades, so the
+    # check:   -e packages_brew_update=false: `state=present` never upgrades, so the
     #          index refresh detects nothing.
     # upgrade: formulae/Galaxy/Node only; casks need sudo, which has no TTY here.
     #
@@ -712,7 +765,7 @@ run_scheduled() {
     # reported instead.
     local -a mode_args=(-e computer_setup_interactive=false)
     if [[ "$mode" == "check" ]]; then
-        mode_args+=(-e homebrew_update=false --check --diff)
+        mode_args+=(-e packages_brew_update=false --check --diff)
     else
         mode_args+=(--tags upgrade -e computer_setup_upgrade_assume_yes=true
                     -e computer_setup_upgrade_include_casks=false)
@@ -828,7 +881,9 @@ case "$COMMAND" in
     history)            cmd_history "$@" ;;
     progress)           cmd_progress "$@" ;;
     repos)              cmd_repos "$@" ;;
+{% if computer_setup_platform.system_settings == 'osx_defaults' %}
     capture)            cmd_capture "$@" ;;
+{% endif %}
     layers)             cmd_layers "$@" ;;
     _scheduled-check)   run_scheduled check "$@" ;;
     _scheduled-upgrade) run_scheduled upgrade "$@" ;;

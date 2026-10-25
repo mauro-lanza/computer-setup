@@ -1,0 +1,8 @@
+---
+# Arch supports only full system upgrades: upgrading the managed packages alone
+# would be a partial upgrade. See "Platforms and package managers" in docs/architecture.md.
+- name: "[pacman] Explain why repository packages are not upgraded here"
+  ansible.builtin.debug:
+    msg: >-
+      pacman packages: not upgraded here. Arch supports only full system
+      upgrades; use your system updater (Shelly, `paru`, or `sudo pacman -Syu`).

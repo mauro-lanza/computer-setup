@@ -6,3 +6,6 @@ contract_scalar: base
 # applied BEFORE the layer var merge. Applied only after, this would silently
 # bake in the old default and answering the question would do nothing.
 contract_repo_path: "{{ repositories_base_dir }}/thing"
+# Baseline packages append across layers per manager.
+packages_baseline:
+  brew: [base-formula]

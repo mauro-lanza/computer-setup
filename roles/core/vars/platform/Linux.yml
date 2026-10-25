@@ -1,0 +1,26 @@
+---
+# The Linux platform profile (Arch-based). See Darwin.yml for what each key means.
+computer_setup_platform:
+  name: Linux
+  # Linuxbrew's prefix. No brew is used here; defined because layer paths
+  # (adopt_if_present) template against it on every platform.
+  homebrew_prefix: /home/linuxbrew/.linuxbrew
+  uv_bin: /usr/bin/uv
+  log_dir: .local/state/computer-setup/logs
+  scheduler: none
+  system_settings: none
+  package_managers:
+    pacman: /usr/bin/pacman
+    aur: /usr/bin/paru
+    flatpak: /usr/bin/flatpak
+  runner:
+    mtime: stat -c %Y "$1"
+    stamp_epoch: date -d "$1" '+%s'
+    notify: notify-send "$1" "$2"
+    # pacman and chsh need root and a task never prompts, so apply asks up front.
+    sudo_on_apply: true
+    upgrade_summary: >-
+      user flatpak apps, Ansible Galaxy collections, Node LTS. pacman/AUR
+      packages are left to a full system upgrade (Shelly, paru).
+    upgrade_warning: ""
+    upgrade_sudo_prompt: ""

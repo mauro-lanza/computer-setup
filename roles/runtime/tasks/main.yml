@@ -9,7 +9,7 @@
 # Read-only probes; see "Probes under --check" in docs/architecture.md.
 - name: Read the interpreters uv has installed
   ansible.builtin.command:
-    argv: ["{{ homebrew_prefix }}/bin/uv", "python", "list", "--only-installed"]
+    argv: ["{{ computer_setup_platform.uv_bin }}", "python", "list", "--only-installed"]
   register: runtime_pythons
   changed_when: false
   failed_when: false
@@ -48,14 +48,14 @@
 # ─── Converge ────────────────────────────────────────────────────────────────
 - name: Install the pinned Python
   ansible.builtin.command:
-    argv: ["{{ homebrew_prefix }}/bin/uv", "python", "install", "{{ computer_setup_runtime_pins.python }}"]
+    argv: ["{{ computer_setup_platform.uv_bin }}", "python", "install", "{{ computer_setup_runtime_pins.python }}"]
   changed_when: true
   when: runtime_python_missing | bool
 
 - name: Install or re-pin the engine runtime
   ansible.builtin.command:
     argv:
-      - "{{ homebrew_prefix }}/bin/uv"
+      - "{{ computer_setup_platform.uv_bin }}"
       - tool
       - install
       - --force

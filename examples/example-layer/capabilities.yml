@@ -5,16 +5,17 @@
 # The `id` IS the capability token. Schema per item:
 #   id:               stable primary key (never rename; remembers prior answers)
 #   desc:             human-readable label shown in the prompt
-#   type:             formula | cask | extension | feature  (feature = no package)
-#   tap:      (formula/cask only, optional) third-party Homebrew tap this
-#             package lives in, e.g. `owner/tap` for `owner/tap/thing`. Added
-#             before any install. A tapped package WITHOUT this is a fresh-machine
-#             failure: it resolves on a machine where someone ran `brew tap` by
-#             hand and nowhere else. `computer-setup layers lint` rejects it.
-#   packages:         space-separated brew formulae / casks / extension IDs
-#                     installed when selected (omit for `feature`)
-#   manager:          required for `type: extension` — the `extension_managers`
-#                     id (in vars.yml) that installs it
+#   packages:         (optional) package manager -> space-separated names,
+#                     installed when selected. Each manager installs only where
+#                     the engine detects it, so one capability spans platforms:
+#                       brew:    Homebrew formulae (macOS); `owner/tap/name`
+#                                adds the tap `owner/tap` first
+#                       cask:    Homebrew casks (macOS)
+#                       pacman:  Arch repository packages
+#                       aur:     AUR packages, built with paru
+#                       flatpak: flathub app ids, user installation
+#   extensions:       (optional) extension manager id (an `extension_managers`
+#                     entry in vars) -> space-separated extension ids
 #   requires:         (optional) another capability id; only prompt when that
 #                     one is selected earlier in the run or already present
 #   config:           (optional) files/templates deployed when the capability is
@@ -31,23 +32,28 @@
 #                     expanded here — this is also read by bootstrap, before
 #                     Ansible exists to template anything else.
 #   reminders:        (optional) post-setup message strings shown when active
+#
+# A capability with none of packages/extensions/config is just a flag other
+# content can gate on (`# cs:requires-capability:`, `requires_capability:`).
 
 capabilities:
-  - id: htop
-    desc: "htop (interactive process viewer)"
-    type: formula
-    packages: htop
+  # One capability for both platforms: brew on macOS, pacman on Arch.
+  - id: ripgrep
+    desc: "ripgrep (fast search)"
+    packages:
+      brew: ripgrep
+      pacman: ripgrep
 
   - id: vlc
     desc: "VLC media player"
-    type: cask
-    packages: vlc
+    packages:
+      cask: vlc
+      flatpak: org.videolan.VLC
 
   - id: vscode-spell-checker
     desc: "VS Code: Code Spell Checker"
-    type: extension
-    manager: vscode      # matches an `extension_managers` entry in vars.yml
-    packages: streetsidesoftware.code-spell-checker
+    extensions:
+      vscode: streetsidesoftware.code-spell-checker   # an `extension_managers` id in vars
     requires: vscode
 
   # A capability with no package: selecting it just deploys config.
@@ -55,7 +61,6 @@ capabilities:
   # from templates/.
   - id: example-tool
     desc: "Example config-only tool"
-    type: feature
     adopt_if_present: "{{ home_dir }}/.config/example/config.toml"
     config:
       - src: example/config.toml

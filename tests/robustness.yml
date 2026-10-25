@@ -82,39 +82,43 @@
 - name: A bad baseline or conditional default does not abort the play
   hosts: localhost
   connection: local
-  gather_facts: false
+  # Needs `defaults`, so macOS only; the macos role never runs elsewhere.
+  gather_facts: true
   tasks:
-    - name: Create a scratch plist holding a string
-      ansible.builtin.tempfile:
-        state: directory
-      register: scratch
+    - name: Exercise the macos role on macOS only
+      when: ansible_facts['system'] == 'Darwin'
+      block:
+        - name: Create a scratch plist holding a string
+          ansible.builtin.tempfile:
+            state: directory
+          register: scratch
 
-    - name: Seed key with a string value
-      ansible.builtin.command: defaults write {{ scratch.path }}/t.plist K -string hello
-      changed_when: true
+        - name: Seed key with a string value
+          ansible.builtin.command: defaults write {{ scratch.path }}/t.plist K -string hello
+          changed_when: true
 
-    - name: Apply a conditional default declaring the wrong type
-      vars:
-        macos_defaults:
-          - {domain: "{{ scratch.path }}/t.plist", key: K, type: int, value: 1}
-        computer_setup_bin_dir: "{{ scratch.path }}/bin"
-        home_dir: "{{ scratch.path }}"
-        macos_conditional_defaults:
-          - app: "{{ scratch.path }}"
-            defaults:
+        - name: Apply a conditional default declaring the wrong type
+          vars:
+            macos_defaults:
               - {domain: "{{ scratch.path }}/t.plist", key: K, type: int, value: 1}
-      ansible.builtin.include_role:
-        name: macos
+            computer_setup_bin_dir: "{{ scratch.path }}/bin"
+            home_dir: "{{ scratch.path }}"
+            macos_conditional_defaults:
+              - app: "{{ scratch.path }}"
+                defaults:
+                  - {domain: "{{ scratch.path }}/t.plist", key: K, type: int, value: 1}
+          ansible.builtin.include_role:
+            name: macos
 
-    - name: The role reached the end and recorded the failure
-      ansible.builtin.assert:
-        that:
-          - macos_defaults_results.results | selectattr('failed', 'defined') | selectattr('failed') | list | length == 2
+        - name: The role reached the end and recorded the failure
+          ansible.builtin.assert:
+            that:
+              - macos_defaults_results.results | selectattr('failed', 'defined') | selectattr('failed') | list | length == 2
 
-    - name: Remove the scratch dir
-      ansible.builtin.file:
-        path: "{{ scratch.path }}"
-        state: absent
+        - name: Remove the scratch dir
+          ansible.builtin.file:
+            path: "{{ scratch.path }}"
+            state: absent
 
 # A conditional identity is deployed, referenced from the managed config under
 # the same file name, and reaped when it is no longer declared.

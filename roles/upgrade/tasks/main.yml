@@ -4,7 +4,7 @@
 # `computer-setup upgrade`, which confirms in your terminal then runs this with
 # `-e computer_setup_upgrade_assume_yes=true`.
 #
-# Without that flag this role only PREVIEWS, so a scheduled run can never
+# Without that flag every step only PREVIEWS, so a scheduled run can never
 # upgrade. Confirmation lives in the shell function (a guaranteed TTY) rather
 # than an in-play `pause`, which hangs forever under `ansible-pull` when stdin
 # is not interactive.
@@ -12,85 +12,15 @@
 # tfenv's Terraform is deliberately not upgraded — it is pinned by
 # runtimes_tfenv_terraform_version, since an unplanned bump can break state.
 
-- name: Refresh Homebrew package index
-  ansible.builtin.command: brew update
-  changed_when: false
-
-# With no package arguments `brew outdated` reports every outdated package on the
-# machine, managed or not. Skip rather than preview packages we do not manage.
-- name: Determine which managed formulae are outdated
-  ansible.builtin.command:
-    argv: "{{ ['brew', 'outdated', '--formula', '--verbose'] + homebrew_managed_formulae }}"
-  register: upgrade_outdated_formulae
-  changed_when: false
-  failed_when: false
-  when: homebrew_managed_formulae | length > 0
-
-- name: Determine which managed casks are outdated
-  ansible.builtin.command:
-    argv: "{{ ['brew', 'outdated', '--cask', '--verbose'] + upgrade_managed_casks }}"
-  register: upgrade_outdated_casks
-  changed_when: false
-  failed_when: false
-  when:
-    - computer_setup_upgrade_include_casks | bool
-    - upgrade_managed_casks | length > 0
-
-- name: Show pending upgrades
-  vars:
-    # `brew outdated` exits 1 to mean "something IS outdated", like diff(1), so
-    # rc is useless as an error signal. A real failure (unknown formula, missing
-    # tap) also exits non-zero but writes "Error:" to stderr and nothing to
-    # stdout — and `brew outdated` is all-or-nothing, so one bad name means
-    # nothing was checked. Without this, empty stdout renders as "(up to date)".
-    _formulae_error: "{{ 'Error:' in (upgrade_outdated_formulae.stderr | default('')) }}"
-    _casks_error: "{{ 'Error:' in (upgrade_outdated_casks.stderr | default('')) }}"
-  ansible.builtin.debug:
-    msg: |-
-      ── Pending upgrades (preview) ───────────────────────────────
-      Homebrew formulae:
-      {% if homebrew_managed_formulae | length == 0 %}
-        (none managed)
-      {% elif upgrade_outdated_formulae.skipped | default(false) %}
-        (not checked — `brew outdated` cannot run under --check)
-      {% elif _formulae_error | bool %}
-        (CHECK FAILED — brew could not resolve the managed set, so NOTHING was
-         verified. Usually an unknown/renamed formula or an uninstalled tap:)
-      {{ upgrade_outdated_formulae.stderr | default('') | trim | indent(4, true) }}
-      {% else %}
-      {{ upgrade_outdated_formulae.stdout | default('') | trim or '  (up to date)' }}
-      {% endif %}
-
-      Homebrew casks:
-      {% if not (computer_setup_upgrade_include_casks | bool) %}
-        (skipped — computer_setup_upgrade_include_casks=false; run `computer-setup upgrade` to include casks)
-      {% elif upgrade_managed_casks | length == 0 %}
-        (none managed)
-      {% elif upgrade_outdated_casks.skipped | default(false) %}
-        (not checked — `brew outdated` cannot run under --check)
-      {% elif _casks_error | bool %}
-        (CHECK FAILED — see the note above; nothing was verified. brew said:)
-      {{ upgrade_outdated_casks.stderr | default('') | trim | indent(4, true) }}
-      {% else %}
-      {{ upgrade_outdated_casks.stdout | default('') | trim or '  (up to date)' }}
-      {% endif %}
-      {% if upgrade_casks_exclude | length > 0 %}
-        excluded from upgrade: {{ upgrade_casks_exclude | join(', ') }}
-      {% endif %}
-
-      Also refreshed to latest on apply (not pre-diffable):
-        Ansible Galaxy collections{{ ', Node.js ' ~ upgrade_nvm_node if upgrade_nvm_enabled | bool else '' }}.
-      ─────────────────────────────────────────────────────────────
-
-- name: Apply the confirmed upgrades
+- name: Refresh the Ansible Galaxy collections
   when:
     - computer_setup_upgrade_assume_yes | bool
     - not ansible_check_mode
   block:
-    # KEEP THIS FIRST. Every other task in this block runs a community.general
-    # module, and a collection too stale for the installed ansible-core makes
-    # those fail before this repair can run — permanently, since the block
-    # aborts. This task depends on no collection, so it always runs.
+    # KEEP THIS FIRST. The package upgrades below run community.general modules,
+    # and a collection too stale for the installed ansible-core makes those fail
+    # before this repair can run — permanently, since nothing would reach it.
+    # This step depends on no collection, so it always runs.
     #
     # `--upgrade` only when the running core differs from the one recorded in
     # upgrade_galaxy_core_marker; `--clear-response-cache` always.
@@ -139,55 +69,48 @@
         dest: "{{ upgrade_galaxy_core_marker }}"
         mode: "0644"
 
-    - name: Upgrade managed Homebrew formulae to latest
-      community.general.homebrew:
-        name: "{{ homebrew_managed_formulae }}"
-        state: latest
-      when: homebrew_managed_formulae | length > 0
+# Each detected manager previews, then upgrades once confirmed.
+- name: Upgrade managed packages
+  ansible.builtin.include_role:
+    name: packages
+    tasks_from: upgrade
 
-    # One cask at a time with ignore_errors: passing the whole list to a single
-    # task meant the first broken cask aborted the Galaxy and Node upgrades that
-    # follow. Failures are collected and reported together below.
-    - name: Upgrade managed Homebrew casks to latest
-      community.general.homebrew_cask:
-        name: "{{ item }}"
-        state: latest
-        greedy: "{{ upgrade_casks_greedy | bool }}"
-        # Casks replacing root-owned files make Homebrew call sudo, which has no
-        # terminal this deep inside Ansible. Given a password the module writes a
-        # 0700 askpass script so Homebrew can use `sudo -A`. Passed through the
-        # environment by `computer-setup upgrade` (never `-e`, which the process list would
-        # expose); omitted when unset, so scheduled runs are unaffected.
-        sudo_password: "{{ lookup('env', 'CS_SUDO_PASSWORD') | default(omit, true) }}"
-      loop: "{{ upgrade_managed_casks }}"
-      loop_control:
-        label: "{{ item }}"
-      register: upgrade_cask_results
-      ignore_errors: true
-      when:
-        - computer_setup_upgrade_include_casks | bool
-        - upgrade_managed_casks | length > 0
+- name: Upgrade Node.js via nvm
+  when:
+    - computer_setup_upgrade_assume_yes | bool
+    - not ansible_check_mode
+    - upgrade_nvm_enabled | bool
+  block:
+    - name: Check if nvm is installed (to upgrade Node)
+      ansible.builtin.stat:
+        path: "{{ runtimes_nvm_script_path }}"
+      register: upgrade_nvm_script
 
-    - name: Upgrade Node.js via nvm
-      when: upgrade_nvm_enabled | bool
-      block:
-        - name: Check if nvm is installed (to upgrade Node)
-          ansible.builtin.stat:
-            path: "{{ runtimes_nvm_script_path }}"
-          register: upgrade_nvm_script
+    # Quoted: `lts/*` is a glob to a shell (see findings.md).
+    - name: Upgrade default Node.js to newest via nvm ({{ upgrade_nvm_node }})
+      ansible.builtin.shell: |
+        export NVM_DIR="$HOME/.nvm"
+        source "{{ runtimes_nvm_script_path }}"
+        nvm install '{{ upgrade_nvm_node }}' --latest-npm
+        nvm alias default '{{ upgrade_nvm_node }}'
+      args:
+        executable: /bin/bash
+      register: upgrade_nvm_result
+      changed_when: "'Downloading and installing' in upgrade_nvm_result.stdout"
+      when: upgrade_nvm_script.stat.exists
 
-        # Quoted: `lts/*` is a glob to a shell (see findings.md).
-        - name: Upgrade default Node.js to newest via nvm ({{ upgrade_nvm_node }})
-          ansible.builtin.shell: |
-            export NVM_DIR="$HOME/.nvm"
-            source "{{ runtimes_nvm_script_path }}"
-            nvm install '{{ upgrade_nvm_node }}' --latest-npm
-            nvm alias default '{{ upgrade_nvm_node }}'
-          args:
-            executable: /bin/bash
-          register: upgrade_nvm_result
-          changed_when: "'Downloading and installing' in upgrade_nvm_result.stdout"
-          when: upgrade_nvm_script.stat.exists
+- name: Summarise the upgrade
+  ansible.builtin.debug:
+    msg: >-
+      {{ 'Upgrades applied.' if _applied else _preview_note }}
+      Also refreshed to latest on apply (not pre-diffable): Ansible Galaxy
+      collections{{ ', Node.js ' ~ upgrade_nvm_node if upgrade_nvm_enabled | bool else '' }}.
+  vars:
+    _applied: "{{ (computer_setup_upgrade_assume_yes | bool) and not ansible_check_mode }}"
+    _preview_note: >-
+      Preview only — no upgrades applied. Run `computer-setup upgrade` to upgrade
+      (it confirms in your terminal first), or pass
+      `-e computer_setup_upgrade_assume_yes=true` to apply non-interactively.
 
 - name: Report casks that failed to upgrade
   ansible.builtin.fail:
@@ -205,16 +128,6 @@
       `rmdir` before reinstalling.
   vars:
     _failed: >-
-      {{ upgrade_cask_results.results | default([]) | selectattr('failed', 'defined')
+      {{ packages_cask_upgrade_results.results | default([]) | selectattr('failed', 'defined')
          | selectattr('failed') | list }}
   when: _failed | length > 0
-
-- name: Explain how to apply when not confirmed
-  ansible.builtin.debug:
-    msg: >-
-      Preview only — no upgrades applied. Run `computer-setup upgrade` to upgrade
-      (it confirms in your terminal first), or pass `-e computer_setup_upgrade_assume_yes=true`
-      to apply non-interactively.
-  when: >-
-    not (computer_setup_upgrade_assume_yes | bool)
-    or ansible_check_mode

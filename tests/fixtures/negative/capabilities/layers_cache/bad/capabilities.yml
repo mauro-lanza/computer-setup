@@ -3,4 +3,4 @@
 # not an unattributed Jinja error from deep inside the merge.
 capabilities:
   nvm:
-    type: formula
+    packages: {brew: nvm}

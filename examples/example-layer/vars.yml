@@ -4,6 +4,10 @@
 # These keys are the orchestrator's public "variable interface". Lists append
 # across layers; scalars are overridden by the highest-priority layer (with an
 # info message printed on overlap). Only set what you need.
+#
+# vars/<platform>.yml (Darwin, Linux) has the same shape and is merged after
+# this file, only on that platform. Put platform-only values there (Homebrew
+# lists, macOS defaults, paths that differ) so templates read plain values.
 
 # ─── Repositories to clone (list — appends across layers) ────────────────────
 # `folder` may use {{ repositories_base_dir }} (default ~/Projects) or an
@@ -12,11 +16,17 @@ repositories:
   - folder: "{{ repositories_base_dir }}/example-project"
     remote: "git@github.com:example-org/example-project.git"
 
-# ─── Homebrew baseline (lists — append across layers) ────────────────────────
-# homebrew_baseline_formulae: [ripgrep, fd]
-# homebrew_baseline_casks: [iterm2]
-# homebrew_adopt_casks: [iterm2]
-# homebrew_baseline_taps: [example-org/tap]    # taps for capabilities come from their `tap:`
+# ─── Packages always installed (lists append across layers, per manager) ────
+# Same managers as a capability's `packages:`. Each runs only where detected;
+# nothing is ever removed. pacman/AUR installs need root: `computer-setup apply`
+# asks for the sudo password on Linux.
+# packages_baseline:
+#   brew: [ripgrep, fd, example-org/tap/tool]   # owner/tap/name adds the tap
+#   cask: [iterm2]
+#   pacman: [ripgrep, fd]
+#   aur: [example-aur-pkg]
+#   flatpak: [org.example.App]
+# packages_cask_adopt: [iterm2]                 # casks safe to `--adopt` if hand-installed
 
 # ─── git ─────────────────────────────────────────────────────────────────────
 # git_default_branch: main
@@ -40,10 +50,13 @@ repositories:
 #     backup: true                     # optional: keep the previous file
 #   - key: prompt.zsh
 #     dest: "{{ home_dir }}/.zsh/configs/prompt.zsh"
+#
+# The user's login shell (chsh); must be listed in /etc/shells. Needs root.
+# shell_login_shell: /usr/bin/zsh
 
 # ─── Editor extensions ───────────────────────────────────────────────────────
 # Editors are layer data — the engine names none. Declaring a manager is what
-# makes `type: extension` capabilities installable:
+# makes a capability's `extensions:` installable:
 #
 # extension_managers:
 #   - id: vscode
@@ -70,12 +83,13 @@ repositories:
 # runtimes_nvm_default_node: "lts/*"
 # runtimes_tfenv_terraform_version: "1.12.2"   # empty (the default) leaves tfenv alone
 # docker_cli_plugins_extra_dirs: ["{{ homebrew_prefix }}/lib/docker/cli-plugins"]
-# upgrade_casks_exclude: [example-cask]        # casks whose own updater owns the job
-# upgrade_casks_greedy: false
+# packages_cask_upgrade_exclude: [example-cask]  # casks whose own updater owns the job
+# packages_cask_upgrade_greedy: false
 
 # ─── Scheduled jobs (list — appends across layers) ───────────────────────────
 # Recurring work is layer data too: the engine schedules jobs, it does not know
-# what any of them do. Each entry becomes a macOS LaunchAgent.
+# what any of them do. Each entry becomes a macOS LaunchAgent (no Linux
+# scheduler yet: entries are ignored there).
 #
 # `program` is usually something this same layer deploys through a capability
 # `config:` entry, which is why `requires_capability` exists — it drops the

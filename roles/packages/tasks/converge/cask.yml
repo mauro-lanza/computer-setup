@@ -1,0 +1,18 @@
+---
+# One cask at a time, failures collected and reported from local.yml post_tasks
+# (see "Partial failures are reported at the end of the play" in docs/findings.md).
+#
+# `sudo_password` (env, never `-e`) lets the module write a 0700 askpass script
+# for `sudo -A`; see "sudo inside an Ansible task has no controlling terminal" in
+# docs/findings.md. Omitted when unset.
+- name: "[cask] Install casks"
+  community.general.homebrew_cask:
+    name: "{{ item }}"
+    state: present
+    install_options: "{{ 'adopt' if item in packages_cask_adopt else omit }}"
+    sudo_password: "{{ lookup('env', 'CS_SUDO_PASSWORD') | default(omit, true) }}"
+  loop: "{{ _pkg_names }}"
+  loop_control:
+    label: "{{ item }}"
+  register: packages_cask_results
+  ignore_errors: true

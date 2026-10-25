@@ -206,8 +206,43 @@ check_template_syntax() {
     fi
     echo "  ok  $src"
 }
-check_template_syntax roles/drift_correction/templates/computer-setup.j2
 check_template_syntax roles/macos/templates/macos-capture.sh.j2
+
+# The runner is rendered for real, once per platform profile: each platform's
+# output is a different script, and only the rendered one is what ships.
+echo "==> Runner rendered per platform"
+for profile in roles/core/vars/platform/*.yml; do
+    platform="$(basename "$profile" .yml)"
+    rendered="$CS_TMP/computer-setup.$platform"
+    "$CS_PY" tests/render-runner.py "$platform" "$CS_TMP" "$rendered"
+    bash -n "$rendered" || { echo "ERROR: the $platform runner does not parse" >&2; return 1; }
+    shellcheck -S style -s bash "$rendered" || { echo "ERROR: the $platform runner has shellcheck findings" >&2; return 1; }
+    echo "  ok  $platform"
+done
+
+# Every profile must define the same keys: a key missing from one is a
+# StrictUndefined failure on that platform only, on its first apply.
+echo "==> Platform profile keys agree"
+"$CS_PY" - roles/core/vars/platform/*.yml <<'PY'
+import sys, yaml
+def keys(d, p=""):
+    out = set()
+    for k, v in d.items():
+        out.add(p + k)
+        # package_managers is a per-platform list of candidates, not a schema.
+        if isinstance(v, dict) and k != "package_managers":
+            out |= keys(v, p + k + ".")
+    return out
+sets = {f: keys(yaml.safe_load(open(f))["computer_setup_platform"]) for f in sys.argv[1:]}
+ref = set.union(*sets.values())
+rc = 0
+for f, s in sets.items():
+    if s != ref:
+        print(f"  ERROR: {f} lacks {sorted(ref - s)}", file=sys.stderr)
+        rc = 1
+sys.exit(rc)
+PY
+echo "  ok  every profile defines the same keys"
 
 # The sed above cannot see a template Jinja itself refuses to parse — and the
 # syntaxes collide: `${#arr[@]}` contains Jinja's comment-open `{#`. Parse each
@@ -784,7 +819,7 @@ echo "==> Cask failure report"
 cr_dir="$(mktemp -d "$CS_TMP/cask-report.XXXXXX")"
 yq '[.[0].post_tasks[] | select(.name == "Report casks that could not be installed")]' local.yml > "$cr_dir/task.yml"
 yq -n '[{"hosts":"localhost","connection":"local","gather_facts":false,"vars":{
-  "homebrew_cask_results":{"results":[
+  "packages_cask_results":{"results":[
     {"failed":true,"msg":"boom-A","item":"cask-bad-a"},
     {"failed":false,"item":"cask-fine"},
     {"failed":true,"msg":"boom-B","item":"cask-bad-b"}]}},
@@ -1007,11 +1042,15 @@ lint_out="$(./scripts/computer-setup-layers lint --cache "$PWD/tests/fixtures/li
 for expect in \
     "capability id declared twice" \
     "capability requires 'nonexistent'" \
-    "is type: extension but declares no manager" \
+    "capability 'oldshape' uses removed key 'type:'" \
+    "capability 'oldshape' packages: must be a mapping" \
+    "capability 'oldtap' uses removed key 'tap:'" \
+    "capability 'badmgr' packages: key 'apt' must be one of" \
+    "vars.yml sets 'homebrew_baseline_formulae', which no role reads" \
+    "vars/Darwn.yml names no platform" \
     "preset selects capability 'does-not-exist'" \
     "preset answers question 'no-such-question'" \
     "question implies capability 'ghost-capability'" \
-    "names a tapped package but declares no tap" \
     "has a config: entry missing src: or dest:" \
     "config: uses mode:" \
     "config: has a non-boolean executable:" \
@@ -1023,7 +1062,7 @@ do
         exit 1
     fi
 done
-echo "  ok  all 12 broken references rejected"
+echo "  ok  all 16 broken references rejected"
 
 # One malformed file is one error, not one per projection read from it.
 malformed_count="$(grep -cF "malformed/capabilities.yml is not valid YAML" <<<"$lint_out" || true)"
@@ -1096,6 +1135,35 @@ for v in LAYER_CACHE RUNTIME_DIR BACKUP_REPO_DIR; do
     fi
 done
 echo "  ok  bootstrap.sh and local.yml agree on ~/$data_playbook"
+
+# bootstrap.sh expands {{ homebrew_prefix }} in adopt_if_present before any
+# profile can be read, so it keeps a copy per platform.
+echo "==> Homebrew prefix agreement"
+for platform in Darwin Linux; do
+    hp_profile="$(yq -r '.computer_setup_platform.homebrew_prefix' "roles/core/vars/platform/$platform.yml")"
+    if [[ "$(sed -n 's/^    HOMEBREW_PREFIX="\(.*\)"$/\1/p' bootstrap.sh)" != *"$hp_profile"* ]]; then
+        echo "ERROR: bootstrap.sh has no HOMEBREW_PREFIX=\"$hp_profile\" for $platform" >&2
+        exit 1
+    fi
+done
+echo "  ok  bootstrap.sh and the platform profiles agree"
+
+echo "==> Lint platform list agreement"
+lp_profiles="$(for f in roles/core/vars/platform/*.yml; do basename "$f" .yml; done | sort | tr '\n' ' ')"
+lp_lint="$(sed -n 's/^LINT_PLATFORMS="\(.*\)"$/\1/p' scripts/computer-setup-layers | tr ' ' '\n' | sort | tr '\n' ' ')"
+if [[ -z "$lp_lint" || "$lp_profiles" != "$lp_lint" ]]; then
+    echo "ERROR: LINT_PLATFORMS ('$lp_lint') disagrees with the platform profiles ('$lp_profiles')" >&2
+    exit 1
+fi
+echo "  ok  lint knows every platform profile"
+
+lm_profiles="$(yq -r '.computer_setup_platform.package_managers | keys | .[]' roles/core/vars/platform/*.yml | sort -u | tr '\n' ' ')"
+lm_lint="$(sed -n 's/^LINT_MANAGERS="\(.*\)"$/\1/p' scripts/computer-setup-layers | tr ' ' '\n' | sort | tr '\n' ' ')"
+if [[ -z "$lm_lint" || "$lm_profiles" != "$lm_lint" ]]; then
+    echo "ERROR: LINT_MANAGERS ('$lm_lint') disagrees with the profiles' package managers ('$lm_profiles')" >&2
+    exit 1
+fi
+echo "  ok  lint knows every package manager"
 }
 
 # A gate, not an advisory: .ansible-lint waives the two rules that contradict

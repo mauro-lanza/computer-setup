@@ -1,0 +1,60 @@
+---
+# Shared by converge/pacman.yml and converge/aur.yml. Vars: `_pkg_mgr`, `_pkg_names`.
+#
+# `pacman -T` answers from the local database without root and honours
+# `provides`, so it is the probe for both. Never `-Sy`/`-Syu`: refreshing the
+# sync database without upgrading is a partial upgrade, which Arch does not
+# support. See "Platforms and package managers" in docs/architecture.md.
+- name: "[{{ _pkg_mgr }}] Find declared packages that are not installed"
+  ansible.builtin.command:
+    argv: "{{ ['pacman', '-T', '--'] + _pkg_names }}"
+  register: _pkg_probe
+  changed_when: false
+  # 127 means "some are missing", which is the answer, not a failure.
+  failed_when: _pkg_probe.rc not in [0, 127]
+  # Read-only; see "Probes under --check" in docs/architecture.md.
+  check_mode: false
+
+- name: "[{{ _pkg_mgr }}] Resolve the missing set"
+  ansible.builtin.set_fact:
+    _pkg_missing: "{{ _pkg_probe.stdout_lines | default([]) | reject('equalto', '') | list }}"
+
+# Check mode skips `command`; this supplies the drift signal the install cannot.
+- name: "[{{ _pkg_mgr }}] Report missing packages as drift"
+  ansible.builtin.debug:
+    msg: >-
+      {{ _pkg_missing | length }} managed {{ _pkg_mgr }} package(s) not
+      installed: {{ _pkg_missing | join(', ') }}
+  changed_when: true
+  when:
+    - ansible_check_mode
+    - _pkg_missing | length > 0
+
+- name: "[{{ _pkg_mgr }}] Install missing packages"
+  when:
+    - not ansible_check_mode
+    - _pkg_missing | length > 0
+  block:
+    - name: "[{{ _pkg_mgr }}] Resolve sudo"
+      ansible.builtin.include_role:
+        name: core
+        tasks_from: sudo
+
+    # paru must not run as root: it builds as the user and calls sudo itself.
+    - name: "[{{ _pkg_mgr }}] Install"
+      ansible.builtin.command:
+        argv: >-
+          {{ (computer_setup_sudo_argv + ['pacman', '-S', '--needed', '--noconfirm', '--'] + _pkg_missing)
+             if _pkg_mgr == 'pacman' else
+             (['paru', '-S', '--needed', '--noconfirm', '--skipreview',
+               '--sudoflags=' ~ computer_setup_sudo_argv[1], '--'] + _pkg_missing) }}
+      environment: "{{ computer_setup_sudo_env }}"
+      changed_when: true
+      when: computer_setup_sudo_ready | bool
+
+    # Reported from local.yml post_tasks, after every other role has run.
+    - name: "[{{ _pkg_mgr }}] Record packages left uninstalled for lack of sudo"
+      ansible.builtin.set_fact:
+        packages_unprivileged_missing: >-
+          {{ (packages_unprivileged_missing | default([])) + _pkg_missing }}
+      when: not (computer_setup_sudo_ready | bool)

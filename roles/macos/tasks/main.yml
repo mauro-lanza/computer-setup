@@ -24,8 +24,8 @@
     state: present
   loop: >-
     {{ macos_defaults
-       + (macos_conditional_app_stat.results
-          | selectattr('stat.exists')
+       + (macos_conditional_app_stat.results | default([])
+          | selectattr('stat', 'defined') | selectattr('stat.exists')
           | map(attribute='item')
           | subelements('defaults', skip_missing=True)
           | map('last') | list) }}

@@ -207,6 +207,13 @@ sync_layers() {
 
 lint_fail_count=0
 lint_note_count=0
+# Platform profile names (roles/core/vars/platform/*.yml), and every package
+# manager any of them declares; check.sh asserts both match the profiles.
+LINT_PLATFORMS="Darwin Linux"
+LINT_MANAGERS="brew cask pacman aur flatpak"
+# Layer var names that no role reads any more (renamed by the package
+# unification); a layer still setting one would silently install nothing.
+LINT_REMOVED_VARS="homebrew_baseline_formulae homebrew_baseline_casks homebrew_baseline_taps homebrew_adopt_casks homebrew_update upgrade_casks_exclude upgrade_casks_greedy packages_pacman_baseline packages_aur_baseline packages_flatpak_baseline"
 lint_err()  { printf '  ERROR: %s\n' "$*" >&2; lint_fail_count=$((lint_fail_count + 1)); }
 lint_note() { printf '  note:  %s\n' "$*"; lint_note_count=$((lint_note_count + 1)); }
 
@@ -297,6 +304,15 @@ lint_layers() {
             lint_validate "$d/$f.yml"
         done
 
+        # vars/<platform>.yml merges after vars.yml only on that platform. A
+        # misspelt name would silently never load anywhere.
+        for f in "$d"/vars/*.yml; do
+            [[ -e "$f" ]] || continue
+            lint_validate "$f"
+            [[ " $LINT_PLATFORMS " == *" $(basename "$f" .yml) "* ]] \
+                || lint_err "[$name] vars/$(basename "$f") names no platform (expected one of: $LINT_PLATFORMS)"
+        done
+
         ids="$(lint_read "$d/capabilities.yml" '.capabilities[]?.id')"
         dupes="$(printf '%s\n' "$ids" | grep -v '^$' | sort | uniq -d || true)"
         [[ -n "$dupes" ]] && lint_err "[$name] capability id declared twice in this layer: $(printf '%s' "$dupes" | tr '\n' ' ')"
@@ -324,21 +340,29 @@ lint_layers() {
                 || lint_ref_problem "[$name] capability requires '$ref', which no layer declares"
         done <<< "$(lint_read "$d/capabilities.yml" '.capabilities[]? | select(.requires) | .requires')"
 
-        # type: extension must name the manager that installs it
-        while IFS= read -r ref; do
+        # Keys from the pre-unification shape. The engine ignores them, so a
+        # capability still using them would quietly install nothing.
+        local bad_key
+        # shellcheck disable=SC2016 # `$id` is a yq variable, not a shell one
+        while read -r ref bad_key; do
             [[ -z "$ref" ]] && continue
-            lint_err "[$name] capability '$ref' is type: extension but declares no manager:"
-        done <<< "$(lint_read "$d/capabilities.yml" '.capabilities[]? | select(.type == "extension") | select(has("manager") | not) | .id')"
+            lint_err "[$name] capability '$ref' uses removed key '$bad_key:' (see packages:/extensions: in the example layer)"
+        done <<< "$(lint_read "$d/capabilities.yml" '.capabilities[]? | .id as $id | keys[] | select(test("^(type|tap|manager)$")) | $id + " " + .')"
 
-        # A package named owner/tap/formula is unresolvable until its tap is
-        # added. Declaring the tap is the ONLY way the engine can know; without
-        # it the capability installs fine on a machine where someone once ran
-        # `brew tap` by hand, and fails on every fresh one. Always an error --
-        # unlike a cross-layer id, a missing tap cannot be supplied elsewhere.
-        while IFS= read -r ref; do
+        # packages: and extensions: are mappings of manager -> space-separated
+        # names. A string has no manager to route to.
+        # shellcheck disable=SC2016 # `$id` is a yq variable, not a shell one
+        while read -r ref bad_key; do
             [[ -z "$ref" ]] && continue
-            lint_err "[$name] capability '$ref' names a tapped package but declares no tap:"
-        done <<< "$(lint_read "$d/capabilities.yml" '.capabilities[]? | select(.packages) | select(.packages | test("[^ /]+/[^ /]+/[^ /]+")) | select(has("tap") | not) | .id')"
+            lint_err "[$name] capability '$ref' $bad_key: must be a mapping of manager -> names"
+        done <<< "$(lint_read "$d/capabilities.yml" '.capabilities[]? | .id as $id | to_entries[] | select(.key == "packages" or .key == "extensions") | select((.value | type) != "!!map") | $id + " " + .key')"
+
+        # An unknown package manager installs nothing on any platform.
+        # shellcheck disable=SC2016 # `$id` is a yq variable, not a shell one
+        while read -r ref bad_key; do
+            [[ -z "$ref" ]] && continue
+            lint_err "[$name] capability '$ref' packages: key '$bad_key' must be one of $LINT_MANAGERS, with a string value"
+        done <<< "$(lint_read "$d/capabilities.yml" '.capabilities[]? | select((.packages | type) == "!!map") | .id as $id | .packages | to_entries[] | select((.key | test("^('"${LINT_MANAGERS// /|}"')$") | not) or (.value | type) != "!!str") | $id + " " + .key')"
 
         # config: entries. `src`/`dest` are the whole contract; `executable`
         # is the only optional key. `mode:` was the old spelling -- catch it,
@@ -371,11 +395,19 @@ lint_layers() {
 
         # shell_config_files[].key -> a file in files/ or templates/; an
         # unresolved key is silently skipped at deploy time
-        while IFS= read -r ref; do
-            [[ -z "$ref" ]] && continue
-            lint_file_resolves "$ref" "${dirs[@]}" \
-                || lint_ref_problem "[$name] shell_config_files key '$ref' matches no files/$ref or templates/$ref.j2"
-        done <<< "$(lint_read "$d/vars.yml" '.shell_config_files[]?.key')"
+        local vf rv
+        for vf in "$d/vars.yml" "$d"/vars/*.yml; do
+            while IFS= read -r ref; do
+                [[ -z "$ref" ]] && continue
+                lint_file_resolves "$ref" "${dirs[@]}" \
+                    || lint_ref_problem "[$name] shell_config_files key '$ref' matches no files/$ref or templates/$ref.j2"
+            done <<< "$(lint_read "$vf" '.shell_config_files[]?.key')"
+
+            while IFS= read -r rv; do
+                [[ -n "$rv" && " $LINT_REMOVED_VARS " == *" $rv "* ]] || continue
+                lint_err "[$name] ${vf#"$d/"} sets '$rv', which no role reads any more (see packages_baseline in the example layer)"
+            done <<< "$(lint_read "$vf" 'keys[]')"
+        done
 
         # preset.capabilities -> a real capability
         while IFS= read -r ref; do

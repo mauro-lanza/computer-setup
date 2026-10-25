@@ -23,7 +23,7 @@ cannot rewrite an attribute — leaving **no app** installed.
 | `docker-desktop` | `docker-compose.bash-completion` |
 | `zed` | `Contents/MacOS/cli` (`com.apple.metadata:kMDItemAlternateNames`) |
 
-Use a fresh install instead of adoption for these. Keep `homebrew_adopt_casks`
+Use a fresh install instead of adoption for these. Keep `packages_cask_adopt`
 an explicit allow-list for this reason. If a previous failed adopt left a
 dangling binary symlink, remove it first or the reinstall aborts with *"there is
 already a Binary at …"*:
@@ -53,7 +53,7 @@ the password in your shell and passes it via the `CS_SUDO_PASSWORD` environment
 variable — never `-e`, which would expose it in the process list. Press Enter at
 the prompt to skip those casks.
 
-`upgrade_casks_exclude` remains the right tool for a cask whose own updater
+`packages_cask_upgrade_exclude` remains the right tool for a cask whose own updater
 should own the job entirely: listing it there keeps it installed and managed but
 skips the upgrade.
 
@@ -69,7 +69,7 @@ had changed underneath it, `hdiutil attach` failed `Resource busy`, and
 Homebrew's rollback could not find the original to restore — leaving an empty
 `/Applications/<App>.app` and a cask reported as *not installed*.
 
-`upgrade_casks_greedy` is therefore **false** by default. Recovering a cask left
+`packages_cask_upgrade_greedy` is therefore **false** by default. Recovering a cask left
 in that state:
 
 ```bash

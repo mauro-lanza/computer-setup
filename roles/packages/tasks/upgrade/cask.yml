@@ -1,0 +1,55 @@
+---
+# Casks can trigger a sudo prompt, which is fatal for a TTY-less LaunchAgent, so
+# the scheduled upgrade passes computer_setup_upgrade_include_casks=false.
+- name: "[cask] Skip casks for this run"
+  ansible.builtin.debug:
+    msg: >-
+      Homebrew casks: skipped (computer_setup_upgrade_include_casks=false); run
+      `computer-setup upgrade` to include them.
+  when: not (computer_setup_upgrade_include_casks | bool)
+
+- name: "[cask] Preview and upgrade casks"
+  when: computer_setup_upgrade_include_casks | bool
+  vars:
+    _casks: "{{ _pkg_names | reject('in', packages_cask_upgrade_exclude) | list }}"
+  block:
+    - name: "[cask] Determine which managed casks are outdated"
+      ansible.builtin.command:
+        argv: "{{ ['brew', 'outdated', '--cask', '--verbose'] + _casks }}"
+      register: _cask_outdated
+      changed_when: false
+      failed_when: false
+      when: _casks | length > 0
+
+    - name: "[cask] Show pending upgrades"
+      ansible.builtin.debug:
+        msg: |-
+          Homebrew casks:
+          {% if _cask_outdated.skipped | default(false) %}
+            (none to check, or not checked under --check)
+          {% elif 'Error:' in (_cask_outdated.stderr | default('')) %}
+            (CHECK FAILED — nothing was verified. brew said:)
+          {{ _cask_outdated.stderr | default('') | trim | indent(4, true) }}
+          {% else %}
+          {{ _cask_outdated.stdout | default('') | trim or '  (up to date)' }}
+          {% endif %}
+          {% if packages_cask_upgrade_exclude | length > 0 %}
+            excluded from upgrade: {{ packages_cask_upgrade_exclude | join(', ') }}
+          {% endif %}
+
+    # One at a time with ignore_errors, so one broken cask cannot abort the rest;
+    # failures are reported at the end of the upgrade role. Casks replacing
+    # root-owned files make Homebrew call sudo; the password comes through the
+    # environment (never `-e`) and the module feeds it to `sudo -A`.
+    - name: "[cask] Upgrade managed casks to latest"
+      community.general.homebrew_cask:
+        name: "{{ item }}"
+        state: latest
+        greedy: "{{ packages_cask_upgrade_greedy | bool }}"
+        sudo_password: "{{ lookup('env', 'CS_SUDO_PASSWORD') | default(omit, true) }}"
+      loop: "{{ _casks }}"
+      loop_control:
+        label: "{{ item }}"
+      register: packages_cask_upgrade_results
+      ignore_errors: true
+      when: _pkg_apply | bool

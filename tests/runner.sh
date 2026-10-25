@@ -13,29 +13,9 @@ mkdir -p "$T/bin" "$T/state" "$T/logs" "$T/home"
 
 # The runtime's own interpreter (has jinja2); its path is the `ansible` shebang.
 RT_PY="$(head -1 "$(command -v ansible)" | sed 's/^#!//')"
-"$RT_PY" - "$T" <<'PY'
-import sys, os, jinja2
-t = sys.argv[1]
-env = jinja2.Environment(undefined=jinja2.StrictUndefined, keep_trailing_newline=True)
-env.filters["expanduser"] = os.path.expanduser
-v = dict(
-    computer_setup_repo_url="git@example.invalid:o/r.git", computer_setup_repo_branch="main",
-    computer_setup_machine_file=t + "/none.yml", computer_setup_layer_cache="",
-    computer_setup_log_dir=t + "/logs", computer_setup_state_dir=t + "/state",
-    computer_setup_config_dir=t + "/config", computer_setup_backup_repo_dir=t + "/backups",
-    computer_setup_runtime_bin=t + "/bin", computer_setup_runtime_tools=t + "/tools",
-    computer_setup_python_version="3.14", computer_setup_pull_dir=t + "/pull",
-    computer_setup_bin_dir=t + "/bin", computer_setup_schema_version=1,
-    drift_correction_log_retention_days=30, drift_correction_stale_after_days=14,
-    drift_correction_connectivity_timeout=1, computer_setup_repositories_override_file=t + "/repositories.yml",
-    repositories_base_dir=t + "/repos",
-)
-src = open("roles/drift_correction/templates/computer-setup.j2").read()
-tpl = env.from_string(src)
-open(t + "/bin/computer-setup", "w").write(tpl.render(**v))
-open(t + "/bin/computer-setup-cached", "w").write(tpl.render(**dict(v, computer_setup_layer_cache=t + "/cache")))
-PY
-chmod +x "$T/bin/computer-setup" "$T/bin/computer-setup-cached"
+# Rendered for THIS host's platform: the stubs below run its real commands.
+"$RT_PY" tests/render-runner.py "$(uname -s)" "$T" "$T/bin/computer-setup"
+"$RT_PY" tests/render-runner.py "$(uname -s)" "$T" "$T/bin/computer-setup-cached" "$T/cache"
 
 # Stubs. The git stub counts calls and fails while $GIT_FAIL is set.
 cat > "$T/bin/git" <<STUB
@@ -55,6 +35,16 @@ chmod +x "$T/bin/git" "$T/bin/ansible-pull"
 run() { HOME="$T/home" PROBE_RETRY_DELAY=0 PATH="$T/bin:$PATH" "$T/bin/computer-setup" "$@"; }
 runc() { HOME="$T/home" PATH="$T/bin:$PATH" "$T/bin/computer-setup-cached" "$@"; }
 fail() { echo "ERROR: $*" >&2; exit 1; }
+# `ago N d|M FORMAT`: N days or minutes ago; BSD and GNU date spell it differently.
+ago() {
+    if [[ "$(uname -s)" == Darwin ]]; then
+        date "-v-${1}${2}" "+$3"
+    elif [[ "$2" == d ]]; then
+        date -d "-$1 days" "+$3"
+    else
+        date -d "-$1 minutes" "+$3"
+    fi
+}
 latest_log() { printf '%s\n' "$T"/logs/*.log | sort | tail -n 1; }
 
 # 1. Unreachable: 3 attempts, the git error survives in the log, nothing runs,
@@ -90,7 +80,7 @@ echo "  ok  check stamps last-success only"
 # 4. status: BEHIND appears only for an old upgrade stamp, and --json carries it.
 out="$(run status)"
 [[ "$out" != *BEHIND* ]] || fail "BEHIND shown with no upgrade stamp"
-date -v-5d '+%Y-%m-%dT%H:%M:%S%z' > "$T/state/last-success-upgrade"
+ago 5 d '%Y-%m-%dT%H:%M:%S%z' > "$T/state/last-success-upgrade"
 echo '{"mode":"check","result":"ok","finished":"x"}' > "$T/state/last-run.json"
 out="$(run status)"
 [[ "$out" == *"BEHIND — last successful scheduled upgrade was 5 day(s) ago"* ]] || fail "BEHIND missing: $out"
@@ -205,9 +195,9 @@ out="$(run status)"
 [[ "$out" != *partial* && "$out" != *truncated* && "$out" != *Failed:* ]] || fail "status shows partial/truncated/failed for a clean check: $out"
 yq -i '.changed = [] | .totals.changed = 0' "$T/state/last-run.json"
 [[ "$(run status)" == *"Drift:     none"* ]] || fail "no-drift line missing"
-date -v-2d '+%Y-%m-%dT%H:%M:%S%z' > "$T/state/last-success"
+ago 2 d '%Y-%m-%dT%H:%M:%S%z' > "$T/state/last-success"
 [[ "$(run status)" == *"Sync:      ok — last successful scheduled run 2 day(s) ago"* ]] || fail "Sync ok line missing"
-date -v-20d '+%Y-%m-%dT%H:%M:%S%z' > "$T/state/last-success"
+ago 20 d '%Y-%m-%dT%H:%M:%S%z' > "$T/state/last-success"
 [[ "$(run status)" == *"Sync:      STALE — last successful scheduled run was 20 day(s) ago"* ]] || fail "Sync STALE line missing"
 rm -f "$T/state/last-run.json"
 [[ "$(run status)" == "No run recorded yet. Run \`computer-setup check\` to populate it." ]] || fail "empty-state message changed"
@@ -222,7 +212,7 @@ js="$(run status --json)"
 [[ "$(yq -p json -r '.stale' <<<"$js")" == false ]] || fail "stale without a stamp"
 [[ "$(yq -p json -r '.days_since_upgrade_success' <<<"$js")" == null ]] || fail "days_since_upgrade_success not null without a stamp"
 [[ "$(yq -p json -r '.last_run.result' <<<"$js")" == ok ]] || fail "last_run not embedded"
-stamp="$(date -v-20d '+%Y-%m-%dT%H:%M:%S%z')"
+stamp="$(ago 20 d '%Y-%m-%dT%H:%M:%S%z')"
 echo "$stamp" > "$T/state/last-success"
 js="$(run status --json)"
 [[ "$(yq -p json -r '.last_success' <<<"$js")" == "$stamp" ]] || fail "last_success not the stamp: $js"
@@ -326,9 +316,9 @@ progress_file "$HEAD" '{"event":"task","n":10,"task":"Install foo"}'
 touch -t 202001010000 "$T/state/progress.jsonl"
 out="$(run progress)"
 [[ "$out" == "Stalled or interrupted — no progress for "*"m, stopped at task 10."$'\n'"  last: Install foo" ]] || fail "stalled line changed: $out"
-touch -t "$(date -v-4M '+%Y%m%d%H%M')" "$T/state/progress.jsonl"
+touch -t "$(ago 4 M '%Y%m%d%H%M')" "$T/state/progress.jsonl"
 [[ "$(run progress)" == "apply  [#####"* ]] || fail "a 4-minute-old file counted as stalled"
-touch -t "$(date -v-6M '+%Y%m%d%H%M')" "$T/state/progress.jsonl"
+touch -t "$(ago 6 M '%Y%m%d%H%M')" "$T/state/progress.jsonl"
 [[ "$(run progress)" == "Stalled or interrupted"* ]] || fail "a 6-minute-old file not stalled"
 
 progress_file "$HEAD" '{"event":"task","n":10,"task":"Install foo"}' '{"event":"end","result":"failed","tasks":12}'
@@ -394,6 +384,19 @@ upgrade_tty() {
     rm -f "$T"/pull-{calls,args,pw,mode} "$T/prune-pw"
     HOME="$T/home" PATH="$T/bin:$PATH" "$RT_PY" "$T/ptyrun.py" "$2" "$1" "$T/bin/computer-setup" upgrade
 }
+
+# Linux upgrades need no root (no casks; pacman is left to a full system
+# upgrade), so there is no password prompt and nothing is exported.
+if [[ "$(uname -s)" != Darwin ]]; then
+    rc=0; out="$(upgrade_tty $'y\n' -)" || rc=$?
+    [[ "$rc" == 0 && "$out" == *"Proceed? [y/N]: "* && "$out" != *password* ]] || fail "linux upgrade prompts changed: rc=$rc $out"
+    [[ "$(cat "$T/pull-pw")" == UNSET ]] || fail "linux upgrade exported a password"
+    [[ "$(cat "$T/pull-args")" == *"--tags upgrade -e computer_setup_upgrade_assume_yes=true local.yml"* ]] || fail "upgrade args changed: $(cat "$T/pull-args")"
+    rc=0; out="$(upgrade_tty $'n\n' -)" || rc=$?
+    [[ "$rc" == 0 && "$out" == *"Aborted — nothing changed."* && ! -e "$T/pull-calls" ]] || fail "declining did not abort cleanly: rc=$rc $out"
+    echo "  ok  upgrade (Linux): one confirmation, no password, decline aborts"
+    exit 0
+fi
 
 rc=0; out="$(upgrade_tty $'y\nhunter2\n' -)" || rc=$?
 [[ "$rc" == 0 ]] || fail "upgrade failed: rc=$rc $out"

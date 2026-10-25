@@ -197,7 +197,7 @@ alone tells you nothing.
 
 ## Non-destructive guarantees
 
-The `homebrew` role is `state: present` only — no prune, no `absent`. Applying
+The `packages` role is `state: present` only — no prune, no `absent`. Applying
 never uninstalls manually-installed apps or unmanaged Homebrew leaves. Removing
 an item from a baseline list stops *enforcing* it; nothing is uninstalled.
 Cleanup is always a deliberate manual step, never a side effect of a run.
@@ -319,8 +319,8 @@ moves on. It goes quiet by itself once you have signed in.
 
 ## Adopting manually-installed apps
 
-The `homebrew` role only uses `install_options: adopt` for casks explicitly
-listed in `homebrew_adopt_casks`. Adoption is **not** safe for every cask — see
+The `packages` role only uses `install_options: adopt` for casks explicitly
+listed in `packages_cask_adopt`. Adoption is **not** safe for every cask — see
 "Casks with protected payloads" in [findings.md](findings.md) before adding one.
 
 ## Migrating a tool off a manual installer

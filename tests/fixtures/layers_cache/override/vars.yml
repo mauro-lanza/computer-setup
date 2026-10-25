@@ -6,3 +6,7 @@ contract_scalar: override
 # second, post-merge application), because the machine is more specific than
 # the layer that proposed the question.
 contract_editor_cmd: from-layer-var
+# Appends to base's brew list; ripgrep is also selected, so dedup is exercised.
+packages_baseline:
+  brew: [ripgrep]
+  pacman: [base-pacman]
