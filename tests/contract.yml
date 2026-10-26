@@ -7,7 +7,7 @@
     home_dir: "{{ ansible_facts['env']['HOME'] }}"
     computer_setup_layer_cache: "{{ playbook_dir }}/fixtures/layers_cache"
     computer_setup_machine_file: "{{ playbook_dir }}/fixtures/machine.yml"
-    computer_setup_schema_version: 1
+    computer_setup_schema_version: 2
     # Deterministic on any host: brew "present", pacman absent.
     computer_setup_package_manager_probes:
       brew: "{{ playbook_dir }}/contract.yml"

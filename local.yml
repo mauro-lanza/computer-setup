@@ -43,8 +43,8 @@
     computer_setup_command_path: "{{ computer_setup_bin_dir }}/computer-setup"
     # One log per run; see LOG_DIR in the runner. Where per the platform profile.
     computer_setup_log_dir: "{{ home_dir }}/{{ computer_setup_platform.log_dir }}"
-    # Highest layer schema_version this orchestrator understands.
-    computer_setup_schema_version: 1
+    # The layer schema_version this orchestrator understands.
+    computer_setup_schema_version: 2
 
   pre_tasks:
     - name: Initialize computer-setup orchestration

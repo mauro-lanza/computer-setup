@@ -941,6 +941,7 @@ expect_layer_failure() {
 }
 expect_layer_failure reserved "defines reserved key"
 expect_layer_failure schema "requires schema_version 99"
+expect_layer_failure schema-old "requires schema_version 1"
 # Reserved by PREFIX, not by name: the engine's scheduled jobs read these keys.
 expect_layer_failure drift-prefix "defines reserved key"
 # Ansible's execution controls are reserved as a NAMESPACE. Enumerating five of
@@ -971,7 +972,7 @@ section_layers() {
 echo "==> Layer sync (pinned ref)"
 _pd="$(mktemp -d "$CS_TMP/pin.XXXXXX")"
 git init -q -b main "$_pd/src"
-printf 'name: pinme\nschema_version: 1\n' > "$_pd/src/layer.yml"
+printf 'name: pinme\nschema_version: 2\n' > "$_pd/src/layer.yml"
 echo one > "$_pd/src/marker"
 git -C "$_pd/src" add -A
 git -C "$_pd/src" -c user.email=t@t -c user.name=t commit -qm one
@@ -1040,6 +1041,7 @@ lint_out="$(./scripts/computer-setup-layers lint --cache "$PWD/tests/fixtures/li
     exit 1
 }
 for expect in \
+    "Layer 'oldschema' requires schema_version 1, but this orchestrator supports 2" \
     "capability id declared twice" \
     "capability requires 'nonexistent'" \
     "capability 'oldshape' uses removed key 'type:'" \

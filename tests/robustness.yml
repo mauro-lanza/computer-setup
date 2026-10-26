@@ -13,6 +13,7 @@
   vars:
     computer_setup_active_capabilities: [docker-cli]
     homebrew_prefix: /opt/homebrew
+    computer_setup_platform: {name: Darwin}
   tasks:
     - name: Create a scratch HOME
       ansible.builtin.tempfile:

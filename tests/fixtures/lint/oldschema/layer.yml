@@ -1,0 +1,4 @@
+---
+name: oldschema
+schema_version: 1
+description: "Lint fixture on a schema the orchestrator no longer supports"

@@ -12,11 +12,12 @@
 - name: "[{{ _layer.name }}] Assert supported schema_version"
   ansible.builtin.assert:
     that:
-      - (_layer_manifest.schema_version | default(1) | int) <= (computer_setup_schema_version | int)
+      - (_layer_manifest.schema_version | default(1) | int) == (computer_setup_schema_version | int)
     fail_msg: >-
       Layer '{{ _layer.name }}' requires schema_version
       {{ _layer_manifest.schema_version | default(1) }}, but this orchestrator
-      supports up to {{ computer_setup_schema_version }}. Update computer-setup.
+      supports {{ computer_setup_schema_version }}. Update the layer, or if it was
+      just synced by an older runner, re-run `computer-setup layers sync` (or bootstrap.sh).
     quiet: true
 
 - name: "[{{ _layer.name }}] Merge each vars file"

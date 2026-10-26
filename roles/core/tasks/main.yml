@@ -91,7 +91,49 @@
           {{ (layers | default([], true))
              | sort(attribute='priority') }}
 
-    # ─── Questions and answers ────────────────────────────────────────────────
+    # An engine update can land before the layers move to its schema: the runner that
+    # started this run synced with the old version. Re-sync here with the engine's own
+    # script and version, so the next run self-heals; see docs/architecture.md (layer schema_version).
+    - name: Read each layer's schema_version
+      ansible.builtin.slurp:
+        src: "{{ computer_setup_layer_cache }}/{{ item.name }}/layer.yml"
+      register: _cs_layer_manifests
+      loop: "{{ computer_setup_active_layers }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Check the layers are git checkouts
+      # The sync script replaces a non-git directory outright, so only a real cache is re-synced.
+      ansible.builtin.stat:
+        path: "{{ computer_setup_layer_cache }}/{{ item.name }}/.git"
+      register: _cs_layer_git
+      loop: "{{ computer_setup_active_layers }}"
+      loop_control:
+        label: "{{ item.name }}"
+
+    - name: Re-sync layers that are on another schema_version
+      ansible.builtin.command:
+        argv:
+          - "{{ role_path }}/../../scripts/computer-setup-layers"
+          - sync
+          - --manifest
+          - "{{ computer_setup_machine_file }}"
+          - --cache
+          - "{{ computer_setup_layer_cache }}"
+          - --schema-version
+          - "{{ computer_setup_schema_version }}"
+      changed_when: true
+      failed_when: false
+      check_mode: false
+      when:
+        - _cs_layer_git.results | rejectattr('stat.exists') | list | length == 0
+        - >-
+          _cs_layer_manifests.results
+          | map(attribute='content') | map('b64decode') | map('from_yaml')
+          | map(attribute='schema_version', default=1)
+          | reject('eq', computer_setup_schema_version | int) | list | length > 0
+
+
     # Answers are applied twice, before and after the layer var merge; see
     # "Resolution order" in docs/architecture.md.
     - name: Merge each layer's questions.yml into the question registry

@@ -40,20 +40,30 @@ normalize_repo_url() {
     esac
 }
 
+# Duplicates local.yml's computer_setup_schema_version; check.sh asserts they agree.
+schema_version_max=2
 validate_layer() {
     local name="$1" dest="$2" schema_version_max="$3"
     [[ -f "$dest/layer.yml" ]] || die "Layer '$name' is missing layer.yml"
 
-    local layer_name sv
+    local layer_name
     layer_name="$(yq -r '.name // ""' "$dest/layer.yml")"
     [[ "$layer_name" == "$name" ]] || die "Layer '$name' layer.yml name is '$layer_name'"
 
-    sv="$(yq -r '.schema_version // 1' "$dest/layer.yml")"
+    local problem
+    problem="$(schema_problem "$name" "$dest/layer.yml" "$schema_version_max")"
+    [[ -z "$problem" ]] || die "$problem"
+}
+
+# Prints why a layer's schema_version is unusable; nothing when it matches.
+schema_problem() {
+    local name="$1" file="$2" want="$3" sv
+    sv="$(yq -r '.schema_version // 1' "$file")"
     # Must be a plain integer: bash `((` errors on `2.0` and would accept the layer.
     [[ "$sv" =~ ^[0-9]+$ ]] \
-        || die "Layer '$name' has a non-integer schema_version: '${sv}'"
-    if (( sv > schema_version_max )); then
-        die "Layer '$name' requires schema_version ${sv}, but this orchestrator supports up to ${schema_version_max}"
+        || { echo "Layer '$name' has a non-integer schema_version: '${sv}'"; return 0; }
+    if (( sv != want )); then
+        echo "Layer '$name' requires schema_version ${sv}, but this orchestrator supports ${want}"
     fi
 }
 
@@ -88,9 +98,7 @@ validate_manifest_entry() {
 }
 
 sync_layers() {
-    # Default duplicated from local.yml's computer_setup_schema_version;
-    # scripts/check.sh asserts they agree. Normally passed in with --schema-version.
-    local manifest="" cache="" schema_version_max=1
+    local manifest="" cache=""
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --manifest) manifest="${2:?--manifest needs a value}"; shift 2 ;;
@@ -295,9 +303,13 @@ lint_layers() {
     # personal layer does exactly this to pre-fill the git identity questions).
     # Only a duplicate WITHIN one layer is a bug, since the two entries silently
     # collapse to whichever the merge reaches last.
-    local all_caps="" all_questions="" all_preset_caps="" d ids dupes name
+    local all_caps="" all_questions="" all_preset_caps="" d ids dupes name problem
     for d in "${dirs[@]}"; do
         name="$(basename "$d")"
+
+        [[ -f "$d/layer.yml" ]] || lint_err "[$name] is missing layer.yml"
+        problem="$(schema_problem "$name" "$d/layer.yml" "$schema_version_max" 2>/dev/null)"
+        [[ -z "$problem" ]] || lint_err "$problem"
 
         local f
         for f in capabilities questions vars presets; do

@@ -21,4 +21,7 @@
     loop_var: _pkg_mgr
   vars:
     _pkg_names: "{{ computer_setup_packages.get(_pkg_mgr, []) }}"
-  when: computer_setup_packages.get(_pkg_mgr, []) | length > 0
+  # cask-only machines still need brew.yml for the tap of an `owner/tap/name` cask.
+  when: >-
+    (computer_setup_packages.get(_pkg_mgr, []) | length > 0)
+    or (_pkg_mgr == 'brew' and computer_setup_packages.get('cask', []) | length > 0)

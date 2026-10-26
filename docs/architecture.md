@@ -23,12 +23,22 @@ Merge `priority` is declared in the *manifest*
 `layer.yml` — one source of
 truth, so a layer cannot disagree with the machine about its own ordering.
 
-The public API is the role variable interface plus this `schema_version`. Bump
-the orchestrator-supported maximum in all three places that state it —
+The public API is the role variable interface plus this `schema_version`. A
+layer must declare exactly the version the orchestrator supports, so a breaking
+change (2: `packages:` mappings replace `homebrew_baseline_*`) rejects old layers
+instead of silently ignoring their vars. Bump it in all three places that state it —
 `computer_setup_schema_version` in `local.yml`, `SCHEMA_VERSION_MAX` in
 `bootstrap.sh`, and the default in `scripts/computer-setup-layers` — when
 changing that contract in a breaking way. They cannot import from each other, so
 `check.sh` asserts they agree instead.
+
+A layer that disagrees with the engine is repaired, not just rejected: core's
+pre-tasks compare each cached layer's version with the engine's and, on a
+mismatch, re-run the engine's own `scripts/computer-setup-layers sync` with the
+engine's version. The installed runner bakes the version in at deploy time, so
+after an engine update it still syncs with the old one; this step is what lets
+the first run after the update succeed. A layer whose origin has not moved to
+the new schema still fails, with `merge_layer_vars` naming the layer.
 
 Not to be confused with the `schema_version` on the run-state file below, which
 is machine-local and not yet a contract.

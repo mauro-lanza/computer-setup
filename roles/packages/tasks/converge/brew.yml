@@ -18,3 +18,4 @@
     state: present
     # No refresh under --check: the module then never reaches the install step and names zero packages.
     update_homebrew: "{{ packages_brew_update | bool and not ansible_check_mode }}"
+  when: _pkg_names | length > 0

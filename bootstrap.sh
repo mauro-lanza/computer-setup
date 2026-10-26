@@ -60,7 +60,7 @@ RAW_BASE="https://raw.githubusercontent.com/${ORCH_OWNER}/${ORCH_NAME}/${REPO_BR
 # Highest layer schema_version understood. Duplicates local.yml and
 # scripts/computer-setup-layers (no checkout exists under `curl | bash`);
 # check.sh asserts all three agree.
-SCHEMA_VERSION_MAX=1
+SCHEMA_VERSION_MAX=2
 
 # Field separator for the merged registry files: not a tab, which `read` collapses
 # when a middle field is empty (architecture.md, "Bootstrap internals").

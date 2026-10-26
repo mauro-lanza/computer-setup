@@ -1,4 +1,4 @@
 ---
 name: bad
-schema_version: 1
+schema_version: 2
 description: "Layer whose every cross-reference is broken. Used by scripts/check.sh."

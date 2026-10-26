@@ -1,6 +1,16 @@
 ---
 # Version managers, each gated on its capability being active and the tool being
 # installed. Bodies are bespoke on purpose; see defaults/main.yml.
+- name: Warn that version managers are Homebrew-only for now
+  ansible.builtin.debug:
+    msg: >-
+      nvm and tfenv are probed under the Homebrew prefix, which is not
+      supported on {{ computer_setup_platform.name }}; their versions are not converged.
+  when:
+    - computer_setup_platform.name != 'Darwin'
+    - (runtimes_nvm_capability in computer_setup_active_capabilities)
+      or (runtimes_tfenv_capability in computer_setup_active_capabilities)
+
 - name: Check if nvm is installed (to converge the default Node alias)
   ansible.builtin.stat:
     path: "{{ runtimes_nvm_script_path }}"

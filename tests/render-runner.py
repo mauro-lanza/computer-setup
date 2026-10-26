@@ -32,7 +32,7 @@ v = dict(
     computer_setup_config_dir=t + "/config", computer_setup_backup_repo_dir=t + "/backups",
     computer_setup_runtime_bin=t + "/bin", computer_setup_runtime_tools=t + "/tools",
     computer_setup_python_version="3.14", computer_setup_pull_dir=t + "/pull",
-    computer_setup_bin_dir=t + "/bin", computer_setup_schema_version=1,
+    computer_setup_bin_dir=t + "/bin", computer_setup_schema_version=2,
     drift_correction_log_retention_days=30, drift_correction_stale_after_days=14,
     drift_correction_connectivity_timeout=1, computer_setup_repositories_override_file=t + "/repositories.yml",
     repositories_base_dir=t + "/repos",

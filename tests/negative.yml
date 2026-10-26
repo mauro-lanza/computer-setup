@@ -20,7 +20,7 @@
     repositories_base_dir: "{{ ansible_facts['env']['HOME'] }}/Projects"
     homebrew_prefix: /opt/homebrew
     computer_setup_machine_file: "{{ playbook_dir }}/fixtures/machine.yml"
-    computer_setup_schema_version: 1
+    computer_setup_schema_version: 2
   tasks:
     - name: Initialize computer-setup orchestration
       ansible.builtin.import_role:
