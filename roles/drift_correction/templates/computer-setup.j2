@@ -745,7 +745,7 @@ run_scheduled() {
     # Exported, not a per-command prefix: otherwise the layer sync and ansible-pull
     # could hang on a host-key or passphrase prompt with no TTY.
     # BatchMode turns any such prompt into an immediate failure.
-    export GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=${CONNECTIVITY_TIMEOUT} -o StrictHostKeyChecking=accept-new"
+    export GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=${CONNECTIVITY_TIMEOUT} -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o StrictHostKeyChecking=accept-new"
 
     # Probe the transport we use (SSH to the real repo): an HTTPS probe passes
     # where port 22 is blocked, and the pull would then fail like a real breakage.

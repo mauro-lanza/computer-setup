@@ -306,7 +306,7 @@ install_galaxy_collections() {
 # SSH key). The probe is an SSH operation, not `gh auth status`
 # (architecture.md, "Bootstrap internals").
 github_ssh_ready() {
-    GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=5 -o StrictHostKeyChecking=accept-new" \
+    GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=5 -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -o StrictHostKeyChecking=accept-new" \
         git ls-remote "$REPO_URL" HEAD &>/dev/null
 }
 
