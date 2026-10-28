@@ -66,8 +66,7 @@
     - { role: capability_configs, tags: [capability_configs] }
     - { role: macos, tags: [macos], when: "computer_setup_platform.system_settings == 'osx_defaults'" }
     - { role: runtimes, tags: [runtimes] }
-    # Merges into ~/.docker/config.json, which holds auths/credsStore this orchestrator must not own;
-    # see "path_helper can defeat the PATH snippet's own prepend logic" in docs/findings.md.
+    # Merges into ~/.docker/config.json, which holds auths/credsStore this orchestrator must not own.
     - { role: docker, tags: [docker] }
     # `never`: the drift check must not clone repos, and bootstrap runs before SSH auth exists.
     - { role: repositories, tags: [repositories, never] }

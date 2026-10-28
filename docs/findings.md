@@ -20,7 +20,6 @@ cannot rewrite an attribute — leaving **no app** installed.
 
 | Cask | File that triggers the failure |
 |---|---|
-| `docker-desktop` | `docker-compose.bash-completion` |
 | `zed` | `Contents/MacOS/cli` (`com.apple.metadata:kMDItemAlternateNames`) |
 
 Use a fresh install instead of adoption for these. Keep `packages_cask_adopt`
@@ -234,20 +233,13 @@ double-adding it with `[[ ":$PATH:" != *":$_cs_p:"* ]]` — skip if already
 present. That guard assumes the only way `/opt/homebrew/bin` gets into `PATH`
 is this loop itself.
 
-It is not. Installing the `docker` Homebrew formula writes
-`/etc/paths.d/homebrew`, and macOS's `path_helper` (which runs before `.zshrc`,
-building the shell's *initial* `PATH` from `/etc/paths` and `/etc/paths.d/*` in
-filename order) puts `/opt/homebrew/bin` there already — appended *after*
-`/usr/local/bin`, which `/etc/paths` lists first. The snippet's loop then saw
-`/opt/homebrew/bin` already present, skipped the prepend, and left it in that
-late position for the rest of the session.
-
-Consequence: with both `docker-desktop` (cask) and `docker`/`docker-compose`
-(formulae, needed for Colima) installed, `/usr/local/bin/docker` — the cask's
-CLI, which has no `compose` plugin wired up outside Docker Desktop's own
-plugin directory — shadowed the Homebrew one. `docker compose ...` failed with
-`unknown shorthand flag: 'f'`, because `compose` wasn't recognized as a
-subcommand at all and `-f` was parsed as a (nonexistent) top-level flag.
+It is not. macOS's `path_helper` (which runs before `.zshrc`, building the
+shell's *initial* `PATH` from `/etc/paths` and `/etc/paths.d/*` in filename
+order) can put `/opt/homebrew/bin` there already via an `/etc/paths.d` entry —
+appended *after* `/usr/local/bin`, which `/etc/paths` lists first. The
+snippet's loop then saw `/opt/homebrew/bin` already present, skipped the
+prepend, and left it in that late position for the rest of the session,
+shadowing Homebrew binaries with same-named ones in `/usr/local/bin`.
 
 Fix: strip any existing occurrence of each path before prepending it, instead
 of skipping when already present, so the loop's declared order always wins
@@ -263,11 +255,8 @@ for _cs_p in {{ homebrew_prefix }}/bin {{ homebrew_prefix }}/sbin "$HOME/.local/
 done
 ```
 
-Symlinking the missing plugin into `~/.docker/cli-plugins` "fixes" a symptom
-per-machine and drifts from the declared config on the next `apply`. The
-`path_helper`-injected entry is the actual cause, and any Homebrew formula that
-ships an `/etc/paths.d` file can trigger the same class of bug for any other
-`_cs_p` in the loop, not just this Docker case.
+Any `/etc/paths.d` file can trigger this class of bug for any `_cs_p` in the
+loop; the `path_helper`-injected entry is the cause, not the symptom.
 
 ### VS Code paths contain spaces
 

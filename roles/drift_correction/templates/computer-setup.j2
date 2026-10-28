@@ -370,7 +370,7 @@ cmd_upgrade() {
         return 0
     fi
 {% if computer_setup_platform.runner.upgrade_sudo_prompt %}
-    # Casks that need root (Docker Desktop) get the password from the environment,
+    # Casks that need root get the password from the environment,
     # not `-e`, which would show it in the process list. The homebrew_cask module
     # feeds it to sudo through an askpass helper.
     local sudo_pw

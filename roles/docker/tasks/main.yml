@@ -1,8 +1,7 @@
 ---
-# Wire Homebrew's docker-compose/buildx plugins into the docker CLI's config —
-# see defaults/main.yml and "path_helper can defeat the PATH snippet's own
-# prepend logic" in docs/findings.md for why `docker compose` fails without
-# this even when both formulae are installed.
+# Wire Homebrew's docker-compose/buildx plugins into the docker CLI's config:
+# the CLI doesn't search {{ homebrew_prefix }}/lib/docker/cli-plugins unless
+# cliPluginsExtraDirs is set (see defaults/main.yml).
 #
 # ~/.docker/config.json also holds auths, credsStore, credHelpers and
 # currentContext, so this task MERGES one key rather than templating the whole

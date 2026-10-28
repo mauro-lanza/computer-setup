@@ -7,8 +7,7 @@ docker_cli_capability: docker-cli
 # credsStore, credHelpers and currentContext — user/session state this
 # orchestrator has no business overwriting. Only the one key below is merged
 # in, the same "included, not imposed" shape as the git role and
-# ~/.gitconfig. See "path_helper can defeat the PATH snippet's own prepend
-# logic" in docs/findings.md for why this key matters.
+# ~/.gitconfig.
 docker_config_path: "{{ home_dir }}/.docker/config.json"
 
 # Homebrew's docker-compose (and buildx) formula installs its plugin under
