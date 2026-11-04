@@ -680,6 +680,10 @@ seconds of git, during which the file would otherwise still describe the
 previous run — so a reader would show "not running" after being asked to run, or
 show the last result as though it were this one.
 
+If the runner exits non-zero without the callback having written an `end` (git or
+sync failed before the playbook), the runner appends a failed `end` itself, so the
+failure is visible instead of reading as a running run.
+
 No end marker does not prove a run is live; it may have been killed. The file's
 mtime is the only evidence either way, so consumers report a stall rather than
 animating a bar for a process that died.

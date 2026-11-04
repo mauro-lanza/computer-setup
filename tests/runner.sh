@@ -109,6 +109,19 @@ run apply >/dev/null 2>&1 || fail "a dead holder's lock was not cleared"
 [[ ! -e "$T/state/run.lock" ]] || fail "lock not released after the run"
 echo "  ok  stale lock cleared, lock released on exit"
 
+# 5b. A launcher failure before the playbook closes the progress file with a
+#     failed `end`; a run's own `end` is left alone.
+cp "$T/bin/ansible-pull" "$T/ansible-pull.ok"
+printf '#!/bin/bash\nexit 3\n' > "$T/bin/ansible-pull"
+run apply >/dev/null 2>&1 && fail "a failing pull did not fail the run"
+[[ "$(tail -n 1 "$T/state/progress.jsonl" | yq -p json -r '.event + " " + .result')" == "end failed" ]] || fail "pre-run failure left no failed end"
+[[ "$(grep -c '"event": "end"' "$T/state/progress.jsonl")" == 1 ]] || fail "expected exactly one end"
+printf '#!/bin/bash\nprintf '"'"'{"event": "end", "result": "failed", "tasks": 7}\\n'"'"' >> "%s"\nexit 2\n' "$T/state/progress.jsonl" > "$T/bin/ansible-pull"
+run apply >/dev/null 2>&1 && fail "a failing pull did not fail the run"
+[[ "$(tail -n 1 "$T/state/progress.jsonl" | yq -p json -r '.tasks')" == 7 ]] || fail "the run's own end was clobbered"
+cp "$T/ansible-pull.ok" "$T/bin/ansible-pull"
+echo "  ok  pre-run failure writes a failed end, a run's own end is kept"
+
 # 6. A lock that never got a pid (holder died between mkdir and the write) is
 #    cleared once it is old, but respected while young.
 mkdir "$T/state/run.lock"

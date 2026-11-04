@@ -179,6 +179,14 @@ start_run_log() {
     chmod 600 "$PROGRESS_FILE" 2>/dev/null || true
 }
 
+# A launcher that fails before the playbook runs (sync, git) leaves no callback
+# `end`; without one readers show a running run. Never overwrites the callback's own.
+close_unfinished_run() {
+    [[ "$(tail -n 1 "$PROGRESS_FILE" 2>/dev/null)" == *'"event": "end"'* ]] && return 0
+    printf '{"event": "end", "result": "failed", "tasks": 0, "changed": 0, "failed": 0, "finished": "%s"}\n' \
+        "$(date '+%Y-%m-%dT%H:%M:%S%z')" >> "$PROGRESS_FILE" 2>/dev/null || true
+}
+
 # Prunes only after a successful run: a failing machine should not tidy away its
 # evidence.
 #
@@ -288,6 +296,7 @@ run_foreground() {
     if [[ $rc -ne 0 && ! -t 1 ]]; then
         notify_failed "$mode" "$rc"
     fi
+    [[ $rc -eq 0 ]] || close_unfinished_run
     [[ $rc -eq 0 ]] && prune_logs
     return "$rc"
 }
@@ -393,7 +402,7 @@ cmd_upgrade() {
         -e computer_setup_upgrade_assume_yes=true local.yml "$@" 2>&1 | tee -a "$RUN_LOG"
     local rc=${PIPESTATUS[0]}
     unset CS_SUDO_PASSWORD
-    [[ $rc -eq 0 ]] && prune_logs
+    if [[ $rc -eq 0 ]]; then prune_logs; else close_unfinished_run; fi
     return "$rc"
 }
 
@@ -782,6 +791,7 @@ run_scheduled() {
 
     if [[ $rc -ne 0 ]]; then
         notify_failed "$mode" "$rc"
+        close_unfinished_run
         log "RESULT: ansible-pull failed (rc=$rc)"
         exit "$rc"
     fi
