@@ -180,7 +180,7 @@ sync_layers() {
                 # commit, i.e. never update the layer at all.
                 git -C "$dest" fetch --depth 1 origin \
                     "+refs/heads/${branch}:refs/remotes/origin/${branch}" \
-                    || die "Layer '$name': fetch failed — cache is stale and cannot be repaired. Remove $dest and re-run."
+                    || die "Layer '$name': fetch failed (check network and SSH access); the cached copy is unchanged."
                 git -C "$dest" reset --hard "refs/remotes/origin/${branch}" >/dev/null \
                     || die "Layer '$name': reset failed. Remove $dest and re-run."
                 # -ffd also clears nested checkouts a stray clone may have left.

@@ -276,7 +276,24 @@ run_foreground() {
     local mode="$1" partial="$2"; shift 2
     require_lock || return 1
     start_run_log "$mode"
-    sync_layers || printf '%s\n' "WARN: layer sync failed; continuing with cached content" >&2
+
+    # Scoped to the probe: BatchMode fails fast instead of prompting, without
+    # changing how the run itself authenticates.
+    if ! GIT_SSH_COMMAND="ssh -o BatchMode=yes -o ConnectTimeout=${CONNECTIVITY_TIMEOUT} -o StrictHostKeyChecking=accept-new" repo_reachable; then
+        local msg="${REPO_URL} unreachable (offline, port 22 blocked, or SSH key unavailable); probe errors are in the run log"
+        log "RESULT: failed — ${msg}"
+        printf '%s\n' "computer-setup ${mode}: ${msg}" >&2
+        [[ -t 1 ]] || notify_failed "$mode" 1
+        close_unfinished_run
+        return 1
+    fi
+
+    if [[ -t 1 ]]; then
+        sync_layers 2>&1 | tee -a "$RUN_LOG"
+        [[ ${PIPESTATUS[0]} -eq 0 ]] || printf '%s\n' "WARN: layer sync failed; continuing with cached content" >&2
+    else
+        sync_layers >> "$RUN_LOG" 2>&1 || log "WARN: layer sync failed; continuing with cached content"
+    fi
     # Hand-run modes record state too, or `status` would describe the scheduled
     # agent's last run.
     state_env "$mode" "$partial"
