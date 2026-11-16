@@ -4,7 +4,8 @@
 #   * git: `include.path` was written with git_config's default add_mode
 #     (replace-all), which deleted every OTHER include.path on each run.
 #   * docker: a zero-byte ~/.docker/config.json slurps to content '', which
-#     `default()` does not replace, so from_json crashed the play.
+#     `default()` does not replace, so from_json crashed the play; an invalid one
+#     is treated as {} with a warning instead of aborting.
 # Driven against a scratch HOME; the real ~/.gitconfig is never read.
 - name: Role robustness against pre-existing user state
   hosts: localhost
@@ -51,6 +52,16 @@
           loop: "{{ ['git', 'docker'] | product([1, 2]) | list }}"
           loop_control:
             label: "{{ item.0 }} run {{ item.1 }}"
+
+        - name: Seed an invalid-JSON Docker config and apply docker again
+          ansible.builtin.copy:
+            content: "{not json"
+            dest: "{{ scratch.path }}/.docker/config.json"
+            mode: "0600"
+
+        - name: Apply docker over the invalid config
+          ansible.builtin.include_role:
+            name: docker
 
         - name: Read back every include.path
           community.general.git_config_info:

@@ -91,8 +91,8 @@
       ansible.builtin.shell: |
         export NVM_DIR="$HOME/.nvm"
         source "{{ runtimes_nvm_script_path }}"
-        nvm install '{{ upgrade_nvm_node }}' --latest-npm
-        nvm alias default '{{ upgrade_nvm_node }}'
+        nvm install {{ upgrade_nvm_node | quote }} --latest-npm
+        nvm alias default {{ upgrade_nvm_node | quote }}
       args:
         executable: /bin/bash
       register: upgrade_nvm_result

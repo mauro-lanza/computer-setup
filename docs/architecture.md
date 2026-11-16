@@ -52,6 +52,11 @@ can already do anything its path-based limits would try to forbid. That is why
 a security boundary it is not. The boundaries that do hold are the reserved keys
 and the machine tier (see below), which stop a layer reaching the engine itself.
 
+Layers are trusted code, self-hosted by the user or their organization. The
+reserved-key guard protects machine-tier settings from accidental or
+mis-scoped overrides, not against a hostile layer, so `post_clone` and layer vars
+that reach a shell are by design.
+
 What a layer repo is trusted *not to do* is change under you. By default a layer
 follows its repo's default branch, hard-reset on every sync, so a push reaches
 every machine at the next 09:00 run. The sync is fetch plus hard-reset, not `pull`:

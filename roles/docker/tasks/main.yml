@@ -40,6 +40,19 @@
       register: docker_config_raw
       when: docker_config_stat.stat.exists
 
+    - name: Parse the existing Docker CLI config
+      block:
+        - name: Parse the config as JSON
+          ansible.builtin.set_fact:
+            docker_config_current: "{{ (docker_config_raw.content | default('e30=', true)) | b64decode | from_json }}"
+      rescue:
+        - name: Treat an empty or invalid Docker CLI config as {}
+          ansible.builtin.set_fact:
+            docker_config_current: {}
+        - name: Warn about the unreadable Docker CLI config
+          ansible.builtin.debug:
+            msg: "{{ docker_config_path }} is empty or invalid JSON; treating it as {}."
+
     - name: Merge cliPluginsExtraDirs into the Docker CLI config
       # list_merge='replace': this key is engine-declared, not something a user adds
       # entries to by hand, so the declared list always wins outright rather than
@@ -47,7 +60,7 @@
       ansible.builtin.copy:
         content: >-
           {{
-            ((docker_config_raw.content | default('e30=', true)) | b64decode | from_json)
+            docker_config_current
             | combine({'cliPluginsExtraDirs': docker_cli_plugins_extra_dirs}, list_merge='replace')
             | to_nice_json
           }}
