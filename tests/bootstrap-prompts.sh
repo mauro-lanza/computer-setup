@@ -242,6 +242,7 @@ assert_eq "empty selection still writes a valid selected_capabilities list" \
 # higher-priority definition must win, as in the engine.
 echo "==> bootstrap capability merge"
 (
+    CS_OS=Darwin
     LAYER_CACHE="$REPO_ROOT/tests/fixtures/layers_cache"
     MACHINE_FILE="$REPO_ROOT/tests/fixtures/machine.yml"
     load_capabilities >/dev/null 2>&1
@@ -249,10 +250,100 @@ echo "==> bootstrap capability merge"
     rm -f "$MERGED_CAPABILITIES_FILE"
 )
 merged_ids="$(cut -d"$FS_U" -f1 "$WORK/merged.tsv" | tr '\n' ' ' | sed 's/ $//')"
-assert_eq "layers merge highest-priority-first, deduped by id" \
-    "nvm vscode dbt vscode-peacock ripgrep pacman-only opencode zed adopted" "$merged_ids"
+assert_eq "layers merge highest-priority-first, deduped by id (pacman-only hidden on Darwin)" \
+    "nvm vscode dbt vscode-peacock ripgrep opencode zed adopted" "$merged_ids"
 assert_eq "  the higher-priority layer's definition wins" \
     "Node Version Manager (override wins)" "$(awk -F"$FS_U" '$1=="nvm"{print $2}' "$WORK/merged.tsv")"
+
+# ── 11b. The menu hides what this platform cannot install ───────────────────
+# Names come from the platform profile; config-only capabilities always stay.
+echo "==> bootstrap platform filtering"
+# Prints "<offered ids>|<hidden ids>" for one platform.
+offered_on() {
+    (
+        CS_OS="$1"
+        LAYER_CACHE="${2:-$REPO_ROOT/tests/fixtures/layers_cache}"
+        MACHINE_FILE="${3:-$REPO_ROOT/tests/fixtures/machine.yml}"
+        load_capabilities >/dev/null 2>&1
+        local hidden="${UNOFFERABLE_CAPS# }"
+        printf '%s|%s' "$(cut -d"$FS_U" -f1 "$MERGED_CAPABILITIES_FILE" | tr '\n' ' ' | sed 's/ $//')" \
+            "${hidden% }"
+        rm -f "$MERGED_CAPABILITIES_FILE"
+    )
+}
+assert_eq "Linux keeps config-only, pacman and flatpak items; hides brew/cask-only" \
+    "dbt vscode-peacock ripgrep pacman-only|nvm vscode opencode zed adopted" "$(offered_on Linux)"
+assert_eq "Darwin hides pacman-only" \
+    "nvm vscode dbt vscode-peacock ripgrep opencode zed adopted|pacman-only" "$(offered_on Darwin)"
+
+# A temp layer: an option implying a cask-only capability, as a default, plus a preset.
+FILTER_CACHE="$WORK/filter-cache"
+mkdir -p "$FILTER_CACHE/lay"
+cat > "$FILTER_CACHE/lay/capabilities.yml" <<'YML'
+capabilities:
+  - {id: caskapp, desc: "Cask app", packages: {cask: x}}
+  - {id: cfg, desc: "Config only", config: [{src: a, dest: /tmp/a}]}
+  - {id: paru-app, desc: "AUR app", packages: {aur: y}}
+  - {id: cask, desc: "Prefix of caskapp", packages: {aur: z}}
+YML
+cat > "$FILTER_CACHE/lay/questions.yml" <<'YML'
+questions:
+  - id: prefix
+    type: select
+    desc: Prefix
+    default: a
+    options:
+      - {value: a, implies: [caskapp]}
+      - {value: b, implies: [paru-app]}
+  - id: editor
+    type: select
+    desc: Editor
+    default: gui
+    options:
+      - {value: gui, implies: [caskapp]}
+      - {value: zed}
+      - {value: none}
+  - id: other
+    type: select
+    desc: Other
+    default: zed
+    options:
+      - {value: gui, implies: [caskapp]}
+      - {value: zed}
+YML
+cat > "$FILTER_CACHE/lay/presets.yml" <<'YML'
+presets:
+  - {id: p, desc: P, capabilities: [caskapp, cfg, paru-app]}
+YML
+printf -- 'layers:\n  - {name: lay, repo: r, priority: 10}\n' > "$WORK/filter-machine.yml"
+assert_eq "Linux offers the config-only and AUR capabilities of a layer" \
+    "cfg paru-app cask|caskapp" "$(offered_on Linux "$FILTER_CACHE" "$WORK/filter-machine.yml")"
+assert_eq "Darwin offers the cask one and the config-only one" \
+    "caskapp cfg|paru-app cask" "$(offered_on Darwin "$FILTER_CACHE" "$WORK/filter-machine.yml")"
+# Hidden `cask` is a prefix of the offered `caskapp`: matching is by whole id.
+assert_eq "an option implying caskapp survives hiding its prefix id cask (Darwin)" "a" \
+    "$(
+        CS_OS=Darwin LAYER_CACHE="$FILTER_CACHE" MACHINE_FILE="$WORK/filter-machine.yml"
+        load_capabilities >/dev/null 2>&1; load_questions >/dev/null 2>&1
+        awk -F"$FS_U" '$1=="prefix"{print $5}' "$MERGED_QUESTIONS_FILE"
+    )"
+(
+    CS_OS=Linux
+    LAYER_CACHE="$FILTER_CACHE"
+    MACHINE_FILE="$WORK/filter-machine.yml"
+    load_capabilities >/dev/null 2>&1
+    load_questions >/dev/null 2>&1
+    load_presets >/dev/null 2>&1
+    cp "$MERGED_QUESTIONS_FILE" "$WORK/filter-q.tsv"; cp "$MERGED_PRESETS_FILE" "$WORK/filter-p.tsv"
+    rm -f "$MERGED_CAPABILITIES_FILE" "$MERGED_QUESTIONS_FILE" "$MERGED_PRESETS_FILE"
+)
+assert_eq "Linux hides an option implying a cask-only capability" \
+    "zed,none" "$(awk -F"$FS_U" '$1=="editor"{print $5}' "$WORK/filter-q.tsv")"
+assert_eq "  and a hidden default falls back to the first remaining option" \
+    "zed" "$(awk -F"$FS_U" '$1=="editor"{print $4}' "$WORK/filter-q.tsv")"
+assert_eq "  a visible default is kept" "zed" "$(awk -F"$FS_U" '$1=="other"{print $4}' "$WORK/filter-q.tsv")"
+assert_eq "presets drop capabilities the platform cannot offer" "cfg,paru-app" \
+    "$(awk -F"$FS_U" '$1=="p"{print $3}' "$WORK/filter-p.tsv")"
 
 # ── 12. Questions: the single-select prompt path ────────────────────────────
 # Same stdin/FD 3 hazard as the capability loop; also ask_select prints its

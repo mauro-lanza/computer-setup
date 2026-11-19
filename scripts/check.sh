@@ -118,6 +118,7 @@ if [[ ! -x "$RUNTIME_BIN/ansible-playbook" ]]; then
     echo "       (or re-run bootstrap.sh, which installs it in Phase 0)" >&2
     exit 1
 fi
+ORIGINAL_PATH="$PATH"
 PATH="$RUNTIME_BIN:$PATH"
 export PATH
 
@@ -1179,7 +1180,9 @@ if ! command -v ansible-lint >/dev/null 2>&1; then
     echo "       (it is also the 'ansible-lint' capability in the public layer)" >&2
     exit 1
 fi
-ansible-lint -q
+# Runs with the caller's PATH: ansible-lint imports its own ansible-core and
+# refuses to run when the runtime's ansible CLI on PATH is a different version.
+PATH="$ORIGINAL_PATH" ansible-lint -q
 echo "  ok  no findings"
 }
 

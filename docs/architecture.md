@@ -155,7 +155,11 @@ plus the selected capabilities' `packages:`, for detected managers only. The
 (`converge/<m>.yml`, `upgrade/<m>.yml`), so adding a manager is a profile entry
 plus two task files. A selected capability with no key for any detected manager
 is reported (`computer_setup_uninstallable_selections`) rather than silently
-installing nothing; its config still deploys. Homebrew taps are derived from
+installing nothing; its config still deploys. The bootstrap menu applies the
+same test to the profile's candidates, so capabilities, preset entries and
+question options (via `implies:`) this platform cannot install are never
+offered; apply's warning stays the backstop for a hand-edited `machine.yml` or
+an `--answers` file. Homebrew taps are derived from
 `owner/tap/name`, so a tapped package cannot forget its tap.
 
 Detection was chosen over a layer-declared platform list because a declared list

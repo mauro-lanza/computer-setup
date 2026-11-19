@@ -588,18 +588,41 @@ order_capabilities_by_requires() {
 # Merged capabilities. Columns:
 #   id  desc  requires  adopt_if_present
 # `id` is the capability token written to ~/.config/computer-setup/machine.yml as a selection.
-# Packages are not read here: the engine derives them from the registry at apply time.
+# Packages are not read for apply (the engine derives them from the registry), only to hide
+# what this platform's managers (from its profile) cannot install; see "Platforms and package
+# managers" in docs/architecture.md. Hidden ids land in UNOFFERABLE_CAPS.
 load_capabilities() {
     MERGED_CAPABILITIES_FILE="$(mktemp)"
+    UNOFFERABLE_CAPS=" "
 
     if [[ ! -f "$MACHINE_FILE" ]]; then
         warn "No layer manifest — no capabilities offered."
         return 0
     fi
 
+    # Offerability is decided per merged row, after the highest-priority
+    # definition won, so a lower layer's variant cannot resurface.
+    local profile managers offerable
+    profile="$(fetch_repo_file "roles/core/vars/platform/${CS_OS}.yml")" || exit 1
+    managers="$(yq -r '.computer_setup_platform.package_managers | keys | .[]' "$profile")" || {
+        error "Cannot read package managers from the platform profile roles/core/vars/platform/${CS_OS}.yml"
+        exit 1
+    }
+    [[ -n "$SCRIPT_DIR" && "$profile" == "$SCRIPT_DIR/"* ]] || rm -f "$profile"
+    offerable="((.packages // {}) | length) == 0"
+    local m
+    for m in $managers; do offerable="$offerable or .packages.${m} != null"; done
+
     merge_layer_file capabilities.yml \
-        '.capabilities[]? | [.id, .desc, (.requires // ""), (.adopt_if_present // "")] | @tsv' \
+        ".capabilities[]? | [.id, .desc, (.requires // \"\"), (.adopt_if_present // \"\"),
+                             (if $offerable then \"y\" else \"n\" end)] | @tsv" \
         "$MERGED_CAPABILITIES_FILE"
+
+    UNOFFERABLE_CAPS=" $(awk -F"$FS_U" '$5 == "n" { printf "%s ", $1 }' "$MERGED_CAPABILITIES_FILE")"
+    local filtered
+    filtered="$(mktemp)"
+    awk -F"$FS_U" -v OFS="$FS_U" '$5 == "y" { print $1, $2, $3, $4 }' \
+        "$MERGED_CAPABILITIES_FILE" > "$filtered" && mv "$filtered" "$MERGED_CAPABILITIES_FILE"
 
     order_capabilities_by_requires "$MERGED_CAPABILITIES_FILE"
 
@@ -624,9 +647,17 @@ load_capabilities() {
 load_questions() {
     MERGED_QUESTIONS_FILE="$(mktemp)"
 
-    merge_layer_file questions.yml \
-        '.questions[]? | [.id, .type, (.desc // .id), (.default // ""),
-                          ([.options[]?.value] | join(",")), (.validate // "")] | @tsv' \
+    # An option is hidden when it implies a capability this platform cannot offer.
+    # shellcheck disable=SC2016 # a yq program: $hidden/$i are yq variables
+    CS_UNOFFERABLE="${UNOFFERABLE_CAPS:- }" merge_layer_file questions.yml \
+        '(env(CS_UNOFFERABLE) | split(" ")) as $hidden
+         | .questions[]?
+         | ([.options[]? | select(([.implies[]? | select(. as $i | $hidden | any_c(. == $i))] | length) == 0) | .value]) as $shown
+         | (.default // "") as $d
+         | [.id, .type, (.desc // .id),
+            (if ([.options[]?.value] | contains([$d])) and ($shown | contains([$d]) | not) and ($shown | length) > 0
+             then $shown[0] else $d end),
+            ($shown | join(",")), (.validate // "")] | @tsv' \
         "$MERGED_QUESTIONS_FILE"
 
     local count
@@ -654,6 +685,16 @@ load_presets() {
                         ((.answers // {}) | to_entries
                          | map(.key + "=" + (.value | tostring)) | join(","))] | @tsv' \
         "$MERGED_PRESETS_FILE"
+    # Pre-ticking must not name what the menu hides.
+    local trimmed
+    trimmed="$(mktemp)"
+    awk -F"$FS_U" -v OFS="$FS_U" -v hidden="${UNOFFERABLE_CAPS:- }" '
+        {
+            n = split($3, caps, ","); out = ""
+            for (i = 1; i <= n; i++)
+                if (index(hidden, " " caps[i] " ") == 0) out = out (out == "" ? "" : ",") caps[i]
+            $3 = out; print
+        }' "$MERGED_PRESETS_FILE" > "$trimmed" && mv "$trimmed" "$MERGED_PRESETS_FILE"
     return 0
 }
 
